@@ -1,0 +1,30 @@
+.rolling-page { display: flex; flex-direction: column; gap: 24px; }
+.selector-card { padding: 20px 24px; }
+.page-desc { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
+.error-msg { background: var(--red-dim); border: 1px solid var(--red); border-radius: var(--radius-sm); color: var(--red); padding: 12px 16px; font-size: 13px; }
+
+.rolling-inputs { padding: 24px; }
+.rolling-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-top: 8px; align-items: end; }
+.input-group { display: flex; flex-direction: column; gap: 6px; }
+.input-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-muted); font-weight: 500; }
+.go-group { align-self: flex-end; }
+
+.period-toggle { display: flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.mode-btn { flex: 1; background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-family: var(--font-body); font-size: 12px; font-weight: 500; padding: 8px 12px; transition: var(--transition); }
+.mode-btn.active { background: var(--gold-primary); color: #08091A; font-weight: 600; }
+.mode-btn:hover:not(.active) { background: rgba(255,255,255,0.03); color: var(--text-secondary); }
+.period-hint { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+.validation-msg { display: flex; align-items: flex-start; gap: 12px; padding: 20px; background: rgba(245,158,11,0.06); border-color: rgba(245,158,11,0.25); color: #F59E0B; }
+.validation-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.validation-body { font-size: 13px; opacity: 0.85; }
+
+.rolling-results { display: flex; flex-direction: column; gap: 20px; }
+.rolling-summary { }
+.summary-header { display: flex; align-items: center; justify-content: space-between; }
+.summary-range { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 4px; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.stat-card { padding: 16px 20px; }
+.stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 8px; }
+.stat-value { font-family: var(--font-display); font-size: 20px; font-weight: 600; }

@@ -1,0 +1,32 @@
+.app-shell {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.app-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin-left: var(--nav-width);
+}
+
+.app-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 32px;
+  background: var(--bg-secondary);
+}
+
+.app-main > * { position: relative; z-index: 1; }
+
+/* Page headers */
+.page-header { margin-bottom: 24px; }
+.page-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}

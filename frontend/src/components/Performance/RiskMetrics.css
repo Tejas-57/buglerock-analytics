@@ -1,0 +1,14 @@
+.risk-section { display: flex; flex-direction: column; gap: 0; }
+.risk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.risk-card { padding: 16px 20px; display: flex; flex-direction: column; gap: 6px; }
+.risk-label { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.risk-desc { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+.risk-values { display: flex; align-items: center; gap: 12px; }
+.risk-col { flex: 1; text-align: center; }
+.risk-col-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 4px; }
+.risk-value { font-family: var(--font-mono); font-size: 15px; font-weight: 500; color: var(--text-primary); }
+.risk-divider { width: 1px; height: 32px; background: var(--border); }
