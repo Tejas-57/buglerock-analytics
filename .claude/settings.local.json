@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\tejas.s_buglerock\\\\buglerock-analytics\" -Force)",
+      "Bash(Select-Object Name, Mode)"
+    ]
+  }
+}
