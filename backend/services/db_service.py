@@ -1,11 +1,11 @@
 """
 db_service.py
 All database read/write operations for BugleRock Analytics.
+Updated for new template with 1Y/3Y/5Y risk metrics.
 """
 
 from datetime import date
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 from models.database import SessionLocal, DailyFundData, BenchmarkData, EmailFetchLog
 import logging
 
@@ -25,10 +25,9 @@ def get_session() -> Session:
 def has_data_for_date(data_date: date) -> bool:
     db = get_session()
     try:
-        count = db.query(DailyFundData).filter(
+        return db.query(DailyFundData).filter(
             DailyFundData.data_date == data_date
-        ).count()
-        return count > 0
+        ).count() > 0
     finally:
         db.close()
 
@@ -36,14 +35,10 @@ def has_data_for_date(data_date: date) -> bool:
 def log_email_fetch(email_date, data_date, file_name, status, message):
     db = get_session()
     try:
-        log = EmailFetchLog(
-            email_date=email_date,
-            data_date=data_date,
-            file_name=file_name,
-            status=status,
-            message=message,
-        )
-        db.add(log)
+        db.add(EmailFetchLog(
+            email_date=email_date, data_date=data_date,
+            file_name=file_name, status=status, message=message,
+        ))
         db.commit()
     finally:
         db.close()
@@ -52,22 +47,21 @@ def log_email_fetch(email_date, data_date, file_name, status, message):
 # ── Save parsed data ─────────────────────────────────────────────────────────
 
 def save_parsed_data(parsed: dict):
-    """Upsert all funds and benchmarks for a given data_date."""
+    """Replace all funds and benchmarks for a given data_date."""
     db = get_session()
-    # Ensure data_date is a date object, not a string
-    raw_date = parsed["data_date"]
     from datetime import date as date_type
-    if isinstance(raw_date, str):
-        data_date = date_type.fromisoformat(raw_date)
-    else:
-        data_date = raw_date
 
-    # Also convert date strings in individual fund/benchmark dicts
+    raw_date = parsed["data_date"]
+    data_date = date_type.fromisoformat(raw_date) if isinstance(raw_date, str) else raw_date
+
+    DATE_FIELDS = [
+        "data_date", "email_date", "nav_date", "nav_52w_high_date",
+        "fund_size_date", "inception_date"
+    ]
+
     def coerce_dates(d: dict) -> dict:
-        date_fields = ["data_date", "email_date", "nav_date", "nav_52w_high_date",
-                       "fund_size_date", "inception_date"]
         result = dict(d)
-        for field in date_fields:
+        for field in DATE_FIELDS:
             val = result.get(field)
             if isinstance(val, str) and val:
                 try:
@@ -77,19 +71,16 @@ def save_parsed_data(parsed: dict):
         return result
 
     try:
-        # Delete existing data for this date (replace strategy)
         db.query(DailyFundData).filter(DailyFundData.data_date == data_date).delete()
         db.query(BenchmarkData).filter(BenchmarkData.data_date == data_date).delete()
 
         for fund in parsed["funds"]:
-            fund_clean = coerce_dates(fund)
-            obj = DailyFundData(**{k: v for k, v in fund_clean.items() if hasattr(DailyFundData, k)})
-            db.add(obj)
+            clean = coerce_dates(fund)
+            db.add(DailyFundData(**{k: v for k, v in clean.items() if hasattr(DailyFundData, k)}))
 
         for bm in parsed["benchmarks"]:
-            bm_clean = coerce_dates(bm)
-            obj = BenchmarkData(**{k: v for k, v in bm_clean.items() if hasattr(BenchmarkData, k)})
-            db.add(obj)
+            clean = coerce_dates(bm)
+            db.add(BenchmarkData(**{k: v for k, v in clean.items() if hasattr(BenchmarkData, k)}))
 
         db.commit()
         logger.info(f"Saved {len(parsed['funds'])} funds for {data_date}")
@@ -127,10 +118,7 @@ def get_categories(data_date: date, asset_class: str) -> list:
 
 
 def get_funds_for_dropdown(data_date: date, asset_class: str, category: str) -> list:
-    """
-    Return whitelisted funds for dropdown.
-    If no R1/R2 exist in category, return all funds.
-    """
+    """Return whitelisted funds. If no R1/R2 in category, return all."""
     db = get_session()
     try:
         all_funds = db.query(
@@ -145,9 +133,10 @@ def get_funds_for_dropdown(data_date: date, asset_class: str, category: str) -> 
             DailyFundData.isin.isnot(None),
         ).all()
 
-        fund_list = [{"isin": f.isin, "name": f.name, "ranking": f.ranking, "amfi_code": f.amfi_code} for f in all_funds]
-
-        # Apply whitelist rule
+        fund_list = [
+            {"isin": f.isin, "name": f.name, "ranking": f.ranking, "amfi_code": f.amfi_code}
+            for f in all_funds
+        ]
         ranked = [f for f in fund_list if f["ranking"] in WHITELIST]
         return ranked if ranked else fund_list
     finally:
@@ -163,39 +152,66 @@ def get_fund_snapshot(isin: str, data_date: date) -> dict:
             DailyFundData.isin == isin,
             DailyFundData.data_date == data_date,
         ).first()
-        if not f:
-            return None
-        return _fund_to_dict(f)
+        return _fund_to_dict(f) if f else None
     finally:
         db.close()
 
 
 def _fund_to_dict(f: DailyFundData) -> dict:
-    def fmt(v):
-        return v if v is not None else "-"
+    def fmt(v): return v if v is not None else "-"
 
     return {
         "isin": f.isin, "name": f.name, "ranking": f.ranking,
-        "category": f.category, "asset_class": f.asset_class,
+        "category": f.category, "raw_category": fmt(f.raw_category),
+        "asset_class": f.asset_class,
         "morningstar_category": fmt(f.morningstar_category),
         "morningstar_rating": fmt(f.morningstar_rating),
         "inception_date": str(f.inception_date) if f.inception_date else "-",
-        "nav": fmt(f.nav), "nav_date": str(f.nav_date) if f.nav_date else "-",
+        "nav": fmt(f.nav),
+        "nav_date": str(f.nav_date) if f.nav_date else "-",
         "nav_52w_high": fmt(f.nav_52w_high),
+        "nav_52w_low": fmt(f.nav_52w_low),
+        "nav_mo_end": fmt(f.nav_mo_end),
         "fund_size": fmt(f.fund_size),
         "expense_ratio": fmt(f.expense_ratio),
-        "amfi_code": fmt(f.amfi_code), "rta_code": fmt(f.rta_code),
-        "manager_name": fmt(f.manager_name), "exit_load": fmt(f.exit_load),
-        "large_cap": fmt(f.large_cap), "mid_cap": fmt(f.mid_cap), "small_cap": fmt(f.small_cap),
-        "equity_pct": fmt(f.equity_pct), "bond_pct": fmt(f.bond_pct),
-        "cash_pct": fmt(f.cash_pct), "other_pct": fmt(f.other_pct),
-        "pe_ratio": fmt(f.pe_ratio), "pb_ratio": fmt(f.pb_ratio),
+        "amfi_code": fmt(f.amfi_code),
+        "rta_code": fmt(f.rta_code),
+        "manager_name": fmt(f.manager_name),
+        "exit_load": fmt(f.exit_load),
+        "large_cap": fmt(f.large_cap),
+        "mid_cap": fmt(f.mid_cap),
+        "small_cap": fmt(f.small_cap),
+        "equity_pct": fmt(f.equity_pct),
+        "bond_pct": fmt(f.bond_pct),
+        "cash_pct": fmt(f.cash_pct),
+        "other_pct": fmt(f.other_pct),
+        "pe_ratio": fmt(f.pe_ratio),
+        "pb_ratio": fmt(f.pb_ratio),
         "equity_style": fmt(f.equity_style),
+        # Equity region
+        "region_americas": fmt(f.region_americas),
+        "region_europe": fmt(f.region_europe),
+        "region_asia": fmt(f.region_asia),
+        "region_emerging": fmt(f.region_emerging),
+        # Factor profile
+        "factor_momentum": fmt(f.factor_momentum),
+        "factor_quality": fmt(f.factor_quality),
+        "factor_volatility": fmt(f.factor_volatility),
+        "factor_size": fmt(f.factor_size),
+        "factor_style": fmt(f.factor_style),
+        "factor_yield": fmt(f.factor_yield),
+        "factor_liquidity": fmt(f.factor_liquidity),
+        # Debt
+        "avg_maturity": fmt(f.avg_maturity),
+        "modified_duration": fmt(f.modified_duration),
+        "ytm": fmt(f.ytm),
+        "avg_credit_quality": fmt(f.avg_credit_quality),
+        "credit_aaa": fmt(f.credit_aaa),
+        "credit_aa": fmt(f.credit_aa),
+        "credit_a": fmt(f.credit_a),
+        "credit_bbb": fmt(f.credit_bbb),
         "returns": _returns_dict(f),
         "risk": _risk_dict(f),
-        # Debt fields
-        "avg_maturity": fmt(f.avg_maturity), "modified_duration": fmt(f.modified_duration),
-        "ytm": fmt(f.ytm), "avg_credit_quality": fmt(f.avg_credit_quality),
     }
 
 
@@ -215,13 +231,27 @@ def _returns_dict(f) -> dict:
 
 
 def _risk_dict(f) -> dict:
+    """Returns risk metrics for all 3 timeframes (1Y, 3Y, 5Y)."""
     def fmt(v): return round(v, 4) if v is not None else "-"
     return {
-        "std_dev": fmt(f.std_dev), "alpha": fmt(f.alpha),
-        "beta": fmt(f.beta), "sharpe_ratio": fmt(f.sharpe_ratio),
-        "sortino_ratio": fmt(f.sortino_ratio), "treynor_ratio": fmt(f.treynor_ratio),
-        "information_ratio": fmt(f.information_ratio),
-        "up_capture": fmt(f.up_capture), "down_capture": fmt(f.down_capture),
+        # 1 Year
+        "std_dev_1y": fmt(f.std_dev_1y), "alpha_1y": fmt(f.alpha_1y),
+        "beta_1y": fmt(f.beta_1y), "sharpe_ratio_1y": fmt(f.sharpe_ratio_1y),
+        "sortino_ratio_1y": fmt(f.sortino_ratio_1y), "treynor_ratio_1y": fmt(f.treynor_ratio_1y),
+        "information_ratio_1y": fmt(f.information_ratio_1y),
+        "up_capture_1y": fmt(f.up_capture_1y), "down_capture_1y": fmt(f.down_capture_1y),
+        # 3 Year
+        "std_dev_3y": fmt(f.std_dev_3y), "alpha_3y": fmt(f.alpha_3y),
+        "beta_3y": fmt(f.beta_3y), "sharpe_ratio_3y": fmt(f.sharpe_ratio_3y),
+        "sortino_ratio_3y": fmt(f.sortino_ratio_3y), "treynor_ratio_3y": fmt(f.treynor_ratio_3y),
+        "information_ratio_3y": fmt(f.information_ratio_3y),
+        "up_capture_3y": fmt(f.up_capture_3y), "down_capture_3y": fmt(f.down_capture_3y),
+        # 5 Year
+        "std_dev_5y": fmt(f.std_dev_5y), "alpha_5y": fmt(f.alpha_5y),
+        "beta_5y": fmt(f.beta_5y), "sharpe_ratio_5y": fmt(f.sharpe_ratio_5y),
+        "sortino_ratio_5y": fmt(f.sortino_ratio_5y), "treynor_ratio_5y": fmt(f.treynor_ratio_5y),
+        "information_ratio_5y": fmt(f.information_ratio_5y),
+        "up_capture_5y": fmt(f.up_capture_5y), "down_capture_5y": fmt(f.down_capture_5y),
     }
 
 
@@ -276,34 +306,55 @@ def get_peer_avg(category: str, data_date: date, asset_class: str) -> dict:
 
         return {
             "returns": {
-                "1d":    avg([f.return_1d for f in funds]),
-                "1w":    avg([f.return_1w for f in funds]),
-                "1m":    avg([f.return_1m for f in funds]),
-                "3m":    avg([f.return_3m for f in funds]),
-                "6m":    avg([f.return_6m for f in funds]),
-                "1y":    avg([f.return_1y for f in funds]),
-                "2y":    avg([f.return_2y for f in funds]),
-                "3y":    avg([f.return_3y for f in funds]),
-                "5y":    avg([f.return_5y for f in funds]),
-                "7y":    avg([f.return_7y for f in funds]),
-                "10y":   avg([f.return_10y for f in funds]),
-                "ytd":   avg([f.return_ytd for f in funds]),
-                "cy2025":avg([f.return_cy2025 for f in funds]),
-                "cy2024":avg([f.return_cy2024 for f in funds]),
-                "cy2023":avg([f.return_cy2023 for f in funds]),
-                "cy2022":avg([f.return_cy2022 for f in funds]),
-                "cy2021":avg([f.return_cy2021 for f in funds]),
+                "1d":     avg([f.return_1d for f in funds]),
+                "1w":     avg([f.return_1w for f in funds]),
+                "1m":     avg([f.return_1m for f in funds]),
+                "3m":     avg([f.return_3m for f in funds]),
+                "6m":     avg([f.return_6m for f in funds]),
+                "1y":     avg([f.return_1y for f in funds]),
+                "2y":     avg([f.return_2y for f in funds]),
+                "3y":     avg([f.return_3y for f in funds]),
+                "5y":     avg([f.return_5y for f in funds]),
+                "7y":     avg([f.return_7y for f in funds]),
+                "10y":    avg([f.return_10y for f in funds]),
+                "ytd":    avg([f.return_ytd for f in funds]),
+                "cy2025": avg([f.return_cy2025 for f in funds]),
+                "cy2024": avg([f.return_cy2024 for f in funds]),
+                "cy2023": avg([f.return_cy2023 for f in funds]),
+                "cy2022": avg([f.return_cy2022 for f in funds]),
+                "cy2021": avg([f.return_cy2021 for f in funds]),
             },
             "risk": {
-                "std_dev":          avg([f.std_dev for f in funds]),
-                "alpha":            avg([f.alpha for f in funds]),
-                "beta":             avg([f.beta for f in funds]),
-                "sharpe_ratio":     avg([f.sharpe_ratio for f in funds]),
-                "sortino_ratio":    avg([f.sortino_ratio for f in funds]),
-                "treynor_ratio":    avg([f.treynor_ratio for f in funds]),
-                "information_ratio":avg([f.information_ratio for f in funds]),
-                "up_capture":       avg([f.up_capture for f in funds]),
-                "down_capture":     avg([f.down_capture for f in funds]),
+                # 1Y
+                "std_dev_1y":           avg([f.std_dev_1y for f in funds]),
+                "alpha_1y":             avg([f.alpha_1y for f in funds]),
+                "beta_1y":              avg([f.beta_1y for f in funds]),
+                "sharpe_ratio_1y":      avg([f.sharpe_ratio_1y for f in funds]),
+                "sortino_ratio_1y":     avg([f.sortino_ratio_1y for f in funds]),
+                "treynor_ratio_1y":     avg([f.treynor_ratio_1y for f in funds]),
+                "information_ratio_1y": avg([f.information_ratio_1y for f in funds]),
+                "up_capture_1y":        avg([f.up_capture_1y for f in funds]),
+                "down_capture_1y":      avg([f.down_capture_1y for f in funds]),
+                # 3Y
+                "std_dev_3y":           avg([f.std_dev_3y for f in funds]),
+                "alpha_3y":             avg([f.alpha_3y for f in funds]),
+                "beta_3y":              avg([f.beta_3y for f in funds]),
+                "sharpe_ratio_3y":      avg([f.sharpe_ratio_3y for f in funds]),
+                "sortino_ratio_3y":     avg([f.sortino_ratio_3y for f in funds]),
+                "treynor_ratio_3y":     avg([f.treynor_ratio_3y for f in funds]),
+                "information_ratio_3y": avg([f.information_ratio_3y for f in funds]),
+                "up_capture_3y":        avg([f.up_capture_3y for f in funds]),
+                "down_capture_3y":      avg([f.down_capture_3y for f in funds]),
+                # 5Y
+                "std_dev_5y":           avg([f.std_dev_5y for f in funds]),
+                "alpha_5y":             avg([f.alpha_5y for f in funds]),
+                "beta_5y":              avg([f.beta_5y for f in funds]),
+                "sharpe_ratio_5y":      avg([f.sharpe_ratio_5y for f in funds]),
+                "sortino_ratio_5y":     avg([f.sortino_ratio_5y for f in funds]),
+                "treynor_ratio_5y":     avg([f.treynor_ratio_5y for f in funds]),
+                "information_ratio_5y": avg([f.information_ratio_5y for f in funds]),
+                "up_capture_5y":        avg([f.up_capture_5y for f in funds]),
+                "down_capture_5y":      avg([f.down_capture_5y for f in funds]),
             },
         }
     finally:
@@ -313,7 +364,7 @@ def get_peer_avg(category: str, data_date: date, asset_class: str) -> dict:
 # ── Peer comparison ──────────────────────────────────────────────────────────
 
 def get_whitelisted_peers(category: str, data_date: date, asset_class: str) -> list:
-    """Return only R1/R2 funds in category for peer comparison."""
+    """Return R1/R2 funds in category. If none, return all."""
     db = get_session()
     try:
         all_funds = db.query(DailyFundData).filter(
@@ -321,7 +372,6 @@ def get_whitelisted_peers(category: str, data_date: date, asset_class: str) -> l
             DailyFundData.category == category,
             DailyFundData.isin.isnot(None),
         ).all()
-
         fund_dicts = [_fund_to_dict(f) for f in all_funds]
         ranked = [f for f in fund_dicts if f["ranking"] in WHITELIST]
         return ranked if ranked else fund_dicts
@@ -343,25 +393,24 @@ def get_latest_data_status() -> dict:
         today = date.today()
         return {
             "data_as_of": str(latest_date),
-            "is_fresh": latest_date == today or (today.weekday() >= 5 and latest_date >= today),
+            "is_fresh": latest_date == today,
         }
     finally:
         db.close()
 
 
 def get_latest_data_date():
-    """Return the most recent data_date in the DB, or None if empty."""
     db = get_session()
     try:
-        result = db.query(DailyFundData.data_date).order_by(DailyFundData.data_date.desc()).first()
+        result = db.query(DailyFundData.data_date).order_by(
+            DailyFundData.data_date.desc()
+        ).first()
         return result[0] if result else None
     finally:
         db.close()
 
 
 def get_fund_inception_date(isin: str):
-    """Return inception date for a fund by ISIN, or None if not found."""
-    from datetime import date as date_type
     db = get_session()
     try:
         result = db.query(DailyFundData.inception_date).filter(
@@ -374,10 +423,13 @@ def get_fund_inception_date(isin: str):
 
 
 def get_fund_inception_date_by_amfi(amfi_code: str):
-    """Return inception date for a fund by AMFI code, or None if not found."""
     db = get_session()
     try:
-        result = db.query(DailyFundData.inception_date, DailyFundData.isin, DailyFundData.name).filter(
+        result = db.query(
+            DailyFundData.inception_date,
+            DailyFundData.isin,
+            DailyFundData.name
+        ).filter(
             DailyFundData.amfi_code == amfi_code,
             DailyFundData.inception_date.isnot(None)
         ).first()

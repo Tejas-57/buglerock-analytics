@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import './PeerComparison.css';
 
 const RETURN_COLS = ['1m','3m','6m','1y','3y','5y','ytd'];
-const RISK_COLS   = ['std_dev','alpha','beta','sharpe_ratio','sortino_ratio','information_ratio'];
 
 function fmt(v, suffix = '') {
   if (v === null || v === undefined || v === '-') return '—';
@@ -23,13 +22,14 @@ export default function PeerComparison({ selectedDate, selectedFund }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('returns');
+  const [riskTf, setRiskTf] = useState('3y');
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!selectedFund) return;
     setLoading(true);
     setError(null);
-    const dateStr = selectedDate.toISOString().split('T')[0];
+    const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
     fetch(`/api/peer/comparison?isin=${selectedFund.isin}&category=${encodeURIComponent(selectedFund.category)}&asset_class=${encodeURIComponent(selectedFund.assetClass)}&date=${dateStr}`)
       .then(r => r.json())
       .then(d => { setPeerData(d); setLoading(false); })
@@ -44,16 +44,8 @@ export default function PeerComparison({ selectedDate, selectedFund }) {
           <p className="page-desc">Compare R1 & R2 ranked funds within the same category.</p>
         </div>
         <div className="empty-state">
-          <div className="empty-icon">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.3">
-              <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-              <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-            </svg>
-          </div>
           <p>No fund selected. Please select a fund from the Home tab.</p>
-          <button className="btn-primary" style={{ marginTop: '16px' }} onClick={() => navigate('/home')}>
-            Go to Home
-          </button>
+          <button className="btn-primary" style={{ marginTop: '16px' }} onClick={() => navigate('/home')}>Go to Home</button>
         </div>
       </div>
     );
@@ -64,7 +56,7 @@ export default function PeerComparison({ selectedDate, selectedFund }) {
       <div className="page-header">
         <h1 className="section-title">Peer Comparison</h1>
         <p className="page-desc">
-          Showing: <span style={{ color: 'var(--gold)' }}>{selectedFund.name}</span>
+          Showing: <span style={{ color: 'var(--brand-primary)' }}>{selectedFund.name}</span>
           <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>{selectedFund.category}</span>
         </p>
       </div>
@@ -74,25 +66,40 @@ export default function PeerComparison({ selectedDate, selectedFund }) {
 
       {peerData && !loading && (
         <div className="peer-content">
-          <div className="peer-meta card">
-            <div className="peer-meta-row">
+          <div className="card" style={{ marginBottom: 16, padding: '12px 20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
                 <div className="section-subtitle" style={{ margin: 0 }}>Category</div>
-                <div className="peer-category">{selectedFund?.category}</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginTop: 2 }}>{selectedFund.category}</div>
               </div>
-              <div className="peer-count-badge">
+              <div style={{ background: 'rgba(145,47,99,0.08)', border: '1px solid rgba(145,47,99,0.2)', borderRadius: 20, padding: '4px 14px', fontSize: 12, color: 'var(--brand-primary)', fontWeight: 600 }}>
                 {peerData.peers?.length || 0} peers
               </div>
             </div>
           </div>
 
           <div className="card">
-            <div className="tab-row">
-              <button className={`tab-btn ${activeTab === 'returns' ? 'active' : ''}`} onClick={() => setActiveTab('returns')}>Returns</button>
-              <button className={`tab-btn ${activeTab === 'risk' ? 'active' : ''}`} onClick={() => setActiveTab('risk')}>Risk Metrics</button>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+              <div className="tab-row" style={{ border: 'none', marginBottom: 0 }}>
+                <button className={`tab-btn ${activeTab === 'returns' ? 'active' : ''}`} onClick={() => setActiveTab('returns')}>Returns</button>
+                <button className={`tab-btn ${activeTab === 'risk' ? 'active' : ''}`} onClick={() => setActiveTab('risk')}>Risk Metrics</button>
+              </div>
+              {activeTab === 'risk' && (
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {['3y', '5y'].map(t => (
+                    <button key={t} onClick={() => setRiskTf(t)} style={{
+                      padding: '3px 10px', borderRadius: 4, border: '1px solid',
+                      borderColor: riskTf === t ? 'var(--brand-primary)' : 'var(--border)',
+                      background: riskTf === t ? 'var(--brand-primary)' : 'transparent',
+                      color: riskTf === t ? '#fff' : 'var(--text-muted)',
+                      fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                    }}>{t.toUpperCase()}</button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            <div className="table-scroll" style={{ marginTop: 16 }}>
+            <div className="table-scroll" style={{ padding: '0 0 8px' }}>
               {activeTab === 'returns' && (
                 <table className="data-table">
                   <thead>
@@ -104,8 +111,8 @@ export default function PeerComparison({ selectedDate, selectedFund }) {
                     {peerData.peers?.map((peer) => (
                       <tr key={peer.isin} className={peer.isin === selectedFund?.isin ? 'highlight-row' : ''}>
                         <td>
-                          <div className="peer-name-cell">
-                            {peer.isin === selectedFund?.isin && <span className="selected-dot" />}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {peer.isin === selectedFund?.isin && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--brand-primary)', flexShrink: 0 }} />}
                             {peer.name}
                           </div>
                         </td>
@@ -135,30 +142,30 @@ export default function PeerComparison({ selectedDate, selectedFund }) {
                     {peerData.peers?.map((peer) => (
                       <tr key={peer.isin} className={peer.isin === selectedFund?.isin ? 'highlight-row' : ''}>
                         <td>
-                          <div className="peer-name-cell">
-                            {peer.isin === selectedFund?.isin && <span className="selected-dot" />}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {peer.isin === selectedFund?.isin && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--brand-primary)', flexShrink: 0 }} />}
                             {peer.name}
                           </div>
                         </td>
                         <td><span className={`badge-${peer.ranking?.toLowerCase()}`}>{peer.ranking || '—'}</span></td>
-                        <td>{fmt(peer.risk?.std_dev, '%')}</td>
-                        <td>{fmt(peer.risk?.alpha)}</td>
-                        <td>{fmt(peer.risk?.beta)}</td>
-                        <td>{fmt(peer.risk?.sharpe_ratio)}</td>
-                        <td>{fmt(peer.risk?.sortino_ratio)}</td>
-                        <td>{fmt(peer.risk?.information_ratio)}</td>
+                        <td>{fmt(peer.risk?.[`std_dev_${riskTf}`], '%')}</td>
+                        <td>{fmt(peer.risk?.[`alpha_${riskTf}`])}</td>
+                        <td>{fmt(peer.risk?.[`beta_${riskTf}`])}</td>
+                        <td>{fmt(peer.risk?.[`sharpe_ratio_${riskTf}`])}</td>
+                        <td>{fmt(peer.risk?.[`sortino_ratio_${riskTf}`])}</td>
+                        <td>{fmt(peer.risk?.[`information_ratio_${riskTf}`])}</td>
                       </tr>
                     ))}
                     {peerData.peer_avg && (
                       <tr className="avg-row">
                         <td style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Peer Average</td>
                         <td>—</td>
-                        <td>{fmt(peerData.peer_avg.risk?.std_dev, '%')}</td>
-                        <td>{fmt(peerData.peer_avg.risk?.alpha)}</td>
-                        <td>{fmt(peerData.peer_avg.risk?.beta)}</td>
-                        <td>{fmt(peerData.peer_avg.risk?.sharpe_ratio)}</td>
-                        <td>{fmt(peerData.peer_avg.risk?.sortino_ratio)}</td>
-                        <td>{fmt(peerData.peer_avg.risk?.information_ratio)}</td>
+                        <td>{fmt(peerData.peer_avg.risk?.[`std_dev_${riskTf}`], '%')}</td>
+                        <td>{fmt(peerData.peer_avg.risk?.[`alpha_${riskTf}`])}</td>
+                        <td>{fmt(peerData.peer_avg.risk?.[`beta_${riskTf}`])}</td>
+                        <td>{fmt(peerData.peer_avg.risk?.[`sharpe_ratio_${riskTf}`])}</td>
+                        <td>{fmt(peerData.peer_avg.risk?.[`sortino_ratio_${riskTf}`])}</td>
+                        <td>{fmt(peerData.peer_avg.risk?.[`information_ratio_${riskTf}`])}</td>
                       </tr>
                     )}
                   </tbody>
