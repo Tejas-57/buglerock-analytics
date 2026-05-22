@@ -1,0 +1,409 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+// Normalize category name — remove spaces after colon for consistent matching
+function normCat(cat) {
+  return cat ? cat.replace(/Cat:\s+/g, 'Cat: ').trim() : cat;
+}
+
+const EXCLUDED_ACTIVE_EQUITY = [
+  'Cat: Index MF - IT','Cat: Index MF - Factor-Low Vol','Cat: Index MF - Factor-Alpha Low Vol',
+  'Cat:Index MF - Factor-Momentum','Cat: Index MF - Factor-Value','Cat: Index MF - Factor-Quality','Cat: Index MF - Factor-Alpha',
+];
+
+const ASSET_STRUCTURE = [
+  {
+    id:'equity', label:'Equity', icon:'📈',
+    subtypes:[
+      { id:'active', label:'Active Equity', asset_classes:['Equity'], groups:[
+        { label:'Large Cap', cats:['India Fund Large-Cap','India Fund Large & Mid-Cap','India Fund Flexi Cap','Cat: Flexi Cap Funds','Cat: Multi Cap Funds','India Fund Focused Fund','Cat: Contra / Value Funds'] },
+        { label:'Mid & Small Cap', cats:['India Fund Mid-Cap','India Fund Small-Cap','India Fund Equity - Other'] },
+        { label:'ELSS', cats:['India Fund ELSS (Tax Savings)'] },
+        { label:'Thematic & Sectoral', cats:['Thematic Funds','Cat: Banking & Financial Services Funds','Cat: Infrastructure Funds','Cat: Consumption Funds','India Fund Sector - Energy','Cat: IT / Tech Funds','Cat: Healthcare funds','Cat: MNC Funds'] },
+        { label:'Others', cats:['Cat: Equity FoF','Cat: Multi Factor'] },
+      ]},
+      { id:'passive_index', label:'Index & FoF', asset_classes:['Equity Index'], groups:[
+        { label:'Broad Market', cats:['India Fund Index Funds','Cat: Index MF - Nifty 50','Cat: Index MF - Nifty Next 50','Cat: Index MF - Sensex','Cat: Index MF - Nifty & BSE 500','Cat: Index MF - Nifty 100','Cat: Index MF - Equal Wt','Cat: Index MF - Large&Mid','Cat: Index MF - Midcap','Cat: Index MF - Smallcap'] },
+        { label:'Factor / Smart Beta', cats:['Cat: Index MF - Factor-Value','Cat:Index MF - Factor-Momentum','Cat: Index MF - Factor-Quality','Cat: Index MF - Factor-Low Vol','Cat: Index MF - Factor-Alpha Low Vol','Cat: Index MF - Factor-Alpha','Cat: Multi Factor'] },
+        { label:'Sectoral', cats:['Cat: Index MF - Bank','Cat: Index MF - IT','Cat: Healthcare funds','Cat: Thematic - Manufacturing','Cat: Thematic Funds','Cat: Thematic - PSU','Cat: Thematic - Commodities'] },
+      ]},
+      { id:'passive_etf', label:'ETF', asset_classes:['ETF - Equity'], groups:[
+        { label:'Broad Market', cats:['India ETF Large-Cap','India ETF Multi-Cap','India ETF Mid-Cap','India ETF Small-Cap','India ETF Value','India ETF Dividend Yield','India ETF Index Funds'] },
+        { label:'Sectoral', cats:['India ETF Sector - Financial Services','India ETF Sector - Technology','India ETF Sector - Healthcare','India ETF Sector - Energy','India ETF Sector - Precious Metals','India ETF Equity - Infrastructure','India ETF Equity - Consumption','India ETF Equity - ESG','India ETF Equity - Other'] },
+      ]},
+      { id:'global', label:'Global Equity', asset_classes:['International'], groups:[
+        { label:'Global', cats:['India Fund Global - Other','Cat: Global - Other Funds','Cat: Global - Innovation Funds','Cat: Emerging Market Funds','Cat: China & Asia based Funds','Cat: US based Funds','Cat: Europe based Funds'] },
+      ]},
+    ],
+  },
+  {
+    id:'hybrid', label:'Hybrid', icon:'⚖️',
+    subtypes:[{ id:'hybrid_all', label:'All Hybrid', asset_classes:['Hybrid'], groups:[
+      { label:'Equity-oriented', cats:['India Fund Aggressive Allocation','India Fund Dynamic Asset Allocation','India Fund Multi Asset Allocation','India Fund Balanced Allocation'] },
+      { label:'Debt-oriented', cats:['India Fund Conservative Allocation','India Fund Equity Savings','India Fund Equity Savings - Aggressive','India Fund Equity Savings - Conservative'] },
+      { label:'Special', cats:['India Fund Arbitrage Fund','India Fund Retirement','India Fund Children'] },
+    ]}],
+  },
+  {
+    id:'sif', label:'SIF', icon:'🔬',
+    subtypes:[{ id:'sif_all', label:'All SIF', asset_classes:['SIF'], groups:[
+      { label:'SIF', cats:['Cat: SIF','India Fund Hybrid Long-Short Fund'] },
+    ]}],
+  },
+  {
+    id:'fixed_income', label:'Fixed Income', icon:'🏦',
+    subtypes:[
+      { id:'debt_mf', label:'Debt MFs', asset_classes:['Debt'], groups:[
+        { label:'Liquid & Short', cats:['India OE Overnight','India OE Liquid','India OE Ultra Short Duration','India OE Money Market','India OE Low Duration','India OE Floating Rate'] },
+        { label:'Medium Duration', cats:['India OE Short Duration','India OE Banking & PSU','India OE Corporate Bond','India OE Medium Duration','India OE Credit Risk'] },
+        { label:'Long Duration', cats:['India OE Medium to Long Duration','India OE Dynamic Bond','India OE Government Bond','India OE 10 yr Government Bond','India OE Long Duration'] },
+        { label:'Others', cats:['India OE Index Funds - Fixed Income','India OE Other Bond','India OE Fund of Funds'] },
+      ]},
+      { id:'debt_etf', label:'Fixed Income ETFs', asset_classes:['ETF - Debt'], groups:[
+        { label:'ETF', cats:['India ETF Medium to Long Duration','India ETF Long Duration','India ETF Government Bond','India ETF 10 yr Government Bond','India ETF Index Funds - Fixed Income'] },
+      ]},
+    ],
+  },
+];
+
+const RANK_ORDER = { R1:1, R2:2, R3:3, R4:4, R5:5 };
+const RANK_COLORS = {
+  R1:{ bg:'rgba(16,185,129,0.12)', color:'#059669', border:'rgba(16,185,129,0.3)' },
+  R2:{ bg:'rgba(16,185,129,0.08)', color:'#10B981', border:'rgba(16,185,129,0.2)' },
+  R3:{ bg:'rgba(45,31,43,0.06)',   color:'#2D1F2B', border:'rgba(45,31,43,0.15)' },
+  R4:{ bg:'rgba(239,68,68,0.08)',  color:'#EF4444', border:'rgba(239,68,68,0.2)' },
+  R5:{ bg:'rgba(239,68,68,0.06)',  color:'#F87171', border:'rgba(239,68,68,0.15)' },
+};
+// Color pip per rank
+const PIP_COLORS = { R1:'#059669', R2:'#10B981', R3:'#6D5479', R4:'#F59E0B', R5:'#EF4444', default:'#A795AE' };
+
+function getRankOrder(r) { return !r || r==='-' || r==='0' ? 99 : (RANK_ORDER[r] || 98); }
+function cleanLabel(cat) { return cat.replace(/^(India Fund |India OE |India ETF |Cat: |Cat:)/,''); }
+
+function RankBadge({ ranking }) {
+  if (!ranking || ranking==='-' || ranking==='0') return null;
+  const s = RANK_COLORS[ranking] || { bg:'#f5f5f5', color:'#999', border:'#ddd' };
+  return <span style={{ fontSize:10, fontWeight:700, fontFamily:'var(--font-mono)', padding:'2px 6px', borderRadius:3, background:s.bg, color:s.color, border:`1px solid ${s.border}` }}>{ranking}</span>;
+}
+
+export default function FundExplorer({ selectedDate, setSelectedFund }) {
+  const navigate = useNavigate();
+  const [selectedAsset, setSelectedAsset]     = useState('equity');
+  const [selectedSubtype, setSelectedSubtype] = useState('active');
+  const [selectedCat, setSelectedCat]         = useState(null);
+  const ACTIVE_SUBTYPES = ['active', 'hybrid_all', 'sif_all', 'debt_mf', 'debt_etf'];
+  const [showWhitelisted, setShowWhitelisted] = useState(true);
+  const [sortBy, setSortBy]                   = useState(null);
+  const [searchQuery, setSearchQuery]         = useState('');
+  const [allFunds, setAllFunds]               = useState([]);
+  const [peerAvg1y, setPeerAvg1y]             = useState(null);
+  const [peerAvg3y, setPeerAvg3y]             = useState(null);
+  const [loading, setLoading]                 = useState(false);
+  const [availableCats, setAvailableCats]     = useState(null); // null = not loaded yet
+
+  const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
+  const assetItem   = ASSET_STRUCTURE.find(a => a.id === selectedAsset);
+  const subtypeItem = assetItem?.subtypes.find(s => s.id === selectedSubtype);
+
+  useEffect(() => {
+    if (assetItem?.subtypes?.length) {
+      setSelectedSubtype(assetItem.subtypes[0].id);
+      setSelectedCat(null);
+      setAllFunds([]);
+      // Passive asset classes have no rankings — auto-switch to All Funds
+      const passiveAssets = ['equity', 'fixed_income'];
+      const firstSubtype = assetItem.subtypes[0].id;
+      const isPassive = ['passive_index','passive_etf','debt_etf'].includes(firstSubtype);
+      setShowWhitelisted(!isPassive);
+    }
+  }, [selectedAsset]);
+
+  useEffect(() => {
+    // Default to All Funds for passive subtypes (no rankings)
+    setShowWhitelisted(ACTIVE_SUBTYPES.includes(selectedSubtype));
+  }, [selectedSubtype]);
+
+  useEffect(() => {
+    // Auto-switch whitelist based on whether subtype has rankings
+    const noRankSubtypes = ['passive_index','passive_etf','debt_etf','global'];
+    if (subtypeItem) setShowWhitelisted(!noRankSubtypes.includes(subtypeItem.id));
+  }, [selectedSubtype]);
+
+  useEffect(() => {
+    if (!subtypeItem || !dateStr) return;
+    // Fetch actual categories from API to filter out empty ones
+    const ac = subtypeItem.asset_classes[0];
+    fetch(`/api/funds/categories?asset_class=${encodeURIComponent(ac)}&date=${dateStr}`)
+      .then(r => r.json())
+      .then(d => {
+        const cats = new Set((d.categories || []).map(normCat));
+        setAvailableCats(cats);
+        // Auto-select first available category
+        for (const group of subtypeItem.groups) {
+          const first = group.cats.find(c => cats.has(normCat(c)));
+          if (first) { setSelectedCat(first); return; }
+        }
+        setSelectedCat(null);
+      })
+      .catch(() => setAvailableCats(null));
+  }, [selectedSubtype, dateStr]);
+
+  useEffect(() => {
+    if (!selectedCat || !subtypeItem || !dateStr) return;
+    setLoading(true); setAllFunds([]); setPeerAvg1y(null); setPeerAvg3y(null);
+    const ac = subtypeItem.asset_classes[0];
+    const catNorm = normCat(selectedCat);
+    Promise.all([
+      fetch(`/api/funds/list?asset_class=${encodeURIComponent(ac)}&category=${encodeURIComponent(catNorm)}&date=${dateStr}&all=true`).then(r=>r.json()),
+      fetch(`/api/performance/peer-avg?category=${encodeURIComponent(catNorm)}&asset_class=${encodeURIComponent(ac)}&date=${dateStr}`).then(r=>r.json()).catch(()=>null),
+    ]).then(([fd, pd]) => {
+      setAllFunds(fd.funds || []);
+      setPeerAvg1y(pd?.peer_avg?.returns?.['1y'] ?? null);
+      setPeerAvg3y(pd?.peer_avg?.returns?.['3y'] ?? null);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [selectedCat, selectedSubtype, dateStr]);
+
+  // Passive subtypes never have rankings — hide whitelist toggle
+  const isPassiveSubtype = ['passive_index','passive_etf','debt_etf','global','sif_all','hybrid_all','debt_mf'].includes(selectedSubtype);
+
+  // Check if current category has any ranked funds at all
+  const hasRankedFunds = useMemo(() => {
+    return allFunds.some(f => f.ranking && f.ranking !== '-' && f.ranking !== '0' && ['R1','R2','R3','R4','R5'].includes(f.ranking));
+  }, [allFunds]);
+
+  // Effective whitelist setting — forced off if passive or no ranked funds
+  const effectiveWhitelisted = showWhitelisted && !isPassiveSubtype && hasRankedFunds;
+
+  const peerAvg  = sortBy === '3y' ? peerAvg3y : peerAvg1y;
+  const sortKey  = sortBy === '3y' ? 'return_3y' : 'return_1y';
+  const sortLbl  = sortBy === '3y' ? '3Y' : '1Y';
+
+  const displayFunds = useMemo(() => {
+    let funds = [...allFunds];
+    if (effectiveWhitelisted) funds = funds.filter(f => f.ranking==='R1' || f.ranking==='R2');
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      funds = funds.filter(f => f.name?.toLowerCase().includes(q) || f.isin?.toLowerCase().includes(q));
+    }
+    if (sortBy) {
+      funds.sort((a,b) => (parseFloat(b[sortKey])||-999) - (parseFloat(a[sortKey])||-999));
+    } else {
+      funds.sort((a,b) => {
+        const rd = getRankOrder(a.ranking) - getRankOrder(b.ranking);
+        if (rd !== 0) return rd;
+        return (parseFloat(b.return_1y)||-999) - (parseFloat(a.return_1y)||-999);
+      });
+    }
+    return funds;
+  }, [allFunds, showWhitelisted, searchQuery, sortBy, sortKey]);
+
+  const handleFundClick = (fund) => {
+    setSelectedFund({ isin:fund.isin, name:fund.name, ranking:fund.ranking, amfi_code:fund.amfi_code, category:normCat(selectedCat), assetClass:subtypeItem?.asset_classes[0] });
+    navigate('/home');
+  };
+
+  return (
+    <div style={{ paddingBottom: 40 }}>
+      {/* ── Header ── */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+        <div>
+          <h1 className="section-title" style={{ marginBottom:2 }}>Fund Explorer</h1>
+          <p style={{ fontSize:12, color:'var(--text-muted)' }}>Browse, filter and discover mutual funds</p>
+        </div>
+        <div style={{ position:'relative' }}>
+          <input type="text" placeholder="Search fund, AMC or ISIN..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
+            style={{ padding:'7px 12px 7px 32px', borderRadius:8, border:'1px solid var(--border)', fontSize:12, width:240, outline:'none', background:'#fff', color:'var(--text-primary)' }} />
+          <svg style={{ position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', color:'var(--text-muted)' }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+        </div>
+      </div>
+
+      {/* ── Asset class ── */}
+      <div style={{ marginBottom:4 }}>
+        <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', color:'var(--brand-mid)', textTransform:'uppercase', marginBottom:8 }}>Asset Class</div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          {ASSET_STRUCTURE.map(a => (
+            <div key={a.id} onClick={()=>setSelectedAsset(a.id)} style={{
+              display:'flex', alignItems:'center', gap:7, padding:'7px 14px',
+              border:`1.5px solid ${selectedAsset===a.id?'var(--brand-primary)':'var(--border)'}`,
+              borderRadius:8, cursor:'pointer',
+              background: selectedAsset===a.id ? 'rgba(145,47,99,0.06)' : '#fff',
+              transition:'all .15s',
+            }}>
+              <span style={{ fontSize:15 }}>{a.icon}</span>
+              <span style={{ fontSize:12, fontWeight:600, color: selectedAsset===a.id ? 'var(--brand-primary)' : 'var(--text-primary)' }}>{a.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Sub-type ── */}
+      {assetItem?.subtypes.length > 1 && (
+        <div style={{ margin:'12px 0 0' }}>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', color:'var(--brand-mid)', textTransform:'uppercase', marginBottom:7 }}>Fund Type</div>
+          <div style={{ display:'flex', gap:6 }}>
+            {assetItem.subtypes.map(s => (
+              <button key={s.id} onClick={()=>setSelectedSubtype(s.id)} style={{
+                padding:'5px 13px', borderRadius:20, border:'1px solid',
+                borderColor: selectedSubtype===s.id ? 'var(--brand-primary)' : 'var(--border)',
+                background: selectedSubtype===s.id ? 'var(--brand-primary)' : 'transparent',
+                color: selectedSubtype===s.id ? '#fff' : 'var(--text-secondary)',
+                fontSize:12, fontWeight:500, cursor:'pointer', transition:'all .15s',
+              }}>{s.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Categories ── */}
+      {subtypeItem && (
+        <div style={{ margin:'12px 0 0' }}>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', color:'var(--brand-mid)', textTransform:'uppercase', marginBottom:8 }}>Category</div>
+          {subtypeItem.groups.filter(group => !availableCats || group.cats.some(c => availableCats.has(normCat(c)))).map(group => (
+            <div key={group.label} style={{ marginBottom:10 }}>
+              <div style={{ fontSize:10, fontWeight:600, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:5 }}>{group.label}</div>
+              <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                {group.cats.filter(cat => !availableCats || availableCats.has(normCat(cat))).map(cat => {
+                  const sel = selectedCat===cat;
+                  return (
+                    <div key={cat} onClick={()=>setSelectedCat(cat)} style={{
+                      display:'flex', alignItems:'center', gap:7, padding:'5px 11px',
+                      border:`1.5px solid ${sel?'var(--brand-primary)':'var(--border)'}`,
+                      borderRadius:6, cursor:'pointer',
+                      background: sel ? 'rgba(145,47,99,0.05)' : '#fff',
+                      transition:'all .12s', fontSize:12,
+                      color: sel ? 'var(--brand-primary)' : 'var(--text-secondary)',
+                      fontWeight: sel ? 600 : 400,
+                    }}>
+                      {cleanLabel(cat)}
+                      <span style={{ width:14, height:14, borderRadius:'50%', border:`1.5px solid ${sel?'var(--brand-primary)':'#ccc'}`, background:sel?'var(--brand-primary)':'transparent', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                        {sel && <span style={{ width:5, height:5, borderRadius:'50%', background:'#fff' }} />}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Controls ── */}
+      {/* isPassive = subtypes with no ranking — show only All Funds, no toggle */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', margin:'14px 0 0', padding:'9px 14px', background:'var(--bg-secondary)', borderRadius:8, border:'1px solid var(--border)' }}>
+        <div style={{ display:'flex', gap:6 }}>
+          {(() => {
+            const noRankSubtypes = ['passive_index','passive_etf','debt_etf','global'];
+            const isPassive = noRankSubtypes.includes(subtypeItem?.id);
+            if (isPassive) {
+              return <span style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>All funds shown</span>;
+            }
+            return [{ val:true, label:'★ Whitelisted' },{ val:false, label:'All Funds' }].map(({val,label})=>(
+              <button key={String(val)} onClick={()=>setShowWhitelisted(val)} style={{
+                padding:'4px 12px', borderRadius:20, border:'1px solid',
+                borderColor: showWhitelisted===val ? 'var(--brand-primary)' : 'var(--border)',
+                background: showWhitelisted===val ? 'var(--brand-primary)' : 'transparent',
+                color: showWhitelisted===val ? '#fff' : 'var(--text-secondary)',
+                fontSize:11, fontWeight:600, cursor:'pointer',
+              }}>{label}</button>
+            ));
+          })()}
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <span style={{ fontSize:11, color:'var(--text-muted)' }}>Sort by</span>
+          {[{val:'1y',label:'1Y Return'},{val:'3y',label:'3Y Return'}].map(({val,label})=>(
+            <button key={val} onClick={()=>setSortBy(sortBy===val?null:val)} style={{
+              padding:'3px 10px', borderRadius:4, border:'1px solid',
+              borderColor: sortBy===val ? 'var(--brand-primary)' : 'var(--border)',
+              background: sortBy===val ? 'var(--brand-primary)' : 'transparent',
+              color: sortBy===val ? '#fff' : 'var(--text-muted)',
+              fontSize:11, fontWeight:600, cursor:'pointer',
+            }}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Peer avg strip ── */}
+      {selectedCat && peerAvg != null && peerAvg !== '-' && (
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 14px', background:'rgba(145,47,99,0.04)', border:'1px solid rgba(145,47,99,0.12)', borderRadius:6, margin:'8px 0 0' }}>
+          <span style={{ fontSize:12, color:'var(--brand-mid)', fontWeight:600 }}>
+            Peer avg {sortLbl}: {parseFloat(peerAvg)>=0?'+':''}{parseFloat(peerAvg).toFixed(2)}%
+          </span>
+          <span style={{ fontSize:11, color:'var(--text-muted)' }}>
+            {displayFunds.length} fund{displayFunds.length!==1?'s':''}
+            {sortBy && <span style={{ marginLeft:8, color:'var(--brand-mid)' }}>· Sorted by {sortLbl} return ↓</span>}
+          </span>
+        </div>
+      )}
+
+      {/* ── Fund list ── */}
+      <div style={{ marginTop:8, border:'1px solid var(--border)', borderRadius:10, overflow:'hidden', background:'#fff', boxShadow:'var(--shadow-card)' }}>
+        {loading && [1,2,3,4,5].map(i=>(
+          <div key={i} className="loading-shimmer" style={{ height:62, margin:'1px 0' }}/>
+        ))}
+
+        {!loading && displayFunds.length===0 && selectedCat && (
+          <div style={{ padding:'36px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+            No funds found for this selection.
+          </div>
+        )}
+
+        {!loading && displayFunds.map((fund, idx) => {
+          const ret    = fund[sortKey];
+          const retNum = ret != null && ret !== '-' ? parseFloat(ret) : null;
+          const above  = retNum != null && peerAvg != null && peerAvg !== '-' ? retNum >= parseFloat(peerAvg) : null;
+          const pipColor = PIP_COLORS[fund.ranking] || PIP_COLORS.default;
+          const catDisplay = cleanLabel(selectedCat || '');
+
+          return (
+            <div key={fund.isin || idx}
+              onClick={()=>handleFundClick(fund)}
+              style={{ display:'flex', alignItems:'center', gap:10, padding:'11px 16px', borderBottom: idx<displayFunds.length-1 ? '1px solid var(--border)' : 'none', cursor:'pointer', transition:'background .1s' }}
+              onMouseEnter={e=>e.currentTarget.style.background='var(--bg-secondary)'}
+              onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+            >
+              {/* Color pip */}
+              <div style={{ width:3, height:44, borderRadius:2, background:pipColor, flexShrink:0 }} />
+
+              {/* Fund info */}
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:3 }}>
+                  <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:380 }}>{fund.name}</span>
+                  <RankBadge ranking={fund.ranking} />
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:7 }}>
+                  <span style={{ fontSize:10, color:'var(--text-muted)', fontFamily:'var(--font-mono)' }}>{fund.isin}</span>
+                  <span style={{ fontSize:10, color:'var(--brand-mid)', background:'rgba(109,84,121,0.08)', padding:'1px 6px', borderRadius:3 }}>{catDisplay}</span>
+                </div>
+              </div>
+
+              {/* Above/below badge */}
+              {above !== null && (
+                <span style={{
+                  fontSize:11, fontWeight:600, padding:'3px 9px', borderRadius:20, flexShrink:0,
+                  background: above ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
+                  color: above ? '#10B981' : '#EF4444',
+                  border: `1px solid ${above?'rgba(16,185,129,0.2)':'rgba(239,68,68,0.2)'}`,
+                }}>
+                  {above ? '↑ above avg' : '↓ below avg'}
+                </span>
+              )}
+
+              {/* Return */}
+              <div style={{ textAlign:'right', flexShrink:0, minWidth:64 }}>
+                {retNum != null ? (
+                  <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color: retNum>=0 ? '#10B981' : '#EF4444' }}>
+                    {retNum>=0?'+':''}{retNum.toFixed(2)}%
+                  </div>
+                ) : <div style={{ fontSize:13, color:'var(--text-muted)' }}>—</div>}
+                <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:1 }}>{sortLbl} return</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

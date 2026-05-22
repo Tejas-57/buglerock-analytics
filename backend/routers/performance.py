@@ -5,7 +5,6 @@ from services.db_service import get_fund_snapshot, get_benchmark_for_category, g
 from services.mfapi import fetch_nav_history, build_chart_data
 from services.gmail_watcher import fetch_and_store
 from utils.trading_calendar import resolve_user_date
-import asyncio
 
 router = APIRouter()
 
@@ -48,41 +47,83 @@ async def nav_chart(
     category: str = Query(None),
     date: str = Query(None),
 ):
-    """Fetch historical NAV from MFAPI and optionally benchmark from Yahoo Finance."""
-    from utils.benchmark_tickers import get_ticker_for_benchmark, BENCHMARK_ENABLED_ASSET_CLASSES
+    from utils.benchmark_tickers import (
+        get_nse_index_for_benchmark,
+        get_yahoo_ticker_for_benchmark,
+        BENCHMARK_ENABLED_ASSET_CLASSES,
+    )
+    from services.nse_fetch import fetch_nse_index_history
     from services.mfapi import fetch_yahoo_history
-    from services.db_service import get_benchmark_for_category
-    from utils.trading_calendar import resolve_user_date
-    import asyncio
 
     try:
-        # Fetch fund NAV from MFAPI
         nav_data = await fetch_nav_history(amfi_code)
-
-        # Fetch benchmark from Yahoo only for equity asset classes
-        benchmark_nav = None
-        benchmark_name = None
-        yahoo_ticker = None
-
-        if asset_class in BENCHMARK_ENABLED_ASSET_CLASSES and category:
-            d = resolve_user_date(
-                date_type.fromisoformat(date) if date else date_type.today()
-            )
-            bm = get_benchmark_for_category(category, d)
-            if bm and bm.get("name"):
-                benchmark_name = bm["name"]
-                yahoo_ticker = get_ticker_for_benchmark(benchmark_name)
-                if yahoo_ticker:
-                    benchmark_nav = await fetch_yahoo_history(yahoo_ticker)
-
-        chart_data, warning, performance = build_chart_data(nav_data, period, benchmark_nav)
-        return {
-            "data": chart_data,
-            "warning": warning,
-            "period": period,
-            "performance": performance,
-            "benchmark_name": benchmark_name,
-            "benchmark_ticker": yahoo_ticker,
-        }
     except Exception as e:
-        raise HTTPException(500, f"Failed to fetch NAV data: {str(e)}")
+        raise HTTPException(500, f"Failed to fetch NAV: {e}")
+
+    benchmark_nav  = None
+    benchmark_name = None
+    data_source    = None
+
+    if asset_class in BENCHMARK_ENABLED_ASSET_CLASSES and category:
+        d = resolve_user_date(
+            date_type.fromisoformat(date) if date else date_type.today()
+        )
+        bm = get_benchmark_for_category(category, d)
+
+        if bm and bm.get("name"):
+            benchmark_name = bm["name"]
+
+            # Try NSE India first (TR index)
+            nse_index = get_nse_index_for_benchmark(benchmark_name)
+            if nse_index:
+                try:
+                    benchmark_nav = await fetch_nse_index_history(nse_index)
+                    if benchmark_nav:
+                        data_source = f"NSE India TRI"
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"NSE fetch failed: {e}")
+                    benchmark_nav = None
+
+            # Fallback to Yahoo Finance for international indices
+            if not benchmark_nav:
+                yahoo_ticker = get_yahoo_ticker_for_benchmark(benchmark_name)
+                if yahoo_ticker:
+                    try:
+                        benchmark_nav = await fetch_yahoo_history(yahoo_ticker)
+                        if benchmark_nav:
+                            data_source = "Yahoo Finance PR"
+                    except Exception:
+                        benchmark_nav = None
+
+    chart_data, warning, performance = build_chart_data(nav_data, period, benchmark_nav)
+
+    bm_disclaimer = None
+    if data_source == "NSE India TRI":
+        bm_disclaimer = f"Benchmark: {benchmark_name} — Total Return Index (NSE India)"
+    elif data_source == "Yahoo Finance PR":
+        bm_disclaimer = f"Benchmark shows Price Return (Yahoo Finance) — excludes dividends, may differ from Morningstar TR"
+
+    return {
+        "data":           chart_data,
+        "warning":        warning,
+        "period":         period,
+        "performance":    performance,
+        "benchmark_name": benchmark_name,
+        "data_source":    data_source,
+        "bm_disclaimer":  bm_disclaimer,
+    }
+
+
+@router.get("/peer-avg")
+def peer_avg_only(category: str, asset_class: str, date: str = Query(None)):
+    """Return peer average for a category without needing a specific fund ISIN."""
+    from utils.trading_calendar import resolve_user_date
+    d = resolve_user_date(date_type.fromisoformat(date) if date else date_type.today())
+    benchmark = get_benchmark_for_category(category, d)
+    peer_avg = get_peer_avg(category, d, asset_class)
+    return {
+        "benchmark": benchmark,
+        "peer_avg": peer_avg,
+        "date": str(d),
+    }

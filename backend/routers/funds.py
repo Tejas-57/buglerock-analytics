@@ -42,9 +42,13 @@ def categories(asset_class: str, date: str = Query(None)):
 
 
 @router.get("/list")
-def fund_list(asset_class: str, category: str, date: str = Query(None)):
+def fund_list(asset_class: str, category: str, date: str = Query(None), all: bool = Query(False)):
     d = resolve_date(date)
-    funds = get_funds_for_dropdown(d, asset_class, category)
+    if all:
+        from services.db_service import get_all_funds_for_dropdown
+        funds = get_all_funds_for_dropdown(d, asset_class, category)
+    else:
+        funds = get_funds_for_dropdown(d, asset_class, category)
     return {"funds": funds, "date": str(d)}
 
 

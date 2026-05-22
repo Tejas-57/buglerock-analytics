@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Navbar from './components/Layout/Navbar';
 import Header from './components/Layout/Header';
+import FundExplorer from './components/FundExplorer/FundExplorer';
 import Home from './components/Home/Home';
 import Performance from './components/Performance/Performance';
 import PeerComparison from './components/PeerComparison/PeerComparison';
@@ -15,21 +16,15 @@ function loadFromStorage(key, fallback) {
   try {
     const val = localStorage.getItem(key);
     return val !== null ? JSON.parse(val) : fallback;
-  } catch {
-    return fallback;
-  }
+  } catch { return fallback; }
 }
 
 function saveToStorage(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
 
 function toDateStr(date) {
-  return date instanceof Date
-    ? date.toISOString().split('T')[0]
-    : date;
+  return date instanceof Date ? date.toISOString().split('T')[0] : date;
 }
 
 export default function App() {
@@ -42,48 +37,30 @@ export default function App() {
     return loadFromStorage('br_selected_fund', null);
   });
 
-  // On mount — resolve the correct date to use
-  useEffect(() => {
-    resolveDate(selectedDate);
-  }, []);
+  useEffect(() => { resolveDate(selectedDate); }, []);
 
-  // Whenever date changes, check if data exists — if not, fall back to latest available
   const resolveDate = (date) => {
     const dateStr = toDateStr(date);
     fetch(`/api/funds/asset-classes?date=${dateStr}`)
       .then(r => r.json())
       .then(d => {
         if (d.asset_classes && d.asset_classes.length > 0) {
-          // Data exists for this date — use it
           setSelectedDate(date);
           saveToStorage('br_selected_date', date instanceof Date ? date.toISOString() : new Date(date).toISOString());
         } else {
-          // No data for this date — fall back to latest available
-          fetch('/api/status')
-            .then(r => r.json())
-            .then(s => {
-              if (s.data_as_of) {
-                const fallback = new Date(s.data_as_of + 'T12:00:00');
-                setSelectedDate(fallback);
-                saveToStorage('br_selected_date', fallback.toISOString());
-              }
-            })
-            .catch(() => {});
+          fetch('/api/status').then(r => r.json()).then(s => {
+            if (s.data_as_of) {
+              const fallback = new Date(s.data_as_of + 'T12:00:00');
+              setSelectedDate(fallback);
+              saveToStorage('br_selected_date', fallback.toISOString());
+            }
+          }).catch(() => {});
         }
-      })
-      .catch(() => {});
+      }).catch(() => {});
   };
 
-  const handleDateChange = (date) => {
-    // Optimistically set the date, then resolve
-    setSelectedDate(date);
-    resolveDate(date);
-  };
-
-  const handleFundSelect = (fund) => {
-    setSelectedFund(fund);
-    saveToStorage('br_selected_fund', fund);
-  };
+  const handleDateChange = (date) => { setSelectedDate(date); resolveDate(date); };
+  const handleFundSelect = (fund) => { setSelectedFund(fund); saveToStorage('br_selected_fund', fund); };
 
   return (
     <Router>
@@ -93,7 +70,10 @@ export default function App() {
           <Header selectedDate={selectedDate} onDateChange={handleDateChange} />
           <main className="app-main">
             <Routes>
-              <Route path="/" element={<Navigate to="/home" replace />} />
+              <Route path="/" element={<Navigate to="/fund-explorer" replace />} />
+              <Route path="/fund-explorer" element={
+                <FundExplorer selectedDate={selectedDate} setSelectedFund={handleFundSelect} />
+              } />
               <Route path="/home" element={
                 <Home selectedDate={selectedDate} selectedFund={selectedFund} setSelectedFund={handleFundSelect} />
               } />

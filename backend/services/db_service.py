@@ -438,3 +438,36 @@ def get_fund_inception_date_by_amfi(amfi_code: str):
         return None
     finally:
         db.close()
+
+
+def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> list:
+    """Return ALL funds sorted by rank order: R1, R2, R3, R4, R5, then unranked/0."""
+    db = get_session()
+    RANK_ORDER = {'R1': 1, 'R2': 2, 'R3': 3, 'R4': 4, 'R5': 5}
+    try:
+        funds = db.query(
+            DailyFundData.isin,
+            DailyFundData.name,
+            DailyFundData.ranking,
+            DailyFundData.amfi_code,
+            DailyFundData.return_1y,
+            DailyFundData.return_3y,
+        ).filter(
+            DailyFundData.data_date == data_date,
+            DailyFundData.asset_class == asset_class,
+            DailyFundData.category == category,
+            DailyFundData.isin.isnot(None),
+        ).all()
+
+        result = [{"isin": f.isin, "name": f.name, "ranking": f.ranking,
+                   "amfi_code": f.amfi_code, "return_1y": f.return_1y,
+                   "return_3y": f.return_3y} for f in funds]
+
+        def sort_key(f):
+            r = f.get("ranking") or ""
+            return (RANK_ORDER.get(r, 99), -(f.get("return_1y") or -999))
+
+        result.sort(key=sort_key)
+        return result
+    finally:
+        db.close()
