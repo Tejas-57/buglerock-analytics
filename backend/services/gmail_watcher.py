@@ -27,9 +27,20 @@ from services.db_service import save_parsed_data, log_email_fetch
 
 logger = logging.getLogger(__name__)
 
-SCOPES             = ["https://www.googleapis.com/auth/gmail.readonly"]
-CREDENTIALS_PATH   = "credentials/gmail_credentials.json"
-TOKEN_PATH         = "credentials/gmail_token.json"
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+# Check Render secret files first, fall back to local credentials folder
+CREDENTIALS_PATH = (
+    "/etc/secrets/gmail_credentials.json"
+    if Path("/etc/secrets/gmail_credentials.json").exists()
+    else "credentials/gmail_credentials.json"
+)
+TOKEN_PATH = (
+    "/etc/secrets/gmail_token.json"
+    if Path("/etc/secrets/gmail_token.json").exists()
+    else "credentials/gmail_token.json"
+)
+
 GMAIL_SENDER       = "sujaya.l@alerts-morningstar.com"
 SUBJECT_KEYWORD    = "New Singlesheet Daily MF Report"
 ATTACHMENT_KEYWORD = "New_Singlesheet_Daily_MF_Report"
@@ -45,8 +56,12 @@ def get_gmail_service():
         else:
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
             creds = flow.run_local_server(port=0)
-        with open(TOKEN_PATH, "w") as f:
-            f.write(creds.to_json())
+        # Only write token if path is writable (won't work on Render /etc/secrets)
+        try:
+            with open(TOKEN_PATH, "w") as f:
+                f.write(creds.to_json())
+        except OSError:
+            logger.warning(f"Could not write token to {TOKEN_PATH} — read-only path")
     return build("gmail", "v1", credentials=creds)
 
 
@@ -114,7 +129,6 @@ def fetch_and_store(data_date: date) -> bool:
         logger.warning(f"No .xlsx attachment found in email {messages[0]['id']}")
         return False
 
-    # Save to temp file — close before parsing (Windows requirement)
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
     try:
         tmp.write(file_bytes)
