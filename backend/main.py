@@ -31,6 +31,7 @@ app.include_router(simulator.router,   prefix="/api/simulator")
 app.include_router(rolling.router,     prefix="/api/rolling")
 app.include_router(chat.router,        prefix="/api/chat")
 app.include_router(funds.router,       prefix="/api/funds")
+app.include_router(gmail.router,       prefix="/api/gmail")
 
 
 async def gmail_poll_loop():
@@ -71,3 +72,4 @@ def health():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("APP_PORT", 8000)), reload=True)
+    
