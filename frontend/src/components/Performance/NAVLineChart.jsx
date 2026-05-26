@@ -54,7 +54,7 @@ export default function NAVLineChart({ fund, selectedDate }) {
       ...(fund.category   && { category: fund.category }),
       ...(dateStr         && { date: dateStr }),
     });
-    fetch(`/api/performance/nav-chart?${params}`)
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/performance/nav-chart?${params}`)
       .then(r => r.json())
       .then(d => {
         setChartData(d.data || []);

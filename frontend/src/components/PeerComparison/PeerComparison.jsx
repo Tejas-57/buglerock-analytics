@@ -30,7 +30,7 @@ export default function PeerComparison({ selectedDate, selectedFund }) {
     setLoading(true);
     setError(null);
     const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
-    fetch(`/api/peer/comparison?isin=${selectedFund.isin}&category=${encodeURIComponent(selectedFund.category)}&asset_class=${encodeURIComponent(selectedFund.assetClass)}&date=${dateStr}`)
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/peer/comparison?isin=${selectedFund.isin}&category=${encodeURIComponent(selectedFund.category)}&asset_class=${encodeURIComponent(selectedFund.assetClass)}&date=${dateStr}`)
       .then(r => r.json())
       .then(d => { setPeerData(d); setLoading(false); })
       .catch(() => { setError('Failed to load peer data.'); setLoading(false); });

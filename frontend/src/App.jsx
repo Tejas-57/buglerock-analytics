@@ -41,14 +41,14 @@ export default function App() {
 
   const resolveDate = (date) => {
     const dateStr = toDateStr(date);
-    fetch(`/api/funds/asset-classes?date=${dateStr}`)
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/asset-classes?date=${dateStr}`)
       .then(r => r.json())
       .then(d => {
         if (d.asset_classes && d.asset_classes.length > 0) {
           setSelectedDate(date);
           saveToStorage('br_selected_date', date instanceof Date ? date.toISOString() : new Date(date).toISOString());
         } else {
-          fetch('/api/status').then(r => r.json()).then(s => {
+          fetch(`${process.env.REACT_APP_API_URL || ''}/api/status`).then(r => r.json()).then(s => {
             if (s.data_as_of) {
               const fallback = new Date(s.data_as_of + 'T12:00:00');
               setSelectedDate(fallback);

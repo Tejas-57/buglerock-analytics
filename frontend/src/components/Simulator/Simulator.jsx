@@ -44,7 +44,7 @@ export default function Simulator({ selectedFund }) {
       ...(mode === 'sip' ? { sip_date: sipDate } : {}),
     });
 
-    fetch(`/api/simulator/run?${params}`)
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/simulator/run?${params}`)
       .then(r => r.json())
       .then(d => { setResult(d); setLoading(false); })
       .catch(() => { setError('Simulation failed. Please check inputs.'); setLoading(false); });

@@ -14,7 +14,7 @@ export default function Home({ selectedDate, selectedFund, setSelectedFund }) {
     setLoading(true);
     setError(null);
     const dateStr = selectedDate.toISOString().split('T')[0];
-    fetch(`/api/home/snapshot?isin=${selectedFund.isin}&date=${dateStr}`)
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/home/snapshot?isin=${selectedFund.isin}&date=${dateStr}`)
       .then(r => r.json())
       .then(d => { setSnapshotData(d); setLoading(false); })
       .catch(e => { setError('Failed to load fund data.'); setLoading(false); });

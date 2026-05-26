@@ -30,11 +30,11 @@ export default function ChatButton({ selectedFund, selectedDate }) {
 
     Promise.allSettled([
       // Home snapshot
-      fetch(`/api/home/snapshot?isin=${isin}&date=${dateStr}`).then(r => r.json()),
+      fetch(`${process.env.REACT_APP_API_URL || ''}/api/home/snapshot?isin=${isin}&date=${dateStr}`).then(r => r.json()),
       // Performance metrics (returns + benchmark + peer avg)
-      fetch(`/api/performance/metrics?isin=${isin}&category=${category}&asset_class=${assetClass}&date=${dateStr}`).then(r => r.json()),
+      fetch(`${process.env.REACT_APP_API_URL || ''}/api/performance/metrics?isin=${isin}&category=${category}&asset_class=${assetClass}&date=${dateStr}`).then(r => r.json()),
       // Peer comparison
-      fetch(`/api/peer/comparison?isin=${isin}&category=${category}&asset_class=${assetClass}&date=${dateStr}`).then(r => r.json()),
+      fetch(`${process.env.REACT_APP_API_URL || ''}/api/peer/comparison?isin=${isin}&category=${category}&asset_class=${assetClass}&date=${dateStr}`).then(r => r.json()),
     ]).then(([snapRes, perfRes, peerRes]) => {
       setFullContext({
         snapshot:    snapRes.status === 'fulfilled' ? snapRes.value : null,
@@ -54,7 +54,7 @@ export default function ChatButton({ selectedFund, selectedDate }) {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/chat/ask', {
+      const res = await fetch(`${process.env.REACT_APP_API_URL || ''}/api/chat/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

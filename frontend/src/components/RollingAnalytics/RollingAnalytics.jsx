@@ -49,7 +49,7 @@ export default function RollingAnalytics({ selectedFund }) {
       end_date: endDate,
     });
 
-    fetch(`/api/rolling/analysis?${params}`)
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/rolling/analysis?${params}`)
       .then(r => r.json())
       .then(d => {
         if (d.error === 'insufficient_data') {

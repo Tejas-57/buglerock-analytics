@@ -16,7 +16,7 @@ export default function FundSelector({ onFundSelect, selectedFund, selectedDate 
 
   // Fetch asset classes when date changes — but don't reset fund selection
   useEffect(() => {
-    fetch(`/api/funds/asset-classes?date=${dateStr}`)
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/asset-classes?date=${dateStr}`)
       .then(r => r.json())
       .then(d => setAssetClasses(d.asset_classes || []))
       .catch(() => {});
@@ -25,7 +25,7 @@ export default function FundSelector({ onFundSelect, selectedFund, selectedDate 
   // Fetch categories when asset changes or date changes
   useEffect(() => {
     if (!selectedAsset) { setCategories([]); return; }
-    fetch(`/api/funds/categories?asset_class=${encodeURIComponent(selectedAsset)}&date=${dateStr}`)
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/categories?asset_class=${encodeURIComponent(selectedAsset)}&date=${dateStr}`)
       .then(r => r.json())
       .then(d => setCategories(d.categories || []))
       .catch(() => {});
@@ -34,7 +34,7 @@ export default function FundSelector({ onFundSelect, selectedFund, selectedDate 
   // Fetch funds when category changes or date changes
   useEffect(() => {
     if (!selectedAsset || !selectedCategory) { setFunds([]); return; }
-    fetch(`/api/funds/list?asset_class=${encodeURIComponent(selectedAsset)}&category=${encodeURIComponent(selectedCategory)}&date=${dateStr}`)
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/list?asset_class=${encodeURIComponent(selectedAsset)}&category=${encodeURIComponent(selectedCategory)}&date=${dateStr}`)
       .then(r => r.json())
       .then(d => setFunds(d.funds || []))
       .catch(() => {});

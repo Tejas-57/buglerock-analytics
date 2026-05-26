@@ -133,7 +133,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     if (!subtypeItem || !dateStr) return;
     // Fetch actual categories from API to filter out empty ones
     const ac = subtypeItem.asset_classes[0];
-    fetch(`/api/funds/categories?asset_class=${encodeURIComponent(ac)}&date=${dateStr}`)
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/categories?asset_class=${encodeURIComponent(ac)}&date=${dateStr}`)
       .then(r => r.json())
       .then(d => {
         const cats = new Set((d.categories || []).map(normCat));
@@ -154,8 +154,8 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     const ac = subtypeItem.asset_classes[0];
     const catNorm = normCat(selectedCat);
     Promise.all([
-      fetch(`/api/funds/list?asset_class=${encodeURIComponent(ac)}&category=${encodeURIComponent(catNorm)}&date=${dateStr}&all=true`).then(r=>r.json()),
-      fetch(`/api/performance/peer-avg?category=${encodeURIComponent(catNorm)}&asset_class=${encodeURIComponent(ac)}&date=${dateStr}`).then(r=>r.json()).catch(()=>null),
+      fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/list?asset_class=${encodeURIComponent(ac)}&category=${encodeURIComponent(catNorm)}&date=${dateStr}&all=true`).then(r=>r.json()),
+      fetch(`${process.env.REACT_APP_API_URL || ''}/api/performance/peer-avg?category=${encodeURIComponent(catNorm)}&asset_class=${encodeURIComponent(ac)}&date=${dateStr}`).then(r=>r.json()).catch(()=>null),
     ]).then(([fd, pd]) => {
       setAllFunds(fd.funds || []);
       setPeerAvg1y(pd?.peer_avg?.returns?.['1y'] ?? null);

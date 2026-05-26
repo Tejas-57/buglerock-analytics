@@ -16,7 +16,7 @@ export default function Performance({ selectedDate, selectedFund }) {
     setLoading(true);
     setError(null);
     const dateStr = selectedDate.toISOString().split('T')[0];
-    fetch(`/api/performance/metrics?isin=${selectedFund.isin}&date=${dateStr}&category=${encodeURIComponent(selectedFund.category)}&asset_class=${encodeURIComponent(selectedFund.assetClass)}`)
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/performance/metrics?isin=${selectedFund.isin}&date=${dateStr}&category=${encodeURIComponent(selectedFund.category)}&asset_class=${encodeURIComponent(selectedFund.assetClass)}`)
       .then(r => r.json())
       .then(d => { setPerfData(d); setLoading(false); })
       .catch(() => { setError('Failed to load performance data.'); setLoading(false); });
