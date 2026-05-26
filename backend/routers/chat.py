@@ -3,12 +3,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import os
-from google import genai
+import google.generativeai as genai
 
 router = APIRouter()
 
 _api_key = os.getenv("GEMINI_API_KEY")
-_client = genai.Client(api_key=_api_key) if _api_key else None
+if _api_key:
+    genai.configure(api_key=_api_key)
 
 MODEL = "gemini-2.5-flash"
 
@@ -119,12 +120,11 @@ def build_context_prompt(fc: dict, date: str) -> str:
         f"Large Cap: {f(snap.get('large_cap'))}%  Mid Cap: {f(snap.get('mid_cap'))}%  Small Cap: {f(snap.get('small_cap'))}%",
     ]
 
-    # Add peer comparison
     if peers:
         lines.append("")
         lines.append(f"--- Peer Funds in Category ({len(peers)} R1/R2 funds) ---")
         lines.append(f"{'Fund':<35} {'Rank':>5} {'1Y':>8} {'3Y':>8} {'5Y':>8} {'Sharpe':>8}")
-        for p in peers[:10]:  # limit to 10 peers
+        for p in peers[:10]:
             pr = (p.get('returns') or {})
             pk = (p.get('risk') or {})
             lines.append(
@@ -142,17 +142,15 @@ def build_context_prompt(fc: dict, date: str) -> str:
 
 @router.post("/ask")
 async def ask_gemini(request: ChatRequest):
-    if not _client:
+    if not _api_key:
         raise HTTPException(503, "AI service not configured. Please set GEMINI_API_KEY in .env file.")
 
     context_block = build_context_prompt(request.fund_context, request.date)
     full_prompt = f"{SYSTEM_CONTEXT}\n\n{context_block}\n\nUser question: {request.message}"
 
     try:
-        response = _client.models.generate_content(
-            model=MODEL,
-            contents=full_prompt,
-        )
+        model = genai.GenerativeModel(MODEL)
+        response = model.generate_content(full_prompt)
         return {"response": response.text}
     except Exception as e:
         raise HTTPException(500, f"AI response failed: {str(e)}")
