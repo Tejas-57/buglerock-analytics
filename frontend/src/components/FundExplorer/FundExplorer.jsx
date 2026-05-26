@@ -47,7 +47,7 @@ const ASSET_STRUCTURE = [
   {
     id:'sif', label:'SIF', icon:'🔬',
     subtypes:[{ id:'sif_all', label:'All SIF', asset_classes:['SIF'], groups:[
-      { label:'SIF', cats:['Cat: SIF','India Fund Hybrid Long-Short Fund'] },
+      {  label:'SIF', cats:['Cat: SIF','India Fund Hybrid Long-Short Fund','India Fund Equity Ex-Top 100 Long-Short Fund','India Fund Equity Long-Short Fund'] },
     ]}],
   },
   {
