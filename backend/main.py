@@ -8,7 +8,7 @@ from datetime import date
 
 load_dotenv()
 
-from routers import home, performance, peer, simulator, rolling, chat, status, funds
+from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail
 from models.database import init_db
 
 logger = logging.getLogger(__name__)

@@ -30,6 +30,15 @@ def init_db():
     Base.metadata.create_all(bind=engine)
 
 
+class AppSettings(Base):
+    """Key-value store for app configuration — used to persist Gmail token."""
+    __tablename__ = "app_settings"
+
+    key        = Column(String(100), primary_key=True)
+    value      = Column(Text, nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class DailyFundData(Base):
     __tablename__ = "daily_fund_data"
 

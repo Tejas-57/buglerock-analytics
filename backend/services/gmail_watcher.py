@@ -1,16 +1,11 @@
 """
 gmail_watcher.py
 Fetches the daily Morningstar email and parses the attachment.
-
-New template:
-  Sender:  sujaya.l@alerts-morningstar.com
-  Subject: New Singlesheet Daily MF Report
-  File:    New_Singlesheet_Daily_MF_Report_DDMMYYYY.xlsx
-
-No historical fetching — daily only.
+Token is stored in PostgreSQL DB — works permanently on Render.
 """
 
 import os
+import json
 import base64
 import tempfile
 import logging
@@ -18,55 +13,105 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
 from services.parser import parse_excel_file
-from services.db_service import save_parsed_data, log_email_fetch
+from services.db_service import save_parsed_data, log_email_fetch, get_setting, set_setting
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SCOPES             = ["https://www.googleapis.com/auth/gmail.readonly"]
+GMAIL_SENDER       = "sujaya.l@alerts-morningstar.com"
+SUBJECT_KEYWORD    = "New Singlesheet Daily MF Report"
+ATTACHMENT_KEYWORD = "New_Singlesheet_Daily_MF_Report"
 
-# Check Render secret files first, fall back to local credentials folder
+# DB key for storing token
+TOKEN_DB_KEY = "gmail_token"
+
+# Fallback file paths (local dev)
 CREDENTIALS_PATH = (
     "/etc/secrets/gmail_credentials.json"
     if Path("/etc/secrets/gmail_credentials.json").exists()
     else "credentials/gmail_credentials.json"
 )
-TOKEN_PATH = (
+TOKEN_FILE_PATH = (
     "/etc/secrets/gmail_token.json"
     if Path("/etc/secrets/gmail_token.json").exists()
     else "credentials/gmail_token.json"
 )
 
-GMAIL_SENDER       = "sujaya.l@alerts-morningstar.com"
-SUBJECT_KEYWORD    = "New Singlesheet Daily MF Report"
-ATTACHMENT_KEYWORD = "New_Singlesheet_Daily_MF_Report"
+
+def _load_token_json() -> str | None:
+    """Load token JSON string — DB first, then file fallback."""
+    # Try DB first
+    try:
+        val = get_setting(TOKEN_DB_KEY)
+        if val:
+            logger.info("Gmail token loaded from DB")
+            return val
+    except Exception as e:
+        logger.warning(f"Could not load token from DB: {e}")
+
+    # Fall back to file
+    if Path(TOKEN_FILE_PATH).exists():
+        logger.info(f"Gmail token loaded from file: {TOKEN_FILE_PATH}")
+        return Path(TOKEN_FILE_PATH).read_text()
+
+    return None
+
+
+def _save_token_json(token_json: str):
+    """Save token JSON string to DB (and file if writable)."""
+    try:
+        set_setting(TOKEN_DB_KEY, token_json)
+        logger.info("Gmail token saved to DB")
+    except Exception as e:
+        logger.error(f"Could not save token to DB: {e}")
+
+    # Also try file (works locally, silently fails on Render)
+    try:
+        Path(TOKEN_FILE_PATH).write_text(token_json)
+    except OSError:
+        pass
 
 
 def get_gmail_service():
     creds = None
-    if Path(TOKEN_PATH).exists():
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+    token_json = _load_token_json()
+
+    if token_json:
+        creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
+
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
+            logger.info("Refreshing Gmail token...")
             creds.refresh(Request())
+            _save_token_json(creds.to_json())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-            creds = flow.run_local_server(port=0)
-        # Only write token if path is writable (won't work on Render /etc/secrets)
-        try:
-            with open(TOKEN_PATH, "w") as f:
-                f.write(creds.to_json())
-        except OSError:
-            logger.warning(f"Could not write token to {TOKEN_PATH} — read-only path")
+            raise RuntimeError(
+                "No valid Gmail token found. Run the auth flow locally first: "
+                "POST /api/gmail/init-auth"
+            )
+
     return build("gmail", "v1", credentials=creds)
 
 
+def store_token_from_file(token_path: str = None):
+    """
+    One-time utility: read token from file and store in DB.
+    Call this after doing the OAuth flow locally.
+    """
+    path = token_path or TOKEN_FILE_PATH
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Token file not found: {path}")
+    token_json = Path(path).read_text()
+    _save_token_json(token_json)
+    logger.info(f"Token from {path} stored in DB successfully")
+    return True
+
+
 def search_emails_for_date(service, target_date: date) -> list:
-    """Search Gmail for the daily report email sent on target_date."""
     after  = target_date.strftime("%Y/%m/%d")
     before = (target_date + timedelta(days=1)).strftime("%Y/%m/%d")
     query  = (
@@ -81,10 +126,6 @@ def search_emails_for_date(service, target_date: date) -> list:
 
 
 def download_attachment(service, message_id: str) -> tuple:
-    """
-    Download the .xlsx attachment from a Gmail message.
-    Returns (file_bytes, file_name) or (None, None).
-    """
     msg = service.users().messages().get(
         userId="me", id=message_id, format="full"
     ).execute()
@@ -106,11 +147,6 @@ def download_attachment(service, message_id: str) -> tuple:
 
 
 def fetch_and_store(data_date: date) -> bool:
-    """
-    Fetch today's email and store parsed data.
-    Email date = data_date + 1 calendar day (Morningstar sends next day).
-    Returns True if data was successfully loaded, False otherwise.
-    """
     email_date = data_date + timedelta(days=1)
 
     try:

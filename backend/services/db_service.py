@@ -471,3 +471,30 @@ def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> li
         return result
     finally:
         db.close()
+
+# ── App Settings (Gmail token storage) ──────────────────────────────────────
+
+def get_setting(key: str) -> str | None:
+    """Get a setting value from the DB."""
+    db = get_session()
+    try:
+        from models.database import AppSettings
+        row = db.query(AppSettings).filter(AppSettings.key == key).first()
+        return row.value if row else None
+    finally:
+        db.close()
+
+
+def set_setting(key: str, value: str):
+    """Upsert a setting value in the DB."""
+    db = get_session()
+    try:
+        from models.database import AppSettings
+        row = db.query(AppSettings).filter(AppSettings.key == key).first()
+        if row:
+            row.value = value
+        else:
+            db.add(AppSettings(key=key, value=value))
+        db.commit()
+    finally:
+        db.close()
