@@ -35,27 +35,25 @@ app.include_router(gmail.router,       prefix="/api/gmail")
 
 
 async def gmail_poll_loop():
-    """Poll Gmail every 30 minutes for today's Morningstar report."""
-    from services.db_service import has_data_for_date
-    from services.gmail_watcher import fetch_and_store
+    """
+    Poll Gmail every 5 minutes for the latest Morningstar report.
+    Checks today and up to 3 days back so we never miss an email.
+    """
+    from services.gmail_watcher import fetch_latest
 
     while True:
         try:
-            today = date.today()
-            if not has_data_for_date(today):
-                logger.info(f"Gmail poll: checking for data on {today}...")
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, fetch_and_store, today)
-                if result:
-                    logger.info(f"Gmail poll: data loaded for {today}")
-                else:
-                    logger.info(f"Gmail poll: no email found yet for {today}")
+            logger.info("Gmail poll: checking for latest data...")
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, fetch_latest, 3)
+            if result:
+                logger.info("Gmail poll: new data loaded successfully")
             else:
-                logger.info(f"Gmail poll: data already present for {today}")
+                logger.info("Gmail poll: no new data found")
         except Exception as e:
             logger.error(f"Gmail poll error: {e}", exc_info=True)
 
-        await asyncio.sleep(30 * 60)  # poll every 30 minutes
+        await asyncio.sleep(5 * 60)  # poll every 5 minutes
 
 
 @app.on_event("startup")
@@ -72,4 +70,3 @@ def health():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("APP_PORT", 8000)), reload=True)
-    

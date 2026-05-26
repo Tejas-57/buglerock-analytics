@@ -1,7 +1,14 @@
 """
 gmail_watcher.py
 Fetches the daily Morningstar email and parses the attachment.
-Token is stored in PostgreSQL DB — works permanently on Render.
+
+Email logic:
+  - Email arrives on day X containing data as of day X-1
+  - We search Gmail for TODAY's email
+  - data_date = today - 1 day
+  - If today's email not found, the latest data in DB is shown (fallback)
+
+Token stored permanently in PostgreSQL DB.
 """
 
 import os
@@ -25,9 +32,7 @@ SCOPES             = ["https://www.googleapis.com/auth/gmail.readonly"]
 GMAIL_SENDER       = "sujaya.l@alerts-morningstar.com"
 SUBJECT_KEYWORD    = "New Singlesheet Daily MF Report"
 ATTACHMENT_KEYWORD = "New_Singlesheet_Daily_MF_Report"
-
-# DB key for storing token
-TOKEN_DB_KEY = "gmail_token"
+TOKEN_DB_KEY       = "gmail_token"
 
 # Fallback file paths (local dev)
 CREDENTIALS_PATH = (
@@ -43,33 +48,25 @@ TOKEN_FILE_PATH = (
 
 
 def _load_token_json() -> str | None:
-    """Load token JSON string — DB first, then file fallback."""
-    # Try DB first
+    """Load token JSON — DB first, then file fallback."""
     try:
         val = get_setting(TOKEN_DB_KEY)
         if val:
-            logger.info("Gmail token loaded from DB")
             return val
     except Exception as e:
         logger.warning(f"Could not load token from DB: {e}")
-
-    # Fall back to file
     if Path(TOKEN_FILE_PATH).exists():
-        logger.info(f"Gmail token loaded from file: {TOKEN_FILE_PATH}")
         return Path(TOKEN_FILE_PATH).read_text()
-
     return None
 
 
 def _save_token_json(token_json: str):
-    """Save token JSON string to DB (and file if writable)."""
+    """Save token JSON to DB (and file if writable)."""
     try:
         set_setting(TOKEN_DB_KEY, token_json)
         logger.info("Gmail token saved to DB")
     except Exception as e:
         logger.error(f"Could not save token to DB: {e}")
-
-    # Also try file (works locally, silently fails on Render)
     try:
         Path(TOKEN_FILE_PATH).write_text(token_json)
     except OSError:
@@ -90,30 +87,26 @@ def get_gmail_service():
             _save_token_json(creds.to_json())
         else:
             raise RuntimeError(
-                "No valid Gmail token found. Run the auth flow locally first: "
-                "POST /api/gmail/init-auth"
+                "No valid Gmail token. Call POST /api/gmail/store-token first."
             )
 
     return build("gmail", "v1", credentials=creds)
 
 
 def store_token_from_file(token_path: str = None):
-    """
-    One-time utility: read token from file and store in DB.
-    Call this after doing the OAuth flow locally.
-    """
+    """One-time: read token from file and store in DB."""
     path = token_path or TOKEN_FILE_PATH
     if not Path(path).exists():
         raise FileNotFoundError(f"Token file not found: {path}")
     token_json = Path(path).read_text()
     _save_token_json(token_json)
-    logger.info(f"Token from {path} stored in DB successfully")
     return True
 
 
-def search_emails_for_date(service, target_date: date) -> list:
-    after  = target_date.strftime("%Y/%m/%d")
-    before = (target_date + timedelta(days=1)).strftime("%Y/%m/%d")
+def search_emails_for_date(service, email_date: date) -> list:
+    """Search Gmail for the Morningstar email sent on email_date."""
+    after  = email_date.strftime("%Y/%m/%d")
+    before = (email_date + timedelta(days=1)).strftime("%Y/%m/%d")
     query  = (
         f"from:{GMAIL_SENDER} "
         f"subject:{SUBJECT_KEYWORD} "
@@ -126,6 +119,7 @@ def search_emails_for_date(service, target_date: date) -> list:
 
 
 def download_attachment(service, message_id: str) -> tuple:
+    """Download .xlsx attachment. Returns (file_bytes, file_name) or (None, None)."""
     msg = service.users().messages().get(
         userId="me", id=message_id, format="full"
     ).execute()
@@ -146,8 +140,14 @@ def download_attachment(service, message_id: str) -> tuple:
     return None, None
 
 
-def fetch_and_store(data_date: date) -> bool:
-    email_date = data_date + timedelta(days=1)
+def fetch_latest(check_days: int = 3) -> bool:
+    """
+    Try to fetch the most recent available Morningstar email.
+    Checks today, yesterday, day before — up to check_days back.
+    Stores data_date = email_date - 1 day.
+    Returns True if new data was loaded.
+    """
+    from services.db_service import has_data_for_date
 
     try:
         service = get_gmail_service()
@@ -155,52 +155,69 @@ def fetch_and_store(data_date: date) -> bool:
         logger.error(f"Gmail auth failed: {e}")
         return False
 
-    messages = search_emails_for_date(service, email_date)
-    if not messages:
-        logger.info(f"No email found for email_date={email_date}")
-        return False
+    today = date.today()
+    for days_back in range(0, check_days):
+        email_date = today - timedelta(days=days_back)
+        data_date  = email_date - timedelta(days=1)
 
-    file_bytes, file_name = download_attachment(service, messages[0]["id"])
-    if not file_bytes:
-        logger.warning(f"No .xlsx attachment found in email {messages[0]['id']}")
-        return False
+        # Skip if we already have this data
+        if has_data_for_date(data_date):
+            logger.info(f"Data already present for {data_date}, skipping")
+            continue
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
-    try:
-        tmp.write(file_bytes)
-        tmp_path = tmp.name
-    finally:
-        tmp.close()
+        logger.info(f"Checking Gmail for email_date={email_date} (data_date={data_date})")
+        messages = search_emails_for_date(service, email_date)
+        if not messages:
+            logger.info(f"No email found for {email_date}")
+            continue
 
-    try:
-        parsed = parse_excel_file(
-            file_path=tmp_path,
-            data_date=str(data_date),
-            email_date=str(email_date),
-            file_name=file_name,
-        )
-        save_parsed_data(parsed)
-        log_email_fetch(
-            email_date=str(email_date),
-            data_date=str(data_date),
-            file_name=file_name,
-            status="success",
-            message=f"Parsed {len(parsed['funds'])} funds",
-        )
-        logger.info(f"Successfully loaded {len(parsed['funds'])} funds for {data_date}")
-        return True
-    except Exception as e:
-        logger.error(f"Parse/save failed for {data_date}: {e}", exc_info=True)
-        log_email_fetch(
-            email_date=str(email_date),
-            data_date=str(data_date),
-            file_name=file_name or "",
-            status="error",
-            message=str(e),
-        )
-        return False
-    finally:
+        file_bytes, file_name = download_attachment(service, messages[0]["id"])
+        if not file_bytes:
+            logger.warning(f"No .xlsx attachment in email {messages[0]['id']}")
+            continue
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
         try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+        finally:
+            tmp.close()
+
+        try:
+            parsed = parse_excel_file(
+                file_path=tmp_path,
+                data_date=str(data_date),
+                email_date=str(email_date),
+                file_name=file_name,
+            )
+            save_parsed_data(parsed)
+            log_email_fetch(
+                email_date=str(email_date),
+                data_date=str(data_date),
+                file_name=file_name,
+                status="success",
+                message=f"Parsed {len(parsed['funds'])} funds",
+            )
+            logger.info(f"Loaded {len(parsed['funds'])} funds for {data_date}")
+            return True
+        except Exception as e:
+            logger.error(f"Parse/save failed: {e}", exc_info=True)
+            log_email_fetch(
+                email_date=str(email_date),
+                data_date=str(data_date),
+                file_name=file_name or "",
+                status="error",
+                message=str(e),
+            )
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+    return False
+
+
+# Keep backward compat — used by funds.py ensure_todays_data
+def fetch_and_store(data_date: date) -> bool:
+    return fetch_latest(check_days=3)
