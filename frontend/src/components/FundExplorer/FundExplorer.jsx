@@ -310,7 +310,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
         <div style={{ display:'flex', gap:6 }}>
           {(() => {
             const noRankSubtypes = ['passive_index','passive_etf','debt_etf','global'];
-            const isPassive = noRankSubtypes.includes(subtypeItem?.id);
+            const isPassive = noRankSubtypes.includes(subtypeItem?.id) || !hasRankedFunds;
             if (isPassive) {
               return <span style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>All funds shown</span>;
             }
