@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
+// Normalize category name — remove spaces after colon for consistent matching
 function normCat(cat) {
   return cat ? cat.replace(/Cat:\s+/g, 'Cat: ').trim() : cat;
 }
@@ -73,6 +74,7 @@ const RANK_COLORS = {
   R4:{ bg:'rgba(239,68,68,0.08)',  color:'#EF4444', border:'rgba(239,68,68,0.2)' },
   R5:{ bg:'rgba(239,68,68,0.06)',  color:'#F87171', border:'rgba(239,68,68,0.15)' },
 };
+// Color pip per rank
 const PIP_COLORS = { R1:'#059669', R2:'#10B981', R3:'#6D5479', R4:'#F59E0B', R5:'#EF4444', default:'#A795AE' };
 
 function getRankOrder(r) { return !r || r==='-' || r==='0' ? 99 : (RANK_ORDER[r] || 98); }
@@ -102,14 +104,13 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     if (selectedCat) params.cat = selectedCat;
     setSearchParams(params, { replace: true });
   }, [selectedAsset, selectedSubtype, selectedCat]);
-
   const [sortBy, setSortBy]                   = useState(null);
   const [searchQuery, setSearchQuery]         = useState('');
   const [allFunds, setAllFunds]               = useState([]);
   const [peerAvg1y, setPeerAvg1y]             = useState(null);
   const [peerAvg3y, setPeerAvg3y]             = useState(null);
   const [loading, setLoading]                 = useState(false);
-  const [availableCats, setAvailableCats]     = useState(null);
+  const [availableCats, setAvailableCats]     = useState(null); // null = not loaded yet
 
   const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
   const assetItem   = ASSET_STRUCTURE.find(a => a.id === selectedAsset);
@@ -132,30 +133,31 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   }, [selectedAsset]);
 
   useEffect(() => {
+    // Default to All Funds for passive subtypes (no rankings)
     setShowWhitelisted(ACTIVE_SUBTYPES.includes(selectedSubtype));
   }, [selectedSubtype]);
 
   useEffect(() => {
+    // Auto-switch whitelist based on whether subtype has rankings
     const noRankSubtypes = ['passive_index','passive_etf','debt_etf','global'];
     if (subtypeItem) setShowWhitelisted(!noRankSubtypes.includes(subtypeItem.id));
   }, [selectedSubtype]);
 
   useEffect(() => {
     if (!subtypeItem || !dateStr) return;
+    // Fetch actual categories from API to filter out empty ones
     const ac = subtypeItem.asset_classes[0];
     fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/categories?asset_class=${encodeURIComponent(ac)}&date=${dateStr}`)
       .then(r => r.json())
       .then(d => {
         const cats = new Set((d.categories || []).map(normCat));
         setAvailableCats(cats);
-        // Only auto-select if no cat in URL
-        if (!searchParams.get('cat')) {
-          for (const group of subtypeItem.groups) {
-            const first = group.cats.find(c => cats.has(normCat(c)));
-            if (first) { setSelectedCat(first); return; }
-          }
-          setSelectedCat(null);
+        // Auto-select first available category
+        for (const group of subtypeItem.groups) {
+          const first = group.cats.find(c => cats.has(normCat(c)));
+          if (first) { setSelectedCat(first); return; }
         }
+        setSelectedCat(null);
       })
       .catch(() => setAvailableCats(null));
   }, [selectedSubtype, dateStr]);
@@ -176,12 +178,15 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     }).catch(() => setLoading(false));
   }, [selectedCat, selectedSubtype, dateStr]);
 
-  const isPassiveSubtype = ['passive_index','passive_etf','debt_etf','global','sif_all','hybrid_all','debt_mf'].includes(selectedSubtype);
+  // Passive subtypes never have rankings — hide whitelist toggle
+  const isPassiveSubtype = ['passive_index','passive_etf','debt_etf','global'].includes(selectedSubtype);
 
+  // Check if current category has any ranked funds at all
   const hasRankedFunds = useMemo(() => {
     return allFunds.some(f => f.ranking && f.ranking !== '-' && f.ranking !== '0' && ['R1','R2','R3','R4','R5'].includes(f.ranking));
   }, [allFunds]);
 
+  // Effective whitelist setting — forced off if passive or no ranked funds
   const effectiveWhitelisted = showWhitelisted && !isPassiveSubtype && hasRankedFunds;
 
   const peerAvg  = sortBy === '3y' ? peerAvg3y : peerAvg1y;
@@ -300,6 +305,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
       )}
 
       {/* ── Controls ── */}
+      {/* isPassive = subtypes with no ranking — show only All Funds, no toggle */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', margin:'14px 0 0', padding:'9px 14px', background:'var(--bg-secondary)', borderRadius:8, border:'1px solid var(--border)' }}>
         <div style={{ display:'flex', gap:6 }}>
           {(() => {
@@ -372,7 +378,10 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
               onMouseEnter={e=>e.currentTarget.style.background='var(--bg-secondary)'}
               onMouseLeave={e=>e.currentTarget.style.background='transparent'}
             >
+              {/* Color pip */}
               <div style={{ width:3, height:44, borderRadius:2, background:pipColor, flexShrink:0 }} />
+
+              {/* Fund info */}
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:3 }}>
                   <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:380 }}>{fund.name}</span>
@@ -383,6 +392,8 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
                   <span style={{ fontSize:10, color:'var(--brand-mid)', background:'rgba(109,84,121,0.08)', padding:'1px 6px', borderRadius:3 }}>{catDisplay}</span>
                 </div>
               </div>
+
+              {/* Above/below badge */}
               {above !== null && (
                 <span style={{
                   fontSize:11, fontWeight:600, padding:'3px 9px', borderRadius:20, flexShrink:0,
@@ -393,6 +404,8 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
                   {above ? '↑ above avg' : '↓ below avg'}
                 </span>
               )}
+
+              {/* Return */}
               <div style={{ textAlign:'right', flexShrink:0, minWidth:64 }}>
                 {retNum != null ? (
                   <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color: retNum>=0 ? '#10B981' : '#EF4444' }}>
