@@ -119,32 +119,47 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   const assetItem   = ASSET_STRUCTURE.find(a => a.id === selectedAsset);
   const subtypeItem = assetItem?.subtypes.find(s => s.id === selectedSubtype);
 
-  const isInitialSubtype = React.useRef(true);
-  const isInitialAsset = React.useRef(true);
+  // Track user-initiated changes vs URL-restored state
+  const userChangedAsset   = React.useRef(false);
+  const userChangedSubtype = React.useRef(false);
 
+  const handleAssetChange = (assetId) => {
+    userChangedAsset.current = true;
+    setSelectedAsset(assetId);
+  };
+
+  const handleSubtypeChange = (subtypeId) => {
+    userChangedSubtype.current = true;
+    setSelectedCat(null);
+    setAllFunds([]);
+    setAvailableCats(new Set());
+    setAvailableCatsSubtype(null);
+    setSelectedSubtype(subtypeId);
+  };
+
+  // Asset change — reset subtype and cat
   useEffect(() => {
-    if (isInitialAsset.current) { isInitialAsset.current = false; return; }
+    if (!userChangedAsset.current) return;
+    userChangedAsset.current = false;
     if (assetItem?.subtypes?.length) {
-      setSelectedSubtype(assetItem.subtypes[0].id);
+      const firstSubtype = assetItem.subtypes[0].id;
       setSelectedCat(null);
       setAllFunds([]);
-      const firstSubtype = assetItem.subtypes[0].id;
+      setAvailableCats(new Set());
+      setAvailableCatsSubtype(null);
+      setSelectedSubtype(firstSubtype);
       const isPassive = ['passive_index','passive_etf','debt_etf'].includes(firstSubtype);
       setShowWhitelisted(!isPassive);
     }
   }, [selectedAsset]);
 
+  // Whitelist toggle based on subtype
   useEffect(() => {
     const noRankSubtypes = ['passive_index','passive_etf','debt_etf','global'];
     if (subtypeItem) setShowWhitelisted(!noRankSubtypes.includes(subtypeItem.id));
-    if (isInitialSubtype.current) { isInitialSubtype.current = false; return; }
-    // Manual subtype change — clear immediately
-    setSelectedCat(null);
-    setAllFunds([]);
-    setAvailableCats(new Set());
-    setAvailableCatsSubtype(null);
   }, [selectedSubtype]);
 
+  // Load categories for current subtype
   useEffect(() => {
     if (!subtypeItem || !dateStr) return;
     const ac = subtypeItem.asset_classes[0];
@@ -156,11 +171,23 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
         setAvailableCats(cats);
         setAvailableCatsSubtype(selectedSubtype);
 
-        // If selectedCat is already set and valid for these cats, keep it
-        if (selectedCat && cats.has(normCat(selectedCat))) {
-          return; // keep existing selection — handles hard refresh
+        // If user changed subtype manually, auto-select first cat
+        if (userChangedSubtype.current) {
+          userChangedSubtype.current = false;
+          for (const group of subtypeItem.groups) {
+            const first = group.cats.find(c => cats.has(normCat(c)));
+            if (first) { setSelectedCat(first); return; }
+          }
+          setSelectedCat(null);
+          return;
         }
-        // Auto-select first available category
+
+        // On URL restore / initial load — keep selectedCat if valid
+        if (selectedCat && cats.has(normCat(selectedCat))) {
+          return;
+        }
+
+        // Otherwise auto-select first
         for (const group of subtypeItem.groups) {
           const first = group.cats.find(c => cats.has(normCat(c)));
           if (first) { setSelectedCat(first); return; }
@@ -302,7 +329,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
         <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', color:'var(--brand-mid)', textTransform:'uppercase', marginBottom:8 }}>Asset Class</div>
         <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
           {ASSET_STRUCTURE.map(a => (
-            <div key={a.id} onClick={()=>setSelectedAsset(a.id)} style={{
+            <div key={a.id} onClick={()=>handleAssetChange(a.id)} style={{
               display:'flex', alignItems:'center', gap:7, padding:'7px 14px',
               border:`1.5px solid ${selectedAsset===a.id?'var(--brand-primary)':'var(--border)'}`,
               borderRadius:8, cursor:'pointer',
@@ -321,7 +348,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', color:'var(--brand-mid)', textTransform:'uppercase', marginBottom:7 }}>Fund Type</div>
           <div style={{ display:'flex', gap:6 }}>
             {assetItem.subtypes.map(s => (
-              <button key={s.id} onClick={()=>setSelectedSubtype(s.id)} style={{
+              <button key={s.id} onClick={()=>handleSubtypeChange(s.id)} style={{
                 padding:'5px 13px', borderRadius:20, border:'1px solid',
                 borderColor: selectedSubtype===s.id ? 'var(--brand-primary)' : 'var(--border)',
                 background: selectedSubtype===s.id ? 'var(--brand-primary)' : 'transparent',
