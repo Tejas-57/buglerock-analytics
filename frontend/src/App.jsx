@@ -28,16 +28,27 @@ function toDateStr(date) {
 }
 
 export default function App() {
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const saved = loadFromStorage('br_selected_date', null);
-    return saved ? new Date(saved) : new Date();
-  });
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
 
   const [selectedFund, setSelectedFund] = useState(() => {
     return loadFromStorage('br_selected_fund', null);
   });
 
-  useEffect(() => { resolveDate(selectedDate); }, []);
+  // Always fetch latest available date from API on startup
+  useEffect(() => {
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/status`)
+      .then(r => r.json())
+      .then(s => {
+        if (s.data_as_of) {
+          const latest = new Date(s.data_as_of + 'T12:00:00');
+          setSelectedDate(latest);
+          saveToStorage('br_selected_date', latest.toISOString());
+        } else {
+          resolveDate(new Date());
+        }
+      })
+      .catch(() => resolveDate(new Date()));
+  }, []);
 
   const resolveDate = (date) => {
     const dateStr = toDateStr(date);
