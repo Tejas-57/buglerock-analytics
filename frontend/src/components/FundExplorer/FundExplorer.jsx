@@ -110,6 +110,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   const [loading, setLoading]                 = useState(false);
   const [availableCats, setAvailableCats]     = useState(null);
   const [availableCatsSubtype, setAvailableCatsSubtype] = useState(null);
+  const catsLoadedOnce = React.useRef(false);
   const [searchResults, setSearchResults]     = useState([]);
   const [searchOpen, setSearchOpen]           = useState(false);
   const [searchLoading, setSearchLoading]     = useState(false);
@@ -156,6 +157,16 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
         const cats = new Set((d.categories || []).map(normCat));
         setAvailableCats(cats);
         setAvailableCatsSubtype(selectedSubtype);
+
+        const urlCat = searchParams.get('cat');
+        // First load — restore from URL if valid
+        if (!catsLoadedOnce.current && urlCat && cats.has(normCat(urlCat))) {
+          catsLoadedOnce.current = true;
+          setSelectedCat(urlCat);
+          return;
+        }
+        catsLoadedOnce.current = true;
+        // Auto-select first available category
         for (const group of subtypeItem.groups) {
           const first = group.cats.find(c => cats.has(normCat(c)));
           if (first) { setSelectedCat(first); return; }
