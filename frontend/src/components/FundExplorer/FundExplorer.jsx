@@ -47,7 +47,7 @@ const ASSET_STRUCTURE = [
   {
     id:'sif', label:'SIF', icon:'🔬',
     subtypes:[{ id:'sif_all', label:'All SIF', asset_classes:['SIF'], groups:[
-      {  label:'SIF', cats:['Cat: SIF','India Fund Hybrid Long-Short Fund','India Fund Equity Ex-Top 100 Long-Short Fund','India Fund Equity Long-Short Fund'] },
+      { label:'SIF', cats:['Cat: SIF','India Fund Hybrid Long-Short Fund','India Fund Equity Ex-Top 100 Long-Short Fund','India Fund Equity Long-Short Fund'] },
     ]}],
   },
   {
@@ -55,8 +55,8 @@ const ASSET_STRUCTURE = [
     subtypes:[
       { id:'debt_mf', label:'Debt MFs', asset_classes:['Debt'], groups:[
         { label:'Liquid Funds', cats:['India OE Overnight','India OE Liquid','India OE Ultra Short Duration','India OE Money Market'] },
-        { label:'Duration Funds', cats:['India OE Short Duration',,'India OE Low Duration','India OE Medium Duration','India OE Medium to Long Duration','India OE Long Duration','India OE Government Bond','India OE 10 yr Government Bond'] },
-        { label:'Others', cats:['India OE Corporate Bond','India OE Dynamic Bond','India OE Floating Rate',,'India OE Banking & PSU','India OE Credit Risk','India OE Index Funds - Fixed Income','India OE Other Bond','India OE Fund of Funds'] },
+        { label:'Duration Funds', cats:['India OE Short Duration','India OE Low Duration','India OE Medium Duration','India OE Medium to Long Duration','India OE Long Duration','India OE Government Bond','India OE 10 yr Government Bond'] },
+        { label:'Others', cats:['India OE Corporate Bond','India OE Dynamic Bond','India OE Floating Rate','India OE Banking & PSU','India OE Credit Risk','India OE Index Funds - Fixed Income','India OE Other Bond','India OE Fund of Funds'] },
       ]},
       { id:'debt_etf', label:'Fixed Income ETFs', asset_classes:['ETF - Debt'], groups:[
         { label:'ETF', cats:['India ETF Medium to Long Duration','India ETF Long Duration','India ETF Government Bond','India ETF 10 yr Government Bond','India ETF Index Funds - Fixed Income'] },
@@ -73,7 +73,6 @@ const RANK_COLORS = {
   R4:{ bg:'rgba(239,68,68,0.08)',  color:'#EF4444', border:'rgba(239,68,68,0.2)' },
   R5:{ bg:'rgba(239,68,68,0.06)',  color:'#F87171', border:'rgba(239,68,68,0.15)' },
 };
-// Color pip per rank
 const PIP_COLORS = { R1:'#059669', R2:'#10B981', R3:'#6D5479', R4:'#F59E0B', R5:'#EF4444', default:'#A795AE' };
 
 function getRankOrder(r) { return !r || r==='-' || r==='0' ? 99 : (RANK_ORDER[r] || 98); }
@@ -95,7 +94,6 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   const ACTIVE_SUBTYPES = ['active', 'hybrid_all', 'sif_all', 'debt_mf', 'debt_etf'];
   const [showWhitelisted, setShowWhitelisted] = useState(true);
 
-  // Sync state to URL params
   useEffect(() => {
     const params = {};
     if (selectedAsset) params.asset = selectedAsset;
@@ -103,13 +101,17 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     if (selectedCat) params.cat = selectedCat;
     setSearchParams(params, { replace: true });
   }, [selectedAsset, selectedSubtype, selectedCat]);
+
   const [sortBy, setSortBy]                   = useState(null);
   const [searchQuery, setSearchQuery]         = useState('');
   const [allFunds, setAllFunds]               = useState([]);
   const [peerAvg1y, setPeerAvg1y]             = useState(null);
   const [peerAvg3y, setPeerAvg3y]             = useState(null);
   const [loading, setLoading]                 = useState(false);
-  const [availableCats, setAvailableCats]     = useState(null); // null = not loaded yet
+  const [availableCats, setAvailableCats]     = useState(null);
+  const [searchResults, setSearchResults]     = useState([]);
+  const [searchOpen, setSearchOpen]           = useState(false);
+  const [searchLoading, setSearchLoading]     = useState(false);
 
   const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
   const assetItem   = ASSET_STRUCTURE.find(a => a.id === selectedAsset);
@@ -119,7 +121,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
-      return; // Skip reset on initial load — URL params already set state
+      return;
     }
     if (assetItem?.subtypes?.length) {
       setSelectedSubtype(assetItem.subtypes[0].id);
@@ -132,31 +134,29 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   }, [selectedAsset]);
 
   useEffect(() => {
-    // Default to All Funds for passive subtypes (no rankings)
     setShowWhitelisted(ACTIVE_SUBTYPES.includes(selectedSubtype));
   }, [selectedSubtype]);
 
   useEffect(() => {
-    // Auto-switch whitelist based on whether subtype has rankings
     const noRankSubtypes = ['passive_index','passive_etf','debt_etf','global'];
     if (subtypeItem) setShowWhitelisted(!noRankSubtypes.includes(subtypeItem.id));
   }, [selectedSubtype]);
 
   useEffect(() => {
     if (!subtypeItem || !dateStr) return;
-    // Fetch actual categories from API to filter out empty ones
     const ac = subtypeItem.asset_classes[0];
     fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/categories?asset_class=${encodeURIComponent(ac)}&date=${dateStr}`)
       .then(r => r.json())
       .then(d => {
         const cats = new Set((d.categories || []).map(normCat));
         setAvailableCats(cats);
-        // Auto-select first available category
-        for (const group of subtypeItem.groups) {
-          const first = group.cats.find(c => cats.has(normCat(c)));
-          if (first) { setSelectedCat(first); return; }
+        if (!searchParams.get('cat')) {
+          for (const group of subtypeItem.groups) {
+            const first = group.cats.find(c => cats.has(normCat(c)));
+            if (first) { setSelectedCat(first); return; }
+          }
+          setSelectedCat(null);
         }
-        setSelectedCat(null);
       })
       .catch(() => setAvailableCats(null));
   }, [selectedSubtype, dateStr]);
@@ -177,28 +177,42 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     }).catch(() => setLoading(false));
   }, [selectedCat, selectedSubtype, dateStr]);
 
-  // Passive subtypes never have rankings — hide whitelist toggle
   const isPassiveSubtype = ['passive_index','passive_etf','debt_etf','global'].includes(selectedSubtype);
 
-  // Check if current category has any ranked funds at all
   const hasRankedFunds = useMemo(() => {
     return allFunds.some(f => f.ranking && f.ranking !== '-' && f.ranking !== '0' && ['R1','R2','R3','R4','R5'].includes(f.ranking));
   }, [allFunds]);
 
-  // Effective whitelist setting — forced off if passive or no ranked funds
   const effectiveWhitelisted = showWhitelisted && !isPassiveSubtype && hasRankedFunds;
 
   const peerAvg  = sortBy === '3y' ? peerAvg3y : peerAvg1y;
   const sortKey  = sortBy === '3y' ? 'return_3y' : 'return_1y';
   const sortLbl  = sortBy === '3y' ? '3Y' : '1Y';
 
+  // Global search effect
+  useEffect(() => {
+    if (!searchQuery.trim() || searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      setSearchOpen(false);
+      return;
+    }
+    setSearchLoading(true);
+    const timer = setTimeout(() => {
+      fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/search?q=${encodeURIComponent(searchQuery.trim())}&date=${dateStr}`)
+        .then(r => r.json())
+        .then(d => {
+          setSearchResults(d.funds || []);
+          setSearchOpen(true);
+          setSearchLoading(false);
+        })
+        .catch(() => setSearchLoading(false));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, dateStr]);
+
   const displayFunds = useMemo(() => {
     let funds = [...allFunds];
     if (effectiveWhitelisted) funds = funds.filter(f => f.ranking==='R1' || f.ranking==='R2');
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      funds = funds.filter(f => f.name?.toLowerCase().includes(q) || f.isin?.toLowerCase().includes(q));
-    }
     if (sortBy) {
       funds.sort((a,b) => (parseFloat(b[sortKey])||-999) - (parseFloat(a[sortKey])||-999));
     } else {
@@ -218,22 +232,63 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
 
   return (
     <div style={{ paddingBottom: 40 }}>
-      {/* ── Header ── */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
         <div>
           <h1 className="section-title" style={{ marginBottom:2 }}>Fund Explorer</h1>
           <p style={{ fontSize:12, color:'var(--text-muted)' }}>Browse, filter and discover mutual funds</p>
         </div>
-        <div style={{ position:'relative' }}>
-          <input type="text" placeholder="Search fund, AMC or ISIN..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
-            style={{ padding:'7px 12px 7px 32px', borderRadius:8, border:'1px solid var(--border)', fontSize:12, width:240, outline:'none', background:'#fff', color:'var(--text-primary)' }} />
+        <div style={{ position:'relative' }} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setSearchOpen(false); }}>
+          <input
+            type="text"
+            placeholder="Search any fund, AMC or ISIN..."
+            value={searchQuery}
+            onChange={e => { setSearchQuery(e.target.value); }}
+            onFocus={() => { if (searchResults.length > 0) setSearchOpen(true); }}
+            style={{ padding:'7px 12px 7px 32px', borderRadius:8, border:'1px solid var(--border)', fontSize:12, width:280, outline:'none', background:'#fff', color:'var(--text-primary)' }}
+          />
           <svg style={{ position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', color:'var(--text-muted)' }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
+          {searchLoading && <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', fontSize:10, color:'var(--text-muted)' }}>...</span>}
+          {searchOpen && searchResults.length > 0 && (
+            <div style={{
+              position:'absolute', top:'100%', right:0, width:420, maxHeight:320,
+              overflowY:'auto', background:'#fff', border:'1px solid var(--border)',
+              borderRadius:8, boxShadow:'0 8px 24px rgba(0,0,0,0.12)', zIndex:1000, marginTop:4,
+            }}>
+              {searchResults.map((fund, idx) => (
+                <div
+                  key={fund.isin || idx}
+                  tabIndex={0}
+                  onClick={() => {
+                    setSearchQuery('');
+                    setSearchOpen(false);
+                    handleFundClick(fund);
+                  }}
+                  style={{
+                    display:'flex', alignItems:'center', gap:10, padding:'9px 14px',
+                    borderBottom: idx < searchResults.length-1 ? '1px solid var(--border)' : 'none',
+                    cursor:'pointer', transition:'background .1s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background='var(--bg-secondary)'}
+                  onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                >
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{fund.name}</div>
+                    <div style={{ display:'flex', gap:6, marginTop:2 }}>
+                      <span style={{ fontSize:10, color:'var(--brand-mid)', background:'rgba(109,84,121,0.08)', padding:'1px 5px', borderRadius:3 }}>{fund.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/,'')}</span>
+                    </div>
+                  </div>
+                  {fund.ranking && fund.ranking !== '-' && fund.ranking !== '0' && (
+                    <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:3, background:'rgba(16,185,129,0.1)', color:'#059669' }}>{fund.ranking}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ── Asset class ── */}
       <div style={{ marginBottom:4 }}>
         <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', color:'var(--brand-mid)', textTransform:'uppercase', marginBottom:8 }}>Asset Class</div>
         <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
@@ -252,7 +307,6 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
         </div>
       </div>
 
-      {/* ── Sub-type ── */}
       {assetItem?.subtypes.length > 1 && (
         <div style={{ margin:'12px 0 0' }}>
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', color:'var(--brand-mid)', textTransform:'uppercase', marginBottom:7 }}>Fund Type</div>
@@ -270,7 +324,6 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
         </div>
       )}
 
-      {/* ── Categories ── */}
       {subtypeItem && (
         <div style={{ margin:'12px 0 0' }}>
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', color:'var(--brand-mid)', textTransform:'uppercase', marginBottom:8 }}>Category</div>
@@ -303,8 +356,6 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
         </div>
       )}
 
-      {/* ── Controls ── */}
-      {/* isPassive = subtypes with no ranking — show only All Funds, no toggle */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', margin:'14px 0 0', padding:'9px 14px', background:'var(--bg-secondary)', borderRadius:8, border:'1px solid var(--border)' }}>
         <div style={{ display:'flex', gap:6 }}>
           {(() => {
@@ -338,7 +389,6 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
         </div>
       </div>
 
-      {/* ── Peer avg strip ── */}
       {selectedCat && peerAvg != null && peerAvg !== '-' && (
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 14px', background:'rgba(145,47,99,0.04)', border:'1px solid rgba(145,47,99,0.12)', borderRadius:6, margin:'8px 0 0' }}>
           <span style={{ fontSize:12, color:'var(--brand-mid)', fontWeight:600 }}>
@@ -351,7 +401,6 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
         </div>
       )}
 
-      {/* ── Fund list ── */}
       <div style={{ marginTop:8, border:'1px solid var(--border)', borderRadius:10, overflow:'hidden', background:'#fff', boxShadow:'var(--shadow-card)' }}>
         {loading && [1,2,3,4,5].map(i=>(
           <div key={i} className="loading-shimmer" style={{ height:62, margin:'1px 0' }}/>
@@ -377,10 +426,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
               onMouseEnter={e=>e.currentTarget.style.background='var(--bg-secondary)'}
               onMouseLeave={e=>e.currentTarget.style.background='transparent'}
             >
-              {/* Color pip */}
               <div style={{ width:3, height:44, borderRadius:2, background:pipColor, flexShrink:0 }} />
-
-              {/* Fund info */}
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:3 }}>
                   <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:380 }}>{fund.name}</span>
@@ -391,8 +437,6 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
                   <span style={{ fontSize:10, color:'var(--brand-mid)', background:'rgba(109,84,121,0.08)', padding:'1px 6px', borderRadius:3 }}>{catDisplay}</span>
                 </div>
               </div>
-
-              {/* Above/below badge */}
               {above !== null && (
                 <span style={{
                   fontSize:11, fontWeight:600, padding:'3px 9px', borderRadius:20, flexShrink:0,
@@ -403,8 +447,6 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
                   {above ? '↑ above avg' : '↓ below avg'}
                 </span>
               )}
-
-              {/* Return */}
               <div style={{ textAlign:'right', flexShrink:0, minWidth:64 }}>
                 {retNum != null ? (
                   <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color: retNum>=0 ? '#10B981' : '#EF4444' }}>

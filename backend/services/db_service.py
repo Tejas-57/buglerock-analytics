@@ -472,29 +472,28 @@ def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> li
     finally:
         db.close()
 
-# ── App Settings (Gmail token storage) ──────────────────────────────────────
+# ── Global fund search ───────────────────────────────────────────────────────
 
-def get_setting(key: str) -> str | None:
-    """Get a setting value from the DB."""
+def search_funds_global(query: str, data_date: date, limit: int = 20) -> list:
+    """Search all funds by name or ISIN across all categories."""
     db = get_session()
     try:
-        from models.database import AppSettings
-        row = db.query(AppSettings).filter(AppSettings.key == key).first()
-        return row.value if row else None
-    finally:
-        db.close()
+        q = f"%{query.lower()}%"
+        funds = db.query(DailyFundData).filter(
+            DailyFundData.data_date == data_date,
+            DailyFundData.isin != None,
+            DailyFundData.name != None,
+            (DailyFundData.name.ilike(q)) | (DailyFundData.isin.ilike(q))
+        ).limit(limit).all()
 
-
-def set_setting(key: str, value: str):
-    """Upsert a setting value in the DB."""
-    db = get_session()
-    try:
-        from models.database import AppSettings
-        row = db.query(AppSettings).filter(AppSettings.key == key).first()
-        if row:
-            row.value = value
-        else:
-            db.add(AppSettings(key=key, value=value))
-        db.commit()
+        return [{
+            "isin": f.isin,
+            "name": f.name,
+            "ranking": f.ranking,
+            "amfi_code": f.amfi_code,
+            "category": f.category,
+            "asset_class": f.asset_class,
+            "return_1y": f.return_1y,
+        } for f in funds]
     finally:
         db.close()
