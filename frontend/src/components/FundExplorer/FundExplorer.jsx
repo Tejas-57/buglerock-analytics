@@ -119,13 +119,11 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   const assetItem   = ASSET_STRUCTURE.find(a => a.id === selectedAsset);
   const subtypeItem = assetItem?.subtypes.find(s => s.id === selectedSubtype);
 
-  const isInitialMount = React.useRef(true);
-  const subtypeChangedManually = React.useRef(false);
+  const isInitialSubtype = React.useRef(true);
+  const isInitialAsset = React.useRef(true);
+
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
+    if (isInitialAsset.current) { isInitialAsset.current = false; return; }
     if (assetItem?.subtypes?.length) {
       setSelectedSubtype(assetItem.subtypes[0].id);
       setSelectedCat(null);
@@ -139,12 +137,12 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   useEffect(() => {
     const noRankSubtypes = ['passive_index','passive_etf','debt_etf','global'];
     if (subtypeItem) setShowWhitelisted(!noRankSubtypes.includes(subtypeItem.id));
-    // Only clear on manual subtype change, not on initial mount
-    if (!isInitialMount.current) {
-      setSelectedCat(null);
-      setAllFunds([]);
-      setAvailableCats(new Set());
-    }
+    if (isInitialSubtype.current) { isInitialSubtype.current = false; return; }
+    // Manual subtype change — clear immediately
+    setSelectedCat(null);
+    setAllFunds([]);
+    setAvailableCats(new Set());
+    setAvailableCatsSubtype(null);
   }, [selectedSubtype]);
 
   useEffect(() => {
