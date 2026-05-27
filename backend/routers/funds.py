@@ -5,7 +5,7 @@ from services.db_service import (
     get_asset_classes, get_categories, get_funds_for_dropdown,
     has_data_for_date, get_latest_data_date
 )
-from services.gmail_watcher import fetch_and_store, get_gmail_service, GMAIL_SENDER, SUBJECT_KEYWORD
+from services.gmail_watcher import fetch_latest, get_gmail_service, GMAIL_SENDER, SUBJECT_KEYWORD
 from utils.trading_calendar import resolve_user_date
 
 router = APIRouter()
@@ -19,19 +19,15 @@ def resolve_date(date_str: str = None) -> date_type:
     return resolve_user_date(d)
 
 
-def ensure_todays_data(d: date_type):
-    """
-    Fetch today's email only if we don't have data for this date yet.
-    Only attempts for today — no historical fetching.
-    """
-    if not has_data_for_date(d):
-        fetch_and_store(d)
+def ensure_todays_data():
+    """Fetch latest email if we don't have today's data yet."""
+    fetch_latest(check_days=3)
 
 
 @router.get("/asset-classes")
 def asset_classes(date: str = Query(None)):
     d = resolve_date(date)
-    ensure_todays_data(d)
+    ensure_todays_data()
     return {"asset_classes": get_asset_classes(d), "date": str(d)}
 
 
@@ -53,64 +49,96 @@ def fund_list(asset_class: str, category: str, date: str = Query(None), all: boo
 
 
 @router.get("/fetch")
-def manual_fetch(date: str = Query(...)):
-    """Manually trigger fetch for a specific date — for testing/recovery only."""
-    d = resolve_date(date)
-    success = fetch_and_store(d)
+def manual_fetch():
+    """Manually trigger fetch — checks today and 3 days back."""
+    success = fetch_latest(check_days=3)
     return {
-        "date": str(d),
         "success": success,
-        "message": "Data loaded successfully" if success else "No email found for this date"
+        "message": "Data loaded successfully" if success else "No new email found"
     }
 
 
 @router.get("/debug-gmail")
-def debug_gmail(date: str = Query(...)):
-    """Debug Gmail search for a given date."""
-    d = resolve_date(date)
-    email_date = d + __import__('datetime').timedelta(days=1)
+def debug_gmail():
+    """Debug Gmail — show recent emails from Morningstar and what the search finds."""
+    import datetime
+    today = datetime.date.today()
 
     try:
         service = get_gmail_service()
-        after  = email_date.strftime("%Y/%m/%d")
-        before = (email_date + __import__('datetime').timedelta(days=1)).strftime("%Y/%m/%d")
-        query  = f"from:{GMAIL_SENDER} subject:{SUBJECT_KEYWORD} has:attachment after:{after} before:{before}"
-        result = service.users().messages().list(userId="me", q=query).execute()
-        messages = result.get("messages", [])
 
+        results = []
+        for days_back in range(0, 4):
+            email_date = today - timedelta(days=days_back)
+            after  = email_date.strftime("%Y/%m/%d")
+            before = (email_date + timedelta(days=1)).strftime("%Y/%m/%d")
+            query  = f"from:{GMAIL_SENDER} subject:{SUBJECT_KEYWORD} has:attachment after:{after} before:{before}"
+            result = service.users().messages().list(userId="me", q=query).execute()
+            messages = result.get("messages", [])
+
+            msg_details = []
+            for m in messages[:3]:
+                msg = service.users().messages().get(
+                    userId="me", id=m["id"], format="full"
+                ).execute()
+                headers = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
+                parts = msg.get("payload", {}).get("parts", [])
+                attachment_names = _list_all_parts(parts)
+                msg_details.append({
+                    "id": m["id"],
+                    "subject": headers.get("Subject", ""),
+                    "date": headers.get("Date", ""),
+                    "parts_found": attachment_names,
+                })
+
+            results.append({
+                "email_date": str(email_date),
+                "data_date": str(email_date - timedelta(days=1)),
+                "match_count": len(messages),
+                "messages": msg_details,
+            })
+
+        # Also show broad search
         broad = service.users().messages().list(
-            userId="me", q=f"from:{GMAIL_SENDER} has:attachment", maxResults=5
+            userId="me", q=f"from:{GMAIL_SENDER}", maxResults=5
         ).execute()
         recent = []
         for m in broad.get("messages", [])[:5]:
             msg = service.users().messages().get(
                 userId="me", id=m["id"], format="metadata",
-                metadataHeaders=["subject", "date"]
+                metadataHeaders=["Subject", "Date"]
             ).execute()
-            headers = {h["name"]: h["value"] for h in msg["payload"]["headers"]}
-            recent.append({"subject": headers.get("subject",""), "date": headers.get("date","")})
+            headers = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
+            recent.append({"subject": headers.get("Subject", ""), "date": headers.get("Date", "")})
 
         return {
-            "data_date": str(d),
-            "email_date_searched": str(email_date),
-            "query_used": query,
-            "exact_match_count": len(messages),
-            "recent_emails": recent,
+            "today": str(today),
+            "date_search_results": results,
+            "recent_from_morningstar": recent,
         }
     except Exception as e:
         return {"error": str(e)}
 
 
+def _list_all_parts(parts, depth=0):
+    """Recursively list all MIME parts and filenames."""
+    found = []
+    for part in parts:
+        fname = part.get("filename", "")
+        mime  = part.get("mimeType", "")
+        found.append(f"{'  '*depth}[{mime}] fname='{fname}'")
+        nested = part.get("parts", [])
+        if nested:
+            found.extend(_list_all_parts(nested, depth+1))
+    return found
+
+
 @router.post("/upload")
 async def upload_file(file: "UploadFile", date: str = Query(...)):
-    """
-    Directly upload an Excel file to load data — bypasses Gmail.
-    e.g. POST /api/funds/upload?date=2026-05-12
-    """
+    """Directly upload an Excel file — bypasses Gmail."""
     import tempfile, os
     from services.parser import parse_excel_file
     from services.db_service import save_parsed_data
-    from datetime import date as date_type
 
     d = resolve_date(date)
     contents = await file.read()
