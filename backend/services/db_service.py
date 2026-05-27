@@ -497,3 +497,28 @@ def search_funds_global(query: str, data_date: date, limit: int = 20) -> list:
         } for f in funds]
     finally:
         db.close()
+
+# ── App Settings (Gmail token storage) ──────────────────────────────────────
+
+def get_setting(key: str):
+    db = get_session()
+    try:
+        from models.database import AppSettings
+        row = db.query(AppSettings).filter(AppSettings.key == key).first()
+        return row.value if row else None
+    finally:
+        db.close()
+
+
+def set_setting(key: str, value: str):
+    db = get_session()
+    try:
+        from models.database import AppSettings
+        row = db.query(AppSettings).filter(AppSettings.key == key).first()
+        if row:
+            row.value = value
+        else:
+            db.add(AppSettings(key=key, value=value))
+        db.commit()
+    finally:
+        db.close()
