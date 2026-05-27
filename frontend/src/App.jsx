@@ -12,6 +12,10 @@ import ChatButton from './components/Chat/ChatButton';
 import './styles/global.css';
 import './App.css';
 
+function saveToStorage(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
 function loadFromStorage(key, fallback) {
   try {
     const val = localStorage.getItem(key);
@@ -19,22 +23,11 @@ function loadFromStorage(key, fallback) {
   } catch { return fallback; }
 }
 
-function saveToStorage(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
-}
-
-function toDateStr(date) {
-  return date instanceof Date ? date.toISOString().split('T')[0] : date;
-}
-
 export default function App() {
-  const [selectedDate, setSelectedDate] = useState(() => new Date());
+  // null = not resolved yet — routes won't render until date is fetched
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedFund, setSelectedFund] = useState(() => loadFromStorage('br_selected_fund', null));
 
-  const [selectedFund, setSelectedFund] = useState(() => {
-    return loadFromStorage('br_selected_fund', null);
-  });
-
-  // Always fetch latest available date from API on startup
   useEffect(() => {
     fetch(`${process.env.REACT_APP_API_URL || ''}/api/status`)
       .then(r => r.json())
@@ -43,42 +36,31 @@ export default function App() {
           const latest = new Date(s.data_as_of + 'T12:00:00');
           setSelectedDate(latest);
           saveToStorage('br_selected_date', latest.toISOString());
-        } else {
-          resolveDate(new Date());
         }
       })
-      .catch(() => resolveDate(new Date()));
+      .catch(() => setSelectedDate(new Date()));
   }, []);
 
-  const resolveDate = (date) => {
-    const dateStr = toDateStr(date);
-    fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/asset-classes?date=${dateStr}`)
-      .then(r => r.json())
-      .then(d => {
-        if (d.asset_classes && d.asset_classes.length > 0) {
-          setSelectedDate(date);
-          saveToStorage('br_selected_date', date instanceof Date ? date.toISOString() : new Date(date).toISOString());
-        } else {
-          fetch(`${process.env.REACT_APP_API_URL || ''}/api/status`).then(r => r.json()).then(s => {
-            if (s.data_as_of) {
-              const fallback = new Date(s.data_as_of + 'T12:00:00');
-              setSelectedDate(fallback);
-              saveToStorage('br_selected_date', fallback.toISOString());
-            }
-          }).catch(() => {});
-        }
-      }).catch(() => {});
+  const handleFundSelect = (fund) => {
+    setSelectedFund(fund);
+    saveToStorage('br_selected_fund', fund);
   };
 
-  const handleDateChange = (date) => { setSelectedDate(date); resolveDate(date); };
-  const handleFundSelect = (fund) => { setSelectedFund(fund); saveToStorage('br_selected_fund', fund); };
+  // Don't render routes until date is resolved — prevents double-fetch in FundExplorer
+  if (!selectedDate) {
+    return (
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', color:'var(--text-muted)', fontSize:13 }}>
+        Loading...
+      </div>
+    );
+  }
 
   return (
     <Router>
       <div className="app-shell">
         <Navbar />
         <div className="app-body">
-          <Header selectedDate={selectedDate} onDateChange={handleDateChange} />
+          <Header selectedDate={selectedDate} />
           <main className="app-main">
             <Routes>
               <Route path="/" element={<Navigate to="/fund-explorer" replace />} />
