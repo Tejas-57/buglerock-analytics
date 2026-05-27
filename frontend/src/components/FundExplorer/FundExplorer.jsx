@@ -134,14 +134,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     }
   }, [selectedAsset]);
 
-  useEffect(() => {
-    if (!isInitialMount.current) {
-      subtypeChangedManually.current = true;
-      setSelectedCat(null);
-      setAllFunds([]);
-    }
-    setShowWhitelisted(ACTIVE_SUBTYPES.includes(selectedSubtype));
-  }, [selectedSubtype]);
+  const prevSubtype = React.useRef(selectedSubtype);
 
   useEffect(() => {
     const noRankSubtypes = ['passive_index','passive_etf','debt_etf','global'];
@@ -151,13 +144,22 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   useEffect(() => {
     if (!subtypeItem || !dateStr) return;
     const ac = subtypeItem.asset_classes[0];
+    const subtypeJustChanged = prevSubtype.current !== selectedSubtype;
+    prevSubtype.current = selectedSubtype;
+
+    if (subtypeJustChanged) {
+      setSelectedCat(null);
+      setAllFunds([]);
+      setAvailableCats(null);
+    }
+
     fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/categories?asset_class=${encodeURIComponent(ac)}&date=${dateStr}`)
       .then(r => r.json())
       .then(d => {
         const cats = new Set((d.categories || []).map(normCat));
         setAvailableCats(cats);
-        if (!searchParams.get('cat') || subtypeChangedManually.current) {
-          subtypeChangedManually.current = false;
+        // Auto-select first cat if subtype changed or no cat in URL
+        if (subtypeJustChanged || !searchParams.get('cat')) {
           for (const group of subtypeItem.groups) {
             const first = group.cats.find(c => cats.has(normCat(c)));
             if (first) { setSelectedCat(first); return; }
