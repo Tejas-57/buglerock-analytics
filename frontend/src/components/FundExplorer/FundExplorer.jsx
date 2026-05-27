@@ -156,14 +156,10 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
         setAvailableCats(cats);
         setAvailableCatsSubtype(selectedSubtype);
 
-        const urlCat = searchParams.get('cat');
-        // First load — restore from URL if valid
-        if (!catsLoadedOnce.current && urlCat && cats.has(normCat(urlCat))) {
-          catsLoadedOnce.current = true;
-          setSelectedCat(urlCat);
-          return;
+        // If selectedCat is already set and valid for these cats, keep it
+        if (selectedCat && cats.has(normCat(selectedCat))) {
+          return; // keep existing selection — handles hard refresh
         }
-        catsLoadedOnce.current = true;
         // Auto-select first available category
         for (const group of subtypeItem.groups) {
           const first = group.cats.find(c => cats.has(normCat(c)));
