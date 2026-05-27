@@ -1,17 +1,16 @@
 import React from 'react';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import './Header.css';
 
-export default function Header({ selectedDate, onDateChange }) {
-  const isToday = new Date().toDateString() === selectedDate.toDateString();
+export default function Header({ selectedDate }) {
+  const dateStr = selectedDate instanceof Date
+    ? selectedDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })
+    : selectedDate;
 
   return (
     <header className="app-header">
       <div className="header-left">
         <div className="header-title">Analytics Platform</div>
       </div>
-
       <div className="header-right">
         <div className="date-selector">
           <div className="date-label">
@@ -20,21 +19,9 @@ export default function Header({ selectedDate, onDateChange }) {
               <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
               <line x1="3" y1="10" x2="21" y2="10"/>
             </svg>
-            As of Date
+            AS OF DATE
           </div>
-          <DatePicker
-            selected={selectedDate}
-            onChange={onDateChange}
-            dateFormat="dd MMM yyyy"
-            maxDate={new Date()}
-            className="date-input"
-            popperPlacement="bottom-end"
-          />
-          {!isToday && (
-            <button className="date-reset" onClick={() => onDateChange(new Date())} title="Reset to today">
-              Today
-            </button>
-          )}
+          <span className="date-input" style={{ cursor:'default', userSelect:'none' }}>{dateStr}</span>
         </div>
       </div>
     </header>
