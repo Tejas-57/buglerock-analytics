@@ -118,6 +118,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   const subtypeItem = assetItem?.subtypes.find(s => s.id === selectedSubtype);
 
   const isInitialMount = React.useRef(true);
+  const subtypeChangedManually = React.useRef(false);
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
@@ -134,6 +135,11 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   }, [selectedAsset]);
 
   useEffect(() => {
+    if (!isInitialMount.current) {
+      subtypeChangedManually.current = true;
+      setSelectedCat(null);
+      setAllFunds([]);
+    }
     setShowWhitelisted(ACTIVE_SUBTYPES.includes(selectedSubtype));
   }, [selectedSubtype]);
 
@@ -150,7 +156,8 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
       .then(d => {
         const cats = new Set((d.categories || []).map(normCat));
         setAvailableCats(cats);
-        if (!searchParams.get('cat')) {
+        if (!searchParams.get('cat') || subtypeChangedManually.current) {
+          subtypeChangedManually.current = false;
           for (const group of subtypeItem.groups) {
             const first = group.cats.find(c => cats.has(normCat(c)));
             if (first) { setSelectedCat(first); return; }
