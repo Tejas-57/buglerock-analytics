@@ -109,6 +109,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   const [peerAvg3y, setPeerAvg3y]             = useState(null);
   const [loading, setLoading]                 = useState(false);
   const [availableCats, setAvailableCats]     = useState(null);
+  const [availableCatsSubtype, setAvailableCatsSubtype] = useState(null);
   const [searchResults, setSearchResults]     = useState([]);
   const [searchOpen, setSearchOpen]           = useState(false);
   const [searchLoading, setSearchLoading]     = useState(false);
@@ -154,6 +155,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
       .then(d => {
         const cats = new Set((d.categories || []).map(normCat));
         setAvailableCats(cats);
+        setAvailableCatsSubtype(selectedSubtype);
         for (const group of subtypeItem.groups) {
           const first = group.cats.find(c => cats.has(normCat(c)));
           if (first) { setSelectedCat(first); return; }
@@ -329,11 +331,14 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
       {subtypeItem && (
         <div style={{ margin:'12px 0 0' }}>
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', color:'var(--brand-mid)', textTransform:'uppercase', marginBottom:8 }}>Category</div>
-          {subtypeItem.groups.filter(group => !availableCats || group.cats.some(c => availableCats.has(normCat(c)))).map(group => (
+          {subtypeItem.groups.filter(group => {
+            if (!availableCats || availableCatsSubtype !== selectedSubtype) return false;
+            return group.cats.some(c => availableCats.has(normCat(c)));
+          }).map(group => (
             <div key={group.label} style={{ marginBottom:10 }}>
               <div style={{ fontSize:10, fontWeight:600, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:5 }}>{group.label}</div>
               <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                {group.cats.filter(cat => !availableCats || availableCats.has(normCat(cat))).map(cat => {
+                {group.cats.filter(cat => availableCats && availableCatsSubtype === selectedSubtype && availableCats.has(normCat(cat))).map(cat => {
                   const sel = selectedCat===cat;
                   return (
                     <div key={cat} onClick={()=>setSelectedCat(cat)} style={{
