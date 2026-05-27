@@ -15,19 +15,19 @@ const ASSET_STRUCTURE = [
   {
     id:'equity', label:'Equity', icon:'📈',
     subtypes:[
-      { id:'active', label:'Active Equity', asset_classes:['Equity'], groups:[
-        { label:'Large Cap', cats:['India Fund Large-Cap','India Fund Large & Mid-Cap','India Fund Flexi Cap','Cat: Flexi Cap Funds','Cat: Multi Cap Funds','India Fund Focused Fund','Cat: Contra / Value Funds'] },
-        { label:'Mid & Small Cap', cats:['India Fund Mid-Cap','India Fund Small-Cap','India Fund Equity - Other'] },
+      { id:'active', label:'Domestic Equity', asset_classes:['Equity'], groups:[
+        { label:'', cats:['India Fund Large-Cap','India Fund Large & Mid-Cap','India Fund Flexi Cap','Cat: Flexi Cap Funds','Cat: Multi Cap Funds','India Fund Focused Fund','Cat: Contra / Value Funds'] },
+        { label:'', cats:['India Fund Mid-Cap','India Fund Small-Cap'] },
         { label:'ELSS', cats:['India Fund ELSS (Tax Savings)'] },
-        { label:'Thematic & Sectoral', cats:['Thematic Funds','Cat: Banking & Financial Services Funds','Cat: Infrastructure Funds','Cat: Consumption Funds','India Fund Sector - Energy','Cat: IT / Tech Funds','Cat: Healthcare funds','Cat: MNC Funds'] },
+        { label:'Thematic & Sectoral', cats:['Thematic Funds','Cat: Banking & Financial Services Funds','Cat: Infrastructure Funds','Cat: Consumption Funds','India Fund Sector - Energy','Cat: IT / Tech Funds','Cat: Healthcare funds','Cat: MNC Funds','India Fund Equity - Other'] },
         { label:'Others', cats:['Cat: Equity FoF','Cat: Multi Factor'] },
       ]},
-      { id:'passive_index', label:'Index & FoF', asset_classes:['Equity Index'], groups:[
+      { id:'passive_index', label:'Passive Funds', asset_classes:['Equity Index'], groups:[
         { label:'Broad Market', cats:['India Fund Index Funds','Cat: Index MF - Nifty 50','Cat: Index MF - Nifty Next 50','Cat: Index MF - Sensex','Cat: Index MF - Nifty & BSE 500','Cat: Index MF - Nifty 100','Cat: Index MF - Equal Wt','Cat: Index MF - Large&Mid','Cat: Index MF - Midcap','Cat: Index MF - Smallcap'] },
         { label:'Factor / Smart Beta', cats:['Cat: Index MF - Factor-Value','Cat:Index MF - Factor-Momentum','Cat: Index MF - Factor-Quality','Cat: Index MF - Factor-Low Vol','Cat: Index MF - Factor-Alpha Low Vol','Cat: Index MF - Factor-Alpha','Cat: Multi Factor'] },
         { label:'Sectoral', cats:['Cat: Index MF - Bank','Cat: Index MF - IT','Cat: Healthcare funds','Cat: Thematic - Manufacturing','Cat: Thematic Funds','Cat: Thematic - PSU','Cat: Thematic - Commodities'] },
       ]},
-      { id:'passive_etf', label:'ETF', asset_classes:['ETF - Equity'], groups:[
+      { id:'passive_etf', label:'Passive - ETF', asset_classes:['ETF - Equity'], groups:[
         { label:'Broad Market', cats:['India ETF Large-Cap','India ETF Multi-Cap','India ETF Mid-Cap','India ETF Small-Cap','India ETF Value','India ETF Dividend Yield','India ETF Index Funds'] },
         { label:'Sectoral', cats:['India ETF Sector - Financial Services','India ETF Sector - Technology','India ETF Sector - Healthcare','India ETF Sector - Energy','India ETF Sector - Precious Metals','India ETF Equity - Infrastructure','India ETF Equity - Consumption','India ETF Equity - ESG','India ETF Equity - Other'] },
       ]},
@@ -39,9 +39,9 @@ const ASSET_STRUCTURE = [
   {
     id:'hybrid', label:'Hybrid', icon:'⚖️',
     subtypes:[{ id:'hybrid_all', label:'All Hybrid', asset_classes:['Hybrid'], groups:[
-      { label:'Equity-oriented', cats:['India Fund Aggressive Allocation','India Fund Dynamic Asset Allocation','India Fund Multi Asset Allocation','India Fund Balanced Allocation'] },
-      { label:'Debt-oriented', cats:['India Fund Conservative Allocation','India Fund Equity Savings','India Fund Equity Savings - Aggressive','India Fund Equity Savings - Conservative'] },
-      { label:'Special', cats:['India Fund Arbitrage Fund','India Fund Retirement','India Fund Children'] },
+      { label:'Equity-oriented', cats:['India Fund Aggressive Allocation','India Fund Dynamic Asset Allocation','India Fund Multi Asset Allocation','India Fund Balanced Allocation','India Fund Equity Savings','India Fund Equity Savings - Aggressive','India Fund Equity Savings - Conservative','India Fund Arbitrage Fund'] },
+      { label:'Debt-oriented', cats:['India Fund Conservative Allocation'] },
+      { label:'Solution-oriented', cats:['India Fund Retirement','India Fund Children'] },
     ]}],
   },
   {
@@ -54,10 +54,9 @@ const ASSET_STRUCTURE = [
     id:'fixed_income', label:'Fixed Income', icon:'🏦',
     subtypes:[
       { id:'debt_mf', label:'Debt MFs', asset_classes:['Debt'], groups:[
-        { label:'Liquid & Short', cats:['India OE Overnight','India OE Liquid','India OE Ultra Short Duration','India OE Money Market','India OE Low Duration','India OE Floating Rate'] },
-        { label:'Medium Duration', cats:['India OE Short Duration','India OE Banking & PSU','India OE Corporate Bond','India OE Medium Duration','India OE Credit Risk'] },
-        { label:'Long Duration', cats:['India OE Medium to Long Duration','India OE Dynamic Bond','India OE Government Bond','India OE 10 yr Government Bond','India OE Long Duration'] },
-        { label:'Others', cats:['India OE Index Funds - Fixed Income','India OE Other Bond','India OE Fund of Funds'] },
+        { label:'Liquid Funds', cats:['India OE Overnight','India OE Liquid','India OE Ultra Short Duration','India OE Money Market'] },
+        { label:'Duration Funds', cats:['India OE Short Duration',,'India OE Low Duration','India OE Medium Duration','India OE Medium to Long Duration','India OE Long Duration','India OE Government Bond','India OE 10 yr Government Bond'] },
+        { label:'Others', cats:['India OE Corporate Bond','India OE Dynamic Bond','India OE Floating Rate',,'India OE Banking & PSU','India OE Credit Risk','India OE Index Funds - Fixed Income','India OE Other Bond','India OE Fund of Funds'] },
       ]},
       { id:'debt_etf', label:'Fixed Income ETFs', asset_classes:['ETF - Debt'], groups:[
         { label:'ETF', cats:['India ETF Medium to Long Duration','India ETF Long Duration','India ETF Government Bond','India ETF 10 yr Government Bond','India ETF Index Funds - Fixed Income'] },

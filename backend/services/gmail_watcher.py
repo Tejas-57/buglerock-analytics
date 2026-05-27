@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 SCOPES             = ["https://www.googleapis.com/auth/gmail.readonly"]
 GMAIL_SENDER       = "sujaya.l@alerts-morningstar.com"
 SUBJECT_KEYWORD    = "New Singlesheet Daily MF Report"
-ATTACHMENT_KEYWORD = "New_Singlesheet_Daily_MF_Report"
+ATTACHMENT_KEYWORD = "New Singlesheet Daily MF Report"
 TOKEN_DB_KEY       = "gmail_token"
 
 CREDENTIALS_PATH = (
