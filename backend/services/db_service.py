@@ -33,10 +33,18 @@ def has_data_for_date(data_date: date) -> bool:
 
 
 def log_email_fetch(email_date, data_date, file_name, status, message):
+    from datetime import date as date_type
     db = get_session()
     try:
+        def to_date(v):
+            if isinstance(v, date_type): return v
+            if isinstance(v, str) and v: 
+                try: return date_type.fromisoformat(v)
+                except: return None
+            return None
         db.add(EmailFetchLog(
-            email_date=email_date, data_date=data_date,
+            email_date=to_date(email_date),
+            data_date=to_date(data_date),
             file_name=file_name, status=status, message=message,
         ))
         db.commit()
@@ -188,12 +196,10 @@ def _fund_to_dict(f: DailyFundData) -> dict:
         "pe_ratio": fmt(f.pe_ratio),
         "pb_ratio": fmt(f.pb_ratio),
         "equity_style": fmt(f.equity_style),
-        # Equity region
         "region_americas": fmt(f.region_americas),
         "region_europe": fmt(f.region_europe),
         "region_asia": fmt(f.region_asia),
         "region_emerging": fmt(f.region_emerging),
-        # Factor profile
         "factor_momentum": fmt(f.factor_momentum),
         "factor_quality": fmt(f.factor_quality),
         "factor_volatility": fmt(f.factor_volatility),
@@ -201,7 +207,6 @@ def _fund_to_dict(f: DailyFundData) -> dict:
         "factor_style": fmt(f.factor_style),
         "factor_yield": fmt(f.factor_yield),
         "factor_liquidity": fmt(f.factor_liquidity),
-        # Debt
         "avg_maturity": fmt(f.avg_maturity),
         "modified_duration": fmt(f.modified_duration),
         "ytm": fmt(f.ytm),
@@ -231,22 +236,18 @@ def _returns_dict(f) -> dict:
 
 
 def _risk_dict(f) -> dict:
-    """Returns risk metrics for all 3 timeframes (1Y, 3Y, 5Y)."""
     def fmt(v): return round(v, 4) if v is not None else "-"
     return {
-        # 1 Year
         "std_dev_1y": fmt(f.std_dev_1y), "alpha_1y": fmt(f.alpha_1y),
         "beta_1y": fmt(f.beta_1y), "sharpe_ratio_1y": fmt(f.sharpe_ratio_1y),
         "sortino_ratio_1y": fmt(f.sortino_ratio_1y), "treynor_ratio_1y": fmt(f.treynor_ratio_1y),
         "information_ratio_1y": fmt(f.information_ratio_1y),
         "up_capture_1y": fmt(f.up_capture_1y), "down_capture_1y": fmt(f.down_capture_1y),
-        # 3 Year
         "std_dev_3y": fmt(f.std_dev_3y), "alpha_3y": fmt(f.alpha_3y),
         "beta_3y": fmt(f.beta_3y), "sharpe_ratio_3y": fmt(f.sharpe_ratio_3y),
         "sortino_ratio_3y": fmt(f.sortino_ratio_3y), "treynor_ratio_3y": fmt(f.treynor_ratio_3y),
         "information_ratio_3y": fmt(f.information_ratio_3y),
         "up_capture_3y": fmt(f.up_capture_3y), "down_capture_3y": fmt(f.down_capture_3y),
-        # 5 Year
         "std_dev_5y": fmt(f.std_dev_5y), "alpha_5y": fmt(f.alpha_5y),
         "beta_5y": fmt(f.beta_5y), "sharpe_ratio_5y": fmt(f.sharpe_ratio_5y),
         "sortino_ratio_5y": fmt(f.sortino_ratio_5y), "treynor_ratio_5y": fmt(f.treynor_ratio_5y),
@@ -288,7 +289,6 @@ def get_benchmark_for_category(category: str, data_date: date) -> dict:
 
 
 def get_peer_avg(category: str, data_date: date, asset_class: str) -> dict:
-    """Calculate peer average for all funds in category (full universe)."""
     db = get_session()
     try:
         funds = db.query(DailyFundData).filter(
@@ -325,7 +325,6 @@ def get_peer_avg(category: str, data_date: date, asset_class: str) -> dict:
                 "cy2021": avg([f.return_cy2021 for f in funds]),
             },
             "risk": {
-                # 1Y
                 "std_dev_1y":           avg([f.std_dev_1y for f in funds]),
                 "alpha_1y":             avg([f.alpha_1y for f in funds]),
                 "beta_1y":              avg([f.beta_1y for f in funds]),
@@ -335,7 +334,6 @@ def get_peer_avg(category: str, data_date: date, asset_class: str) -> dict:
                 "information_ratio_1y": avg([f.information_ratio_1y for f in funds]),
                 "up_capture_1y":        avg([f.up_capture_1y for f in funds]),
                 "down_capture_1y":      avg([f.down_capture_1y for f in funds]),
-                # 3Y
                 "std_dev_3y":           avg([f.std_dev_3y for f in funds]),
                 "alpha_3y":             avg([f.alpha_3y for f in funds]),
                 "beta_3y":              avg([f.beta_3y for f in funds]),
@@ -345,7 +343,6 @@ def get_peer_avg(category: str, data_date: date, asset_class: str) -> dict:
                 "information_ratio_3y": avg([f.information_ratio_3y for f in funds]),
                 "up_capture_3y":        avg([f.up_capture_3y for f in funds]),
                 "down_capture_3y":      avg([f.down_capture_3y for f in funds]),
-                # 5Y
                 "std_dev_5y":           avg([f.std_dev_5y for f in funds]),
                 "alpha_5y":             avg([f.alpha_5y for f in funds]),
                 "beta_5y":              avg([f.beta_5y for f in funds]),
@@ -364,7 +361,6 @@ def get_peer_avg(category: str, data_date: date, asset_class: str) -> dict:
 # ── Peer comparison ──────────────────────────────────────────────────────────
 
 def get_whitelisted_peers(category: str, data_date: date, asset_class: str) -> list:
-    """Return R1/R2 funds in category. If none, return all."""
     db = get_session()
     try:
         all_funds = db.query(DailyFundData).filter(
@@ -441,7 +437,6 @@ def get_fund_inception_date_by_amfi(amfi_code: str):
 
 
 def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> list:
-    """Return ALL funds sorted by rank order: R1, R2, R3, R4, R5, then unranked/0."""
     db = get_session()
     RANK_ORDER = {'R1': 1, 'R2': 2, 'R3': 3, 'R4': 4, 'R5': 5}
     try:
@@ -472,6 +467,7 @@ def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> li
     finally:
         db.close()
 
+
 # ── Global fund search ───────────────────────────────────────────────────────
 
 def search_funds_global(query: str, data_date: date, limit: int = 20) -> list:
@@ -497,6 +493,7 @@ def search_funds_global(query: str, data_date: date, limit: int = 20) -> list:
         } for f in funds]
     finally:
         db.close()
+
 
 # ── App Settings (Gmail token storage) ──────────────────────────────────────
 

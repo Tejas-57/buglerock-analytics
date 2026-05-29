@@ -49,6 +49,10 @@ SHEET_CONFIG = {
     "Hybrid":                         {"asset_class": "Hybrid",            "has_ranking": True,  "exclude_index_mf": False},
     "SIF":                            {"asset_class": "SIF",               "has_ranking": True,  "exclude_index_mf": False},
     "International":                  {"asset_class": "International",     "has_ranking": False, "exclude_index_mf": False},
+    # New sheet names (from May 2026 onwards)
+    "Debt":                           {"asset_class": "Debt",              "has_ranking": True,  "exclude_index_mf": False},
+    "Debt ETF":                       {"asset_class": "ETF - Debt",        "has_ranking": False, "exclude_index_mf": False},
+    # Old sheet names (kept for backward compatibility)
     "Fixed Income":                   {"asset_class": "Debt",              "has_ranking": True,  "exclude_index_mf": False},
     "BugleRock Capital - Fixed Incom":{"asset_class": "ETF - Debt",        "has_ranking": False, "exclude_index_mf": False},
 }
