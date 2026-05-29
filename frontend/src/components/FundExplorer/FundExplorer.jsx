@@ -39,7 +39,7 @@ const ASSET_STRUCTURE = [
   {
     id:'hybrid', label:'Hybrid', icon:'⚖️',
     subtypes:[{ id:'hybrid_all', label:'All Hybrid', asset_classes:['Hybrid'], groups:[
-      { label:'Equity-oriented', cats:['India Fund Aggressive Allocation','India Fund Dynamic Asset Allocation','India Fund Multi Asset Allocation','India Fund Balanced Allocation','India Fund Equity Savings','India Fund Equity Savings - Aggressive','India Fund Equity Savings - Conservative','India Fund Arbitrage Fund'] },
+      { label:'Equity-oriented', cats:['India Fund Aggressive Allocation','India Fund Dynamic Asset Allocation','India Fund Multi Asset Allocation','India Fund Balanced Allocation','India Fund Arbitrage Fund'] },
       { label:'Debt-oriented', cats:['India Fund Conservative Allocation','India Fund Equity Savings'] },
       { label:'Solution-oriented', cats:['India Fund Retirement','India Fund Children'] },
     ]}],
