@@ -39,8 +39,8 @@ const ASSET_STRUCTURE = [
   {
     id:'hybrid', label:'Hybrid', icon:'⚖️',
     subtypes:[{ id:'hybrid_all', label:'All Hybrid', asset_classes:['Hybrid'], groups:[
-      { label:'Equity-oriented', cats:['India Fund Aggressive Allocation','India Fund Dynamic Asset Allocation','India Fund Multi Asset Allocation','India Fund Balanced Allocation','India Fund Arbitrage Fund'] },
-      { label:'Debt-oriented', cats:['India Fund Conservative Allocation','India Fund Equity Savings'] },
+      { label:'Equity-oriented', cats:['India Fund Aggressive Allocation','India Fund Dynamic Asset Allocation','India Fund Multi Asset Allocation','India Fund Balanced Allocation','India Fund Equity Savings','India Fund Arbitrage Fund'] },
+      { label:'Debt-oriented', cats:['India Fund Conservative Allocation'] },
       { label:'Solution-oriented', cats:['India Fund Retirement','India Fund Children'] },
     ]}],
   },
@@ -385,12 +385,12 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', color:'var(--brand-mid)', textTransform:'uppercase', marginBottom:8 }}>Category</div>
           {subtypeItem.groups.filter(group => {
             if (!availableCats || availableCatsSubtype !== selectedSubtype) return false;
-            return group.cats.some(c => availableCats.has(normCat(c)));
+            return group.cats.some(c => availableCats.has(normCat(c)) || MERGED_CATEGORIES[c]);
           }).map(group => (
             <div key={group.label} style={{ marginBottom:10 }}>
               <div style={{ fontSize:10, fontWeight:600, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:5 }}>{group.label}</div>
               <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                {group.cats.filter(cat => availableCats && availableCatsSubtype === selectedSubtype && availableCats.has(normCat(cat))).map(cat => {
+                {group.cats.filter(cat => availableCats && availableCatsSubtype === selectedSubtype && (availableCats.has(normCat(cat)) || MERGED_CATEGORIES[cat])).map(cat => {
                   const sel = selectedCat===cat;
                   return (
                     <div key={cat} onClick={()=>setSelectedCat(cat)} style={{
