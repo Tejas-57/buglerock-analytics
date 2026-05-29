@@ -40,7 +40,7 @@ const ASSET_STRUCTURE = [
     id:'hybrid', label:'Hybrid', icon:'⚖️',
     subtypes:[{ id:'hybrid_all', label:'All Hybrid', asset_classes:['Hybrid'], groups:[
       { label:'Equity-oriented', cats:['India Fund Aggressive Allocation','India Fund Dynamic Asset Allocation','India Fund Multi Asset Allocation','India Fund Balanced Allocation','India Fund Equity Savings','India Fund Equity Savings - Aggressive','India Fund Equity Savings - Conservative','India Fund Arbitrage Fund'] },
-      { label:'Debt-oriented', cats:['India Fund Conservative Allocation'] },
+      { label:'Debt-oriented', cats:['India Fund Conservative Allocation','India Fund Equity Savings'] },
       { label:'Solution-oriented', cats:['India Fund Retirement','India Fund Children'] },
     ]}],
   },
@@ -71,6 +71,14 @@ const ASSET_STRUCTURE = [
     ],
   },
 ];
+
+// Categories that are merged from multiple DB categories
+const MERGED_CATEGORIES = {
+  'India Fund Equity Savings': {
+    asset_class: 'Hybrid',
+    sub_cats: 'India Fund Equity Savings - Aggressive|India Fund Equity Savings - Conservative',
+  },
+};
 
 const RANK_ORDER = { R1:1, R2:2, R3:3, R4:4, R5:5 };
 const RANK_COLORS = {
@@ -209,8 +217,13 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     setLoading(true); setAllFunds([]); setPeerAvg1y(null); setPeerAvg3y(null);
     const ac = subtypeItem.asset_classes[0];
     const catNorm = normCat(selectedCat);
+    const mergedConfig = MERGED_CATEGORIES[catNorm] || MERGED_CATEGORIES[selectedCat];
+    const fundsUrl = mergedConfig
+      ? `${process.env.REACT_APP_API_URL || ''}/api/funds/merged-list?categories=${encodeURIComponent(mergedConfig.sub_cats)}&asset_class=${encodeURIComponent(mergedConfig.asset_class)}&date=${dateStr}`
+      : `${process.env.REACT_APP_API_URL || ''}/api/funds/list?asset_class=${encodeURIComponent(ac)}&category=${encodeURIComponent(catNorm)}&date=${dateStr}&all=true`;
+
     Promise.all([
-      fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/list?asset_class=${encodeURIComponent(ac)}&category=${encodeURIComponent(catNorm)}&date=${dateStr}&all=true`).then(r=>r.json()),
+      fetch(fundsUrl).then(r=>r.json()),
       fetch(`${process.env.REACT_APP_API_URL || ''}/api/performance/peer-avg?category=${encodeURIComponent(catNorm)}&asset_class=${encodeURIComponent(ac)}&date=${dateStr}`).then(r=>r.json()).catch(()=>null),
     ]).then(([fd, pd]) => {
       setAllFunds(fd.funds || []);
@@ -477,6 +490,9 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
                 <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:3 }}>
                   <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:380 }}>{fund.name}</span>
                   <RankBadge ranking={fund.ranking} />
+                  {fund.sub_label && (
+                    <span style={{ fontSize:10, fontWeight:600, padding:'2px 6px', borderRadius:3, background:'rgba(109,84,121,0.1)', color:'var(--brand-mid)', flexShrink:0 }}>{fund.sub_label}</span>
+                  )}
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:7 }}>
                   <span style={{ fontSize:10, color:'var(--text-muted)', fontFamily:'var(--font-mono)' }}>{fund.isin}</span>

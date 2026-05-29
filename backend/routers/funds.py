@@ -55,6 +55,30 @@ def fund_list(asset_class: str, category: str, date: str = Query(None), all: boo
     return {"funds": funds, "date": str(d)}
 
 
+@router.get("/merged-list")
+def merged_fund_list(categories: str, asset_class: str, date: str = Query(None)):
+    """Fetch funds from multiple categories and tag each with its sub-category label."""
+    from services.db_service import get_all_funds_for_dropdown
+    d = resolve_date(date)
+    cat_list = categories.split("|")
+    
+    LABELS = {
+        "India Fund Equity Savings - Aggressive": "Aggressive",
+        "India Fund Equity Savings - Conservative": "Conservative",
+    }
+    
+    all_funds = []
+    for cat in cat_list:
+        cat = cat.strip()
+        funds = get_all_funds_for_dropdown(d, asset_class, cat)
+        label = LABELS.get(cat, "")
+        for f in funds:
+            f["sub_label"] = label
+        all_funds.extend(funds)
+    
+    return {"funds": all_funds, "date": str(d)}
+
+
 @router.get("/search")
 def search_funds(q: str, date: str = Query(None)):
     """Global fund search across all categories."""
