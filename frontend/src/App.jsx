@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import Navbar from './components/Layout/Navbar';
 import Header from './components/Layout/Header';
 import FundExplorer from './components/FundExplorer/FundExplorer';
-import Home from './components/Home/Home';
+import FundDetail from './components/FundDetail/FundDetail';
 import Performance from './components/Performance/Performance';
 import PeerComparison from './components/PeerComparison/PeerComparison';
 import Simulator from './components/Simulator/Simulator';
@@ -68,7 +68,7 @@ export default function App() {
                 <FundExplorer selectedDate={selectedDate} setSelectedFund={handleFundSelect} />
               } />
               <Route path="/home" element={
-                <Home selectedDate={selectedDate} selectedFund={selectedFund} setSelectedFund={handleFundSelect} />
+                <FundDetail selectedDate={selectedDate} selectedFund={selectedFund} setSelectedFund={handleFundSelect} />
               } />
               <Route path="/performance" element={
                 <Performance selectedDate={selectedDate} selectedFund={selectedFund} />
