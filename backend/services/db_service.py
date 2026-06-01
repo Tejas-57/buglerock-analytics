@@ -474,7 +474,7 @@ def search_funds_global(query: str, data_date: date, limit: int = 50) -> list:
     """Search all funds by name or ISIN across all categories with partial word matching."""
     db = get_session()
     try:
-        from sqlalchemy import and_
+        from sqlalchemy import and_, func
         words = [w.strip() for w in query.lower().split() if w.strip()]
         if not words:
             return []
@@ -487,8 +487,9 @@ def search_funds_global(query: str, data_date: date, limit: int = 50) -> list:
             DailyFundData.isin != None,
             DailyFundData.name != None,
             and_(*word_filters)
-        ).limit(limit).all()
-        result = [{
+        ).order_by(func.lower(DailyFundData.name)).limit(limit).all()
+
+        return [{
             "isin": f.isin,
             "name": f.name,
             "ranking": f.ranking,
@@ -497,8 +498,6 @@ def search_funds_global(query: str, data_date: date, limit: int = 50) -> list:
             "asset_class": f.asset_class,
             "return_1y": f.return_1y,
         } for f in funds]
-        result.sort(key=lambda x: x["name"] or "")
-        return result
     finally:
         db.close()
 
