@@ -15,7 +15,7 @@ const ASSET_STRUCTURE = [
   {
     id:'equity', label:'Equity', icon:'📈',
     subtypes:[
-      { id:'active', label:'Domestic Equity', asset_classes:['Equity'], groups:[
+      { id:'active', label:'Active Funds', asset_classes:['Equity'], groups:[
         { label:'', cats:['India Fund Large-Cap','India Fund Large & Mid-Cap','India Fund Flexi Cap','Cat: Flexi Cap Funds','Cat: Multi Cap Funds','India Fund Focused Fund','Cat: Contra / Value Funds'] },
         { label:'', cats:['India Fund Mid-Cap','India Fund Small-Cap'] },
         { label:'ELSS', cats:['India Fund ELSS (Tax Savings)'] },
@@ -31,7 +31,7 @@ const ASSET_STRUCTURE = [
         { label:'Broad Market', cats:['India ETF Large-Cap','India ETF Multi-Cap','India ETF Mid-Cap','India ETF Small-Cap','India ETF Value','India ETF Dividend Yield','India ETF Index Funds'] },
         { label:'Sectoral', cats:['India ETF Sector - Financial Services','India ETF Sector - Technology','India ETF Sector - Healthcare','India ETF Sector - Energy','India ETF Sector - Precious Metals','India ETF Equity - Infrastructure','India ETF Equity - Consumption','India ETF Equity - ESG','India ETF Equity - Other'] },
       ]},
-      { id:'global', label:'Global Equity', asset_classes:['International'], groups:[
+      { id:'global', label:'Global Funds', asset_classes:['International'], groups:[
         { label:'Global', cats:['India Fund Global - Other','Cat: Global - Other Funds','Cat: Global - Innovation Funds','Cat: Emerging Market Funds','Cat: China & Asia based Funds','Cat: US based Funds','Cat: Europe based Funds'] },
       ]},
     ],
@@ -58,14 +58,14 @@ const ASSET_STRUCTURE = [
     ]}],
   },
   {
-    id:'fixed_income', label:'Fixed Income', icon:'🏦',
+    id:'fixed_income', label:'Debt', icon:'🏦',
     subtypes:[
       { id:'debt_mf', label:'Debt MFs', asset_classes:['Debt'], groups:[
         { label:'Liquid Funds', cats:['India OE Overnight','India OE Liquid','India OE Ultra Short Duration','India OE Money Market'] },
         { label:'Duration Funds', cats:['India OE Short Duration','India OE Low Duration','India OE Medium Duration','India OE Medium to Long Duration','India OE Long Duration','India OE Government Bond','India OE 10 yr Government Bond'] },
         { label:'Others', cats:['India OE Corporate Bond','India OE Dynamic Bond','India OE Floating Rate','India OE Banking & PSU','India OE Credit Risk','India OE Index Funds - Fixed Income','India OE Other Bond','India OE Fund of Funds'] },
       ]},
-      { id:'debt_etf', label:'Fixed Income ETFs', asset_classes:['ETF - Debt'], groups:[
+      { id:'debt_etf', label:'Debt ETFs', asset_classes:['ETF - Debt'], groups:[
         { label:'ETF', cats:['India ETF Medium to Long Duration','India ETF Long Duration','India ETF Government Bond','India ETF 10 yr Government Bond','India ETF Index Funds - Fixed Income'] },
       ]},
     ],
