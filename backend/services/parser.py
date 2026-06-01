@@ -59,6 +59,8 @@ WHITELIST_RANKINGS = {"R1", "R2"}
 CATEGORY_PREFIXES = ("India Fund", "India OE", "Cat:", "India ETF")
 
 # Thematic merge — any category starting with "Cat: Thematic" → "Thematic Funds"
+PARSER_VERSION = "1.1"  # Bump this whenever parser logic changes
+
 THEMATIC_PREFIX = "Cat: Thematic"
 THEMATIC_DISPLAY = "Thematic Funds"
 
