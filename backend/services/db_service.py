@@ -445,6 +445,8 @@ def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> li
             DailyFundData.name,
             DailyFundData.ranking,
             DailyFundData.amfi_code,
+            DailyFundData.return_1m,
+            DailyFundData.return_3m,
             DailyFundData.return_1y,
             DailyFundData.return_3y,
         ).filter(
@@ -455,7 +457,8 @@ def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> li
         ).all()
 
         result = [{"isin": f.isin, "name": f.name, "ranking": f.ranking,
-                   "amfi_code": f.amfi_code, "return_1y": f.return_1y,
+                   "amfi_code": f.amfi_code, "return_1m": f.return_1m,
+                   "return_3m": f.return_3m, "return_1y": f.return_1y,
                    "return_3y": f.return_3y} for f in funds]
 
         def sort_key(f):
