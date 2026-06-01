@@ -470,19 +470,25 @@ def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> li
 
 # ── Global fund search ───────────────────────────────────────────────────────
 
-def search_funds_global(query: str, data_date: date, limit: int = 20) -> list:
-    """Search all funds by name or ISIN across all categories."""
+def search_funds_global(query: str, data_date: date, limit: int = 30) -> list:
+    """Search all funds by name or ISIN across all categories with partial word matching."""
     db = get_session()
     try:
-        q = f"%{query.lower()}%"
+        from sqlalchemy import and_
+        words = [w.strip() for w in query.lower().split() if w.strip()]
+        if not words:
+            return []
+        word_filters = [
+            (DailyFundData.name.ilike(f"%{w}%")) | (DailyFundData.isin.ilike(f"%{w}%"))
+            for w in words
+        ]
         funds = db.query(DailyFundData).filter(
             DailyFundData.data_date == data_date,
             DailyFundData.isin != None,
             DailyFundData.name != None,
-            (DailyFundData.name.ilike(q)) | (DailyFundData.isin.ilike(q))
+            and_(*word_filters)
         ).limit(limit).all()
-
-        return [{
+        result = [{
             "isin": f.isin,
             "name": f.name,
             "ranking": f.ranking,
@@ -491,6 +497,8 @@ def search_funds_global(query: str, data_date: date, limit: int = 20) -> list:
             "asset_class": f.asset_class,
             "return_1y": f.return_1y,
         } for f in funds]
+        result.sort(key=lambda x: x["name"] or "")
+        return result
     finally:
         db.close()
 
