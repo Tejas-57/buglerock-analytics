@@ -241,9 +241,16 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
 
   const effectiveWhitelisted = showWhitelisted && !isPassiveSubtype && hasRankedFunds;
 
-  const peerAvg  = sortBy === '3y' ? peerAvg3y : peerAvg1y;
-  const sortKey  = sortBy === '3y' ? 'return_3y' : 'return_1y';
-  const sortLbl  = sortBy === '3y' ? '3Y' : '1Y';
+  const isSIF = selectedSubtype === 'sif_all';
+  const peerAvg  = isSIF
+    ? (sortBy === '3m' ? null : peerAvg1y)  // SIF: no peer avg for 1M/3M
+    : (sortBy === '3y' ? peerAvg3y : peerAvg1y);
+  const sortKey  = isSIF
+    ? (sortBy === '3m' ? 'return_3m' : 'return_1m')
+    : (sortBy === '3y' ? 'return_3y' : 'return_1y');
+  const sortLbl  = isSIF
+    ? (sortBy === '3m' ? '3M' : '1M')
+    : (sortBy === '3y' ? '3Y' : '1Y');
 
   // Global search effect
   useEffect(() => {
@@ -436,7 +443,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <span style={{ fontSize:11, color:'var(--text-muted)' }}>Sort by</span>
-          {[{val:'1y',label:'1Y Return'},{val:'3y',label:'3Y Return'}].map(({val,label})=>(
+          {(isSIF ? [{val:'1m',label:'1M Return'},{val:'3m',label:'3M Return'}] : [{val:'1y',label:'1Y Return'},{val:'3y',label:'3Y Return'}]).map(({val,label})=>(
             <button key={val} onClick={()=>setSortBy(sortBy===val?null:val)} style={{
               padding:'3px 10px', borderRadius:4, border:'1px solid',
               borderColor: sortBy===val ? 'var(--brand-primary)' : 'var(--border)',
