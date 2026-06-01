@@ -19,7 +19,7 @@ const ASSET_STRUCTURE = [
         { label:'', cats:['India Fund Large-Cap','India Fund Large & Mid-Cap','India Fund Flexi Cap','Cat: Flexi Cap Funds','Cat: Multi Cap Funds','India Fund Focused Fund','Cat: Contra / Value Funds'] },
         { label:'', cats:['India Fund Mid-Cap','India Fund Small-Cap'] },
         { label:'ELSS', cats:['India Fund ELSS (Tax Savings)'] },
-        { label:'Thematic & Sectoral', cats:['Thematic Funds','Cat: Banking & Financial Services Funds','Cat: Infrastructure Funds','Cat: Consumption Funds','India Fund Sector - Energy','Cat: IT / Tech Funds','Cat: Healthcare funds','Cat: MNC Funds','India Fund Equity - Other'] },
+        { label:'Thematic & Sectoral', cats:['Thematic Funds','Cat: Thematic - Quant','Cat: Thematic - Business Cycle','Cat: Banking & Financial Services Funds','Cat: Infrastructure Funds','Cat: Consumption Funds','India Fund Sector - Energy','Cat: IT / Tech Funds','Cat: Healthcare funds','Cat: MNC Funds','India Fund Equity - Other'] },
         { label:'Others', cats:['Cat: Equity FoF','Cat: Multi Factor'] },
       ]},
       { id:'passive_index', label:'Passive Funds', asset_classes:['Equity Index'], groups:[

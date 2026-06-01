@@ -151,9 +151,11 @@ def is_category_header(name: str) -> bool:
     return any(name.startswith(p) for p in CATEGORY_PREFIXES)
 
 
+THEMATIC_EXCEPTIONS = {"Cat: Thematic - Quant", "Cat: Thematic - Business Cycle"}
+
 def get_display_category(raw_name: str) -> str:
-    """Apply thematic merge rule."""
-    if raw_name.startswith(THEMATIC_PREFIX):
+    """Merge all Cat: Thematic - X into Thematic Funds except the exceptions."""
+    if raw_name.startswith(THEMATIC_PREFIX) and raw_name not in THEMATIC_EXCEPTIONS:
         return THEMATIC_DISPLAY
     return raw_name
 
