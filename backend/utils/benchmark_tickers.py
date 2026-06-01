@@ -58,3 +58,30 @@ def get_ticker_for_benchmark(benchmark_name: str) -> str | None:
         if key.lower() in bm_lower:
             return ticker
     return None
+
+# Alias for Yahoo ticker lookup
+def get_yahoo_ticker_for_benchmark(benchmark_name: str) -> str | None:
+    return get_ticker_for_benchmark(benchmark_name)
+
+# NSE index map for benchmarks (used for TRI data via NSE API)
+NSE_INDEX_MAP = {
+    "Nifty 50":             "NIFTY 50",
+    "Nifty 500":            "NIFTY 500",
+    "Nifty 100":            "NIFTY 100",
+    "Nifty Next 50":        "NIFTY NEXT 50",
+    "Nifty Midcap 150":     "NIFTY MIDCAP 150",
+    "Nifty Smallcap 250":   "NIFTY SMALLCAP 250",
+    "Nifty Bank":           "NIFTY BANK",
+    "Nifty IT":             "NIFTY IT",
+    "BSE SENSEX":           "SENSEX",
+}
+
+def get_nse_index_for_benchmark(benchmark_name: str) -> str | None:
+    """Returns NSE index name for a benchmark, or None if not mapped."""
+    if not benchmark_name:
+        return None
+    bm_lower = benchmark_name.lower()
+    for key, index in NSE_INDEX_MAP.items():
+        if key.lower() in bm_lower:
+            return index
+    return None
