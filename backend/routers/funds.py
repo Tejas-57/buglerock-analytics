@@ -142,7 +142,7 @@ async def upload_file(file: "UploadFile", date: str = Query(...)):
     from services.db_service import save_parsed_data
     from datetime import date as date_type
 
-    d = resolve_date(date)
+    d = date_type.fromisoformat(date)  # use exact date, no trading day resolution
     contents = await file.read()
 
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
