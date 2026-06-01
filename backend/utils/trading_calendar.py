@@ -90,11 +90,24 @@ def get_data_date_for_email(email_date: date) -> date:
     return prev_trading_day(email_date)
 
 
-def resolve_user_date(user_date: date) -> date:
+def resolve_user_date(user_date: date, check_db: bool = False) -> date:
     """
     If user picks a non-trading day, resolve to the most recent trading day.
+    If check_db=True, first check if data exists for the exact date.
     e.g. Saturday → Friday, Holiday → day before
     """
     if is_trading_day(user_date):
         return user_date
+    if check_db:
+        try:
+            from models.database import SessionLocal, DailyFundData
+            db = SessionLocal()
+            exists = db.query(DailyFundData.data_date).filter(
+                DailyFundData.data_date == user_date
+            ).first()
+            db.close()
+            if exists:
+                return user_date
+        except Exception:
+            pass
     return prev_trading_day(user_date)

@@ -118,10 +118,15 @@ async def nav_chart(
 @router.get("/peer-avg")
 def peer_avg_only(category: str, asset_class: str, date: str = Query(None)):
     """Return peer average for a category without needing a specific fund ISIN."""
-    from utils.trading_calendar import resolve_user_date
-    d = resolve_user_date(date_type.fromisoformat(date) if date else date_type.today())
+    from services.db_service import get_latest_data_date
+    d = date_type.fromisoformat(date) if date else date_type.today()
+    # If no data for requested date, fall back to latest available
+    from services.db_service import get_peer_avg as _get_peer_avg
+    peer_avg = _get_peer_avg(category, d, asset_class)
+    if peer_avg is None:
+        d = get_latest_data_date() or d
+        peer_avg = _get_peer_avg(category, d, asset_class)
     benchmark = get_benchmark_for_category(category, d)
-    peer_avg = get_peer_avg(category, d, asset_class)
     return {
         "benchmark": benchmark,
         "peer_avg": peer_avg,

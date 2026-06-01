@@ -16,7 +16,7 @@ def resolve_date(date_str: str = None) -> date_type:
         d = date_type.fromisoformat(date_str)
     else:
         d = date_type.today()
-    return resolve_user_date(d)
+    return resolve_user_date(d, check_db=True)
 
 
 def ensure_todays_data(d=None):
