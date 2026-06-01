@@ -1,188 +1,172 @@
-# BugleRock Analytics — Setup Guide
+# BugleRock Analytics Platform
 
-## Project Structure
+AI-native mutual fund analytics platform for BugleRock Capital (BRCPL).
 
-```
-buglerock-analytics/
-├── frontend/          ← React app
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Layout/        (Navbar, Header)
-│   │   │   ├── Home/          (Fund snapshot, pie charts)
-│   │   │   ├── Performance/   (Returns, risk, NAV chart)
-│   │   │   ├── PeerComparison/(Peer table)
-│   │   │   ├── Simulator/     (SIP/Lumpsum backtest)
-│   │   │   ├── RollingAnalytics/ (Rolling CAGR)
-│   │   │   └── Chat/          (Gemini floating chat)
-│   │   ├── styles/global.css
-│   │   └── App.jsx
-│   └── package.json
-│
-└── backend/           ← Python FastAPI
-    ├── main.py
-    ├── models/database.py
-    ├── routers/
-    │   ├── funds.py
-    │   ├── home.py
-    │   ├── performance.py
-    │   ├── peer.py
-    │   ├── simulator.py
-    │   ├── rolling.py
-    │   ├── chat.py
-    │   └── status.py
-    ├── services/
-    │   ├── parser.py
-    │   ├── gmail_watcher.py
-    │   ├── mfapi.py
-    │   └── db_service.py
-    ├── utils/
-    │   └── trading_calendar.py
-    └── requirements.txt
-```
+## Live URLs
+- **Frontend:** https://buglerock-analytics.onrender.com
+- **Backend:** https://buglerock-backend.onrender.com
+- **API Docs:** https://buglerock-backend.onrender.com/docs
+
+## Stack
+- **Backend:** FastAPI + PostgreSQL + SQLAlchemy + Python 3.11
+- **Frontend:** React 18 + Recharts + React Router
+- **Data:** Morningstar Daily Excel (auto-fetched via Gmail API)
+- **AI Chat:** Gemini 2.5 Flash (`google-generativeai`)
+- **Hosting:** Render (backend: Web Service, frontend: Static Site, DB: PostgreSQL)
+
+## Repository
+- **GitHub:** https://github.com/Tejas-57/buglerock-analytics
+- **Branch:** `main` (auto-deploys to Render on push)
 
 ---
 
-## Prerequisites
+## Architecture
 
-- Node.js 18+
-- Python 3.11+
-- PostgreSQL 15+
+```
+Gmail (sujaya.l@alerts-morningstar.com)
+    → Backend polls every 5 mins
+    → parser.py parses Excel (8 sheets)
+    → PostgreSQL stores fund data
+    → React frontend fetches via API
+```
 
----
+## Key Files
+```
+backend/
+  main.py                    — FastAPI app, startup, Gmail poll loop
+  services/parser.py         — Excel parser (PARSER_VERSION here)
+  services/gmail_watcher.py  — Gmail OAuth + attachment download
+  services/db_service.py     — All DB read/write operations
+  models/database.py         — SQLAlchemy models + AppSettings
+  routers/funds.py           — Fund list, search, upload endpoints
+  routers/performance.py     — Performance metrics, peer avg
+  routers/gmail.py           — Gmail token management
+  utils/trading_calendar.py  — NSE holiday calendar + date resolution
 
-## Step 1 — PostgreSQL Setup
-
-```sql
-CREATE DATABASE buglerock_analytics;
-CREATE USER buglerock WITH PASSWORD 'yourpassword';
-GRANT ALL PRIVILEGES ON DATABASE buglerock_analytics TO buglerock;
+frontend/
+  src/components/FundExplorer/FundExplorer.jsx  — Main fund explorer UI
+  src/App.jsx                                   — App shell, date fetching
+  src/components/Layout/Header.jsx              — Header with data date
 ```
 
 ---
 
-## Step 2 — Backend Setup
+## Parser Version System (IMPORTANT)
 
+`backend/services/parser.py` has a `PARSER_VERSION` constant:
+
+```python
+PARSER_VERSION = "1.1"
+```
+
+**Rule:** Whenever parser logic changes (new categories, column mapping, merging rules), bump this version. On next deploy, the app will:
+1. Detect version mismatch
+2. Delete last 7 days of DB data
+3. Re-fetch from Gmail automatically
+4. Re-parse with new logic
+5. Save new version to DB
+
+**This must be done by whoever makes parser changes — no manual data uploads needed.**
+
+---
+
+## Gmail Auto-Fetch
+- Email arrives daily from `sujaya.l@alerts-morningstar.com`
+- Subject: `Morningstar Performance Reporting batch [New Singlesheet Daily MF Report] has finished`
+- Attachment: `New Singlesheet Daily MF Report_DDMMYYYY.xlsx`
+- Token stored permanently in PostgreSQL (`app_settings` table, key: `gmail_token`)
+- If token expires: call `POST /api/gmail/refresh-token` via `/docs`
+- If token needs re-setup: call `POST /api/gmail/store-token` (reads from Render Secret Files)
+
+---
+
+## Render Setup
+| Service | Type | Env Vars |
+|---------|------|----------|
+| buglerock-backend | Web Service (Python 3.11) | `DATABASE_URL`, `GEMINI_API_KEY`, `CORS_ORIGINS` |
+| buglerock-analytics | Static Site | `REACT_APP_API_URL` |
+| buglerock-db | PostgreSQL | — |
+
+**Secret Files** (on backend service):
+- `gmail_credentials.json` — OAuth client credentials
+- `gmail_token.json` — OAuth token (backup, primary stored in DB)
+
+**Redirect Rule** (on frontend service):
+- Source: `/*` → Destination: `/index.html` (Type: Rewrite)
+
+---
+
+## Excel Sheet Names (as of May 2026)
+| Sheet | Asset Class |
+|-------|-------------|
+| Equity | Equity |
+| Equity Index & FoF | Equity Index |
+| Equity ETF | ETF - Equity |
+| Hybrid | Hybrid |
+| SIF | SIF |
+| International | International |
+| Debt | Debt |
+| Debt ETF | ETF - Debt |
+
+---
+
+## Category Rules
+- All `Cat: Thematic - X` merge into `Thematic Funds` **except**:
+  - `Cat: Thematic - Quant` (shown separately)
+  - `Cat: Thematic - Business Cycle` (shown separately)
+- `India Fund Equity Savings - Aggressive` and `India Fund Equity Savings - Conservative` are merged into `India Fund Equity Savings` in the UI
+- SIF shows 1M/3M returns (not 1Y/3Y) since it's a new category
+
+---
+
+## Local Development
 ```bash
+# Backend
 cd backend
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-
-# Install dependencies
+py -3.11 -m venv venv
+venv\Scripts\activate
 pip install -r requirements.txt
 
-# Configure environment
-cp .env.example .env
-# Edit .env with your actual values:
-#   DATABASE_URL
-#   GEMINI_API_KEY
-#   Gmail credentials path
-```
+# Add to backend/.env:
+# DATABASE_URL=<Render PostgreSQL External URL>
+# GEMINI_API_KEY=<your key>
+# CORS_ORIGINS=http://localhost:3000
 
-### Gmail API Setup
-
-1. Go to https://console.cloud.google.com
-2. Create a new project → Enable **Gmail API**
-3. Create OAuth 2.0 credentials (Desktop App)
-4. Download `credentials.json` → save to `backend/credentials/gmail_credentials.json`
-5. On first run, a browser window will open for OAuth login
-6. Login with `tejas.s@buglerock.asia`
-7. Token saved automatically to `backend/credentials/gmail_token.json`
-
-### Gemini API Key
-
-1. Go to https://aistudio.google.com
-2. Create API key → paste in `.env` as `GEMINI_API_KEY`
-
-### Run Backend
-
-```bash
-cd backend
 python main.py
-# API runs at http://localhost:8000
-# Docs at http://localhost:8000/docs
-```
 
----
-
-## Step 3 — Frontend Setup
-
-```bash
+# Frontend
 cd frontend
 npm install
 npm start
-# Runs at http://localhost:3000
 ```
 
----
-
-## Step 4 — First Data Load
-
-The Gmail watcher will automatically:
-1. Check for today's email every 5 minutes
-2. Download the Excel attachment
-3. Parse all 4 sheets
-4. Store in PostgreSQL
-
-To manually trigger a data load for a specific date:
+## Tar Command (for sharing code with Claude)
 ```bash
-# From backend directory
-python -c "
-from services.gmail_watcher import fetch_and_store
-from datetime import date
-fetch_and_store(date(2026, 4, 9))
-"
+cd /c/Users/tejas.s_buglerock/buglerock-analytics
+tar -czf ../buglerock_project.tar.gz --exclude=backend/venv --exclude=backend/__pycache__ --exclude=backend/buglerock.db --exclude=backend/credentials backend frontend/src frontend/public frontend/package.json .gitignore
 ```
 
 ---
 
-## NSE Holiday List
+## What's Built
+- ✅ Fund Explorer — asset class → subtype → category → fund list with ranking, returns, peer avg
+- ✅ Home tab — fund snapshot with NAV, returns, risk metrics
+- ✅ Performance tab — NAV chart vs benchmark, return/risk metrics
+- ✅ Peer Comparison tab — returns and risk comparison
+- ✅ Simulator tab — SIP/lumpsum calculator
+- ✅ Rolling Analytics tab
+- ✅ AI Chat — Gemini powered
+- ✅ Global search — all categories, partial word match
+- ✅ Gmail auto-fetch — daily data, 5-min poll
+- ✅ PostgreSQL — persistent data
+- ✅ Parser version system — auto re-parse on logic changes
 
-Update `backend/utils/trading_calendar.py` annually with the new NSE holiday list.
-Official source: https://www.nseindia.com/products-services/equity-market-timings-holidays
-
----
-
-## Key Rules Implemented
-
-| Rule | Implementation |
-|---|---|
-| R1/R2 whitelist | `parser.py → apply_whitelist()` |
-| No rankings → show all | `db_service.py → get_funds_for_dropdown()` |
-| Thematic merge | `parser.py → MERGE_RULES` |
-| Index MF excluded | `parser.py → EXCLUDE_PREFIXES` |
-| Email X+1 offset | `trading_calendar.py → get_email_date_for()` |
-| NSE holiday handling | `trading_calendar.py → is_trading_day()` |
-| Missing data as "-" | `db_service.py → _fund_to_dict()` |
-| Peer avg only (no rank) | `db_service.py → get_peer_avg()` |
-| 252 trading days/year | `mfapi.py → TRADING_DAYS_PER_YEAR` |
-
----
-
-## Adding Index MFs Later
-
-In `backend/services/parser.py`, remove `"Index MF"` from `EXCLUDE_PREFIXES`:
-
-```python
-EXCLUDE_PREFIXES = [
-    # "Index MF",   ← remove this line
-]
-```
-
-Restart backend. Index MFs will appear automatically.
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | React 18 |
-| Backend | Python 3.11 + FastAPI |
-| Database | PostgreSQL 15 |
-| Email | Gmail API (OAuth2) |
-| Market Data | MFAPI.in (free) |
-| AI Chat | Google Gemini 1.5 Flash |
-| Charts | Recharts |
-| Fonts | Cormorant Garamond + DM Sans |
+## What's Pending
+- 🔲 Fund Detail tab
+- 🔲 Compare Funds tab
+- 🔲 Watchlist
+- 🔲 Portfolio Builder
+- 🔲 Optimisation
+- 🔲 Recommended Portfolio
+- 🔲 Portfolio Review
+- 🔲 PDF Proposal
