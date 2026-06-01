@@ -5,7 +5,7 @@ from services.db_service import (
     get_asset_classes, get_categories, get_funds_for_dropdown,
     has_data_for_date, get_latest_data_date
 )
-from services.gmail_watcher import fetch_and_store, get_gmail_service, GMAIL_SENDER, SUBJECT_KEYWORD
+from services.gmail_watcher import fetch_and_store, fetch_latest, get_gmail_service, GMAIL_SENDER, SUBJECT_KEYWORD
 from utils.trading_calendar import resolve_user_date
 
 router = APIRouter()
@@ -19,16 +19,8 @@ def resolve_date(date_str: str = None) -> date_type:
     return resolve_user_date(d)
 
 
-def ensure_todays_data(d: date_type):
-    """
-    Fetch today's email if we don't have data for yesterday yet.
-    Email arrives today containing data as of yesterday.
-    Only attempts for today — no historical fetching.
-    """
-    from datetime import timedelta
-    yesterday = d - timedelta(days=1)
-    if not has_data_for_date(yesterday):
-        fetch_and_store()
+def ensure_todays_data(d=None):
+    fetch_latest(check_days=3)
 
 
 @router.get("/asset-classes")
