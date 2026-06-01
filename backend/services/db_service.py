@@ -470,7 +470,7 @@ def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> li
 
 # ── Global fund search ───────────────────────────────────────────────────────
 
-def search_funds_global(query: str, data_date: date, limit: int = 30) -> list:
+def search_funds_global(query: str, data_date: date, limit: int = 50) -> list:
     """Search all funds by name or ISIN across all categories with partial word matching."""
     db = get_session()
     try:
