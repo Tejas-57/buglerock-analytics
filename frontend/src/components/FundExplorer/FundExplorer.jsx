@@ -122,6 +122,8 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   const [allFunds, setAllFunds]               = useState([]);
   const [peerAvg1y, setPeerAvg1y]             = useState(null);
   const [peerAvg3y, setPeerAvg3y]             = useState(null);
+  const [peerAvg1m, setPeerAvg1m]             = useState(null);
+  const [peerAvg3m, setPeerAvg3m]             = useState(null);
   const [loading, setLoading]                 = useState(false);
   const [availableCats, setAvailableCats]     = useState(null);
   const [availableCatsSubtype, setAvailableCatsSubtype] = useState(null);
@@ -214,7 +216,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
 
   useEffect(() => {
     if (!selectedCat || !subtypeItem || !dateStr) return;
-    setLoading(true); setAllFunds([]); setPeerAvg1y(null); setPeerAvg3y(null);
+    setLoading(true); setAllFunds([]); setPeerAvg1y(null); setPeerAvg3y(null); setPeerAvg1m(null); setPeerAvg3m(null);
     const ac = subtypeItem.asset_classes[0];
     const catNorm = normCat(selectedCat);
     const mergedConfig = MERGED_CATEGORIES[catNorm] || MERGED_CATEGORIES[selectedCat];
@@ -229,6 +231,8 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
       setAllFunds(fd.funds || []);
       setPeerAvg1y(pd?.peer_avg?.returns?.['1y'] ?? null);
       setPeerAvg3y(pd?.peer_avg?.returns?.['3y'] ?? null);
+      setPeerAvg1m(pd?.peer_avg?.returns?.['1m'] ?? null);
+      setPeerAvg3m(pd?.peer_avg?.returns?.['3m'] ?? null);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [selectedCat, selectedSubtype, dateStr]);
@@ -243,7 +247,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
 
   const isSIF = selectedSubtype === 'sif_all';
   const peerAvg  = isSIF
-    ? (sortBy === '3m' ? null : peerAvg1y)  // SIF: no peer avg for 1M/3M
+    ? (sortBy === '3m' ? peerAvg3m : peerAvg1m)
     : (sortBy === '3y' ? peerAvg3y : peerAvg1y);
   const sortKey  = isSIF
     ? (sortBy === '3m' ? 'return_3m' : 'return_1m')
