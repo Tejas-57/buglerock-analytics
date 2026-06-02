@@ -344,15 +344,18 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
     ['YTD',      r['ytd'], bmR['ytd']],
   ].filter(([, fv]) => fv != null && fv !== '-');
 
+  const bmRisk = benchmark?.risk || {};
+  const bmRk = (base) => { const v = bmRisk[`${base}_${period}`]; return v != null && v !== '-' ? v : null; };
+
   const riskRows = [
-    { l:'Std Dev',  v3:rk('std_dev'),      v1:rk1('std_dev'),      fmt:v=>fmt(v)+'%', sig:v=>parseFloat(v)<12?'Low vol':parseFloat(v)<18?'Moderate':'High vol' },
-    { l:'Alpha',    v3:rk('alpha'),        v1:rk1('alpha'),        fmt:v=>pct(v),     sig:v=>parseFloat(v)>2?'Strong outperform':parseFloat(v)>0?'Positive':parseFloat(v)>-2?'Slight lag':'Underperform' },
-    { l:'Beta',     v3:rk('beta'),         v1:rk1('beta'),         fmt:v=>fmt(v),     sig:v=>parseFloat(v)<0.8?'Defensive':parseFloat(v)<1.1?'Market-like':'Aggressive' },
-    { l:'Sharpe',   v3:rk('sharpe_ratio'), v1:rk1('sharpe_ratio'), fmt:v=>fmt(v),     sig:v=>parseFloat(v)>0.8?'Strong':parseFloat(v)>0.5?'Adequate':'Weak' },
-    { l:'Sortino',  v3:rk('sortino_ratio'),v1:rk1('sortino_ratio'),fmt:v=>fmt(v),     sig:v=>parseFloat(v)>1?'Good':parseFloat(v)>0.6?'Moderate':'Weak' },
-    { l:'Up cap',   v3:rk('up_capture'),   v1:rk1('up_capture'),   fmt:v=>fmt(v)+'%', sig:v=>parseFloat(v)>100?'Beats mkt upside':'Lags upside' },
-    { l:'Down cap', v3:rk('down_capture'), v1:rk1('down_capture'), fmt:v=>fmt(v)+'%', sig:v=>parseFloat(v)<90?'Protected':parseFloat(v)<100?'Moderate':'Poor protect' },
-  ].filter(row => (row.v3!=null&&row.v3!=='-')||(row.v1!=null&&row.v1!=='-'));
+    { l:'Std Dev',  vf:rk('std_dev'),      vb:bmRk('std_dev'),      fmt:v=>fmt(v)+'%', sig:v=>parseFloat(v)<12?'Low vol':parseFloat(v)<18?'Moderate':'High vol' },
+    { l:'Alpha',    vf:rk('alpha'),        vb:null,                  fmt:v=>pct(v),     sig:v=>parseFloat(v)>2?'Strong outperform':parseFloat(v)>0?'Positive':parseFloat(v)>-2?'Slight lag':'Underperform' },
+    { l:'Beta',     vf:rk('beta'),         vb:null,                  fmt:v=>fmt(v),     sig:v=>parseFloat(v)<0.8?'Defensive':parseFloat(v)<1.1?'Market-like':'Aggressive' },
+    { l:'Sharpe',   vf:rk('sharpe_ratio'), vb:bmRk('sharpe_ratio'), fmt:v=>fmt(v),     sig:v=>parseFloat(v)>0.8?'Strong':parseFloat(v)>0.5?'Adequate':'Weak' },
+    { l:'Sortino',  vf:rk('sortino_ratio'),vb:bmRk('sortino_ratio'),fmt:v=>fmt(v),     sig:v=>parseFloat(v)>1?'Good':parseFloat(v)>0.6?'Moderate':'Weak' },
+    { l:'Up cap',   vf:rk('up_capture'),   vb:null,                  fmt:v=>fmt(v),     sig:v=>parseFloat(v)>100?'Beats mkt upside':'Lags upside' },
+    { l:'Down cap', vf:rk('down_capture'), vb:null,                  fmt:v=>fmt(v),     sig:v=>parseFloat(v)<90?'Protected':parseFloat(v)<100?'Moderate':'Poor protect' },
+  ].filter(row => row.vf!=null&&row.vf!=='-');
 
   const nav52pct = f?.nav && f?.nav_52w_high && f?.nav_52w_low && f.nav!=='-' && f.nav_52w_high!=='-' && f.nav_52w_low!=='-'
     ? Math.min(100, Math.max(0, ((parseFloat(f.nav)-parseFloat(f.nav_52w_low))/(parseFloat(f.nav_52w_high)-parseFloat(f.nav_52w_low)))*100))
@@ -370,7 +373,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
     <div style={{ paddingBottom: 40 }}>
 
       {/* ── HERO ── */}
-      <div style={{ background: '#fff', borderBottom: '1px solid var(--border)', padding: '16px 0 18px', marginBottom: 20 }}>
+      <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: '#fff', boxShadow: 'var(--shadow-card)', marginBottom: 14, padding: '16px 20px 18px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', marginBottom: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -391,7 +394,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
             {loading ? <div className="loading-shimmer" style={{ height: 36, width: 100, borderRadius: 6 }} /> : f?.nav && f.nav !== '-' ? (
               <>
                 <div style={{ fontFamily: 'var(--font-serif)', fontSize: 30, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-.03em', lineHeight: 1 }}>₹{fmt(f.nav)}</div>
-                {r['1d'] != null && r['1d'] !== '-' && <div style={{ fontSize: 13, fontWeight: 500, marginTop: 3, color: col(r['1d']) }}>{parseFloat(r['1d'])>=0?'▲ +':'▼ '}{fmt(r['1d'])}% today</div>}
+                {r['1d'] != null && r['1d'] !== '-' && <div style={{ fontSize: 13, fontWeight: 500, marginTop: 3, color: col(r['1d']) }}>{parseFloat(r['1d'])>=0?'▲ +':'▼ '}{fmt(r['1d'])}% 1D</div>}
                 {f.nav_date && f.nav_date !== '-' && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{f.nav_date}</div>}
               </>
             ) : null}
@@ -525,8 +528,8 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ background: 'var(--bg-secondary)' }}>
-                  {['Metric','3Y','1Y','Signal'].map(h => (
-                    <th key={h} style={{ padding: '8px 12px', textAlign: h==='Metric'?'left':'right', fontSize: 10, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
+                  {['Metric', `Fund (${period.toUpperCase()})`, bmName ? bmName.split(' ').slice(0,3).join(' ') : 'Benchmark', 'Signal'].map(h => (
+                    <th key={h} style={{ padding: '8px 12px', textAlign: h==='Metric'?'left':'right', fontSize: 10, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -536,9 +539,9 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
                 ) : riskRows.map(row => (
                   <tr key={row.l} style={{ borderBottom: '1px solid var(--bg-secondary)' }}>
                     <td style={{ padding: '9px 12px', color: 'var(--text-muted)' }}>{row.l}</td>
-                    <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{row.v3!=null&&row.v3!=='-'?row.fmt(row.v3):'—'}</td>
-                    <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{row.v1!=null&&row.v1!=='-'?row.fmt(row.v1):'—'}</td>
-                    <td style={{ padding: '9px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{row.v3!=null&&row.v3!=='-'?row.sig(row.v3):'—'}</td>
+                    <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{row.vf!=null&&row.vf!=='-'?row.fmt(row.vf):'—'}</td>
+                    <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{row.vb!=null&&row.vb!=='-'?row.fmt(row.vb):'—'}</td>
+                    <td style={{ padding: '9px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{row.vf!=null&&row.vf!=='-'?row.sig(row.vf):'—'}</td>
                   </tr>
                 ))}
               </tbody>
