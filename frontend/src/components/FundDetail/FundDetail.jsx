@@ -32,46 +32,144 @@ function stars(n) {
 function ReturnPill({ period, value, highlight }) {
   const v = value != null && value !== '-' ? parseFloat(value) : null;
   return (
-    <div style={{ border: `${highlight ? 1.5 : 1}px solid ${highlight ? 'var(--brand-primary)' : 'var(--border)'}`, borderRadius: 10, padding: '9px 8px', textAlign: 'center', background: highlight ? 'rgba(145,47,99,0.04)' : '#fff' }}>
-      <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>{period}</div>
-      <div style={{ fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 600, lineHeight: 1, letterSpacing: '-.02em', color: v != null ? col(v) : 'var(--text-muted)' }}>{v != null ? pct(v) : '—'}</div>
+    <div style={{ border: `${highlight ? 1.5 : 1}px solid ${highlight ? 'var(--brand-primary)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 10px', textAlign: 'center', background: highlight ? 'rgba(145,47,99,0.04)' : '#fff' }}>
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>{period}</div>
+      <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, lineHeight: 1, letterSpacing: '-.02em', color: v != null ? col(v) : 'var(--text-muted)' }}>{v != null ? pct(v) : '—'}</div>
     </div>
   );
 }
 
-function NavSparkline({ nav, nav52hi, nav52lo }) {
-  if (!nav || !nav52hi || !nav52lo || nav === '-' || nav52hi === '-' || nav52lo === '-') {
-    return <div style={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 12 }}>52W data not available</div>;
-  }
-  const lo = parseFloat(nav52lo), hi = parseFloat(nav52hi), cur = parseFloat(nav);
-  const rng = hi - lo;
-  const pts = [];
-  for (let i = 0; i <= 11; i++) {
-    const prog = i / 11;
-    const noise = (Math.sin(i * 1.7 + 2) * 0.15 + Math.sin(i * 0.9) * 0.1) * rng;
-    pts.push(lo + (cur - lo) * prog + noise);
-  }
-  pts[pts.length - 1] = cur;
-  const minP = Math.min(...pts) * 0.98, maxP = Math.max(...pts) * 1.02;
-  const W = 320, H = 60;
-  const toX = i => (i / (pts.length - 1)) * W;
-  const toY = v => H - ((v - minP) / (maxP - minP)) * H;
-  const pathD = pts.map((v, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(' ');
-  const areaD = pathD + ` L${W},${H} L0,${H} Z`;
-  const chgPct = rng > 0 ? ((cur - lo) / lo * 100).toFixed(1) : '0.0';
+function NAVChart({ fund, selectedDate }) {
+  const [navPeriod, setNavPeriod] = useState('1y');
+  const [chartData, setChartData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [tooltip, setTooltip] = useState(null);
+  const canvasRef = React.useRef(null);
+  const containerRef = React.useRef(null);
+
+  useEffect(() => {
+    if (!fund?.amfi_code) return;
+    setLoading(true);
+    const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
+    const params = new URLSearchParams({
+      amfi_code: fund.amfi_code,
+      period: navPeriod,
+      ...(fund.assetClass && { asset_class: fund.assetClass }),
+      ...(fund.category && { category: fund.category }),
+      ...(dateStr && { date: dateStr }),
+    });
+    fetch(`${API}/api/performance/nav-chart?${params}`)
+      .then(r => r.json())
+      .then(d => { setChartData(d.data || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [fund, navPeriod, selectedDate]);
+
+  const PERIODS = ['1m','3m','6m','1y','3y','5y'];
+  const hasData = chartData.length > 0;
+
+  const firstNav = hasData ? chartData.find(d => d.fund_nav != null)?.fund_nav : null;
+  const lastNav = hasData ? [...chartData].reverse().find(d => d.fund_nav != null)?.fund_nav : null;
+  const isPositive = firstNav && lastNav ? lastNav >= firstNav : true;
+  const lineColor = isPositive ? '#1A7A52' : '#912F63';
+
+  // Draw on canvas whenever data changes
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !hasData) return;
+    const W = canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+    const H = canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+
+    const vals = chartData.map(d => d.fund_nav).filter(v => v != null);
+    if (!vals.length) return;
+    const minV = Math.min(...vals) * 0.998;
+    const maxV = Math.max(...vals) * 1.002;
+    const toX = i => (i / (chartData.length - 1)) * W;
+    const toY = v => H - ((v - minV) / (maxV - minV || 1)) * H;
+
+    ctx.beginPath();
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2 * window.devicePixelRatio;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    let started = false;
+    chartData.forEach((d, i) => {
+      if (d.fund_nav == null) return;
+      const x = toX(i), y = toY(d.fund_nav);
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // End dot
+    const lastIdx = chartData.reduce((acc, d, i) => d.fund_nav != null ? i : acc, 0);
+    if (!tooltip) {
+      ctx.beginPath();
+      ctx.arc(toX(lastIdx), toY(chartData[lastIdx].fund_nav), 3 * window.devicePixelRatio, 0, Math.PI * 2);
+      ctx.fillStyle = lineColor;
+      ctx.fill();
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 1.5 * window.devicePixelRatio;
+      ctx.stroke();
+    }
+  }, [chartData, lineColor, tooltip]);
+
+  const getNavAtX = (clientX) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !hasData) return null;
+    const rect = canvas.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const idx = Math.min(chartData.length - 1, Math.max(0, Math.round(ratio * (chartData.length - 1))));
+    const d = chartData[idx];
+    if (!d?.fund_nav) return null;
+    const vals = chartData.map(p => p.fund_nav).filter(v => v != null);
+    const minV = Math.min(...vals) * 0.998;
+    const maxV = Math.max(...vals) * 1.002;
+    const toY = v => rect.height - ((v - minV) / (maxV - minV || 1)) * rect.height;
+    return { ratio, x: ratio * rect.width, y: toY(d.fund_nav), date: d.date, nav: d.fund_nav };
+  };
+
   return (
     <div>
-      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-        <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#912F63" stopOpacity=".18"/><stop offset="100%" stopColor="#912F63" stopOpacity="0"/></linearGradient></defs>
-        <path d={areaD} fill="url(#sg)"/>
-        <path d={pathD} fill="none" stroke="#912F63" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-        <circle cx={toX(pts.length-1).toFixed(1)} cy={toY(cur).toFixed(1)} r="3.5" fill="#912F63" stroke="white" strokeWidth="1.5"/>
-      </svg>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)', padding: '4px 0' }}>
-        <span>52W Low ₹{fmt(lo)}</span>
-        <span style={{ color: parseFloat(chgPct) >= 0 ? '#1A7A52' : '#912F63', fontWeight: 600 }}>{parseFloat(chgPct) >= 0 ? '+' : ''}{chgPct}% from low</span>
-        <span>52W High ₹{fmt(hi)}</span>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+        {PERIODS.map(p => (
+          <button key={p} onClick={() => setNavPeriod(p)} style={{ padding: '3px 10px', fontSize: 11, border: '1px solid', borderColor: navPeriod===p?'var(--brand-primary)':'var(--border)', borderRadius: 4, background: navPeriod===p?'var(--brand-primary)':'transparent', color: navPeriod===p?'#fff':'var(--text-muted)', cursor: 'pointer', fontWeight: 600, textTransform: 'uppercase' }}>{p}</button>
+        ))}
       </div>
+      <div style={{ height: 20, marginBottom: 4 }}>
+        {tooltip && (
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginLeft: `${Math.min(Math.max(tooltip.ratio * 100, 5), 75)}%` }}>
+            NAV: <strong>₹{fmt(tooltip.nav)}</strong>&nbsp;|&nbsp;{tooltip.date}
+          </span>
+        )}
+      </div>
+      {loading ? (
+        <div className="loading-shimmer" style={{ height: 180, borderRadius: 6 }} />
+      ) : !hasData ? (
+        <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 12 }}>NAV data not available</div>
+      ) : (
+        <div ref={containerRef} style={{ position: 'relative', height: 180, cursor: 'crosshair' }}
+          onMouseMove={e => setTooltip(getNavAtX(e.clientX))}
+          onMouseLeave={() => setTooltip(null)}
+        >
+          <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} />
+          {/* Vertical hover line */}
+          {tooltip && (
+            <div style={{ position: 'absolute', top: 0, bottom: 0, left: tooltip.x, width: 1, background: '#D0CDD4', pointerEvents: 'none', transform: 'translateX(-50%)' }} />
+          )}
+          {/* Hover dot */}
+          {tooltip && (
+            <div style={{ position: 'absolute', width: 10, height: 10, borderRadius: '50%', background: lineColor, border: '2px solid white', boxShadow: `0 0 0 1.5px ${lineColor}`, left: tooltip.x, top: tooltip.y, transform: 'translate(-50%,-50%)', pointerEvents: 'none' }} />
+          )}
+        </div>
+      )}
+      {hasData && chartData.length > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
+          <span>{chartData[0]?.date}</span>
+          <span>{chartData[chartData.length-1]?.date}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -244,7 +342,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
     <div style={{ paddingBottom: 40 }}>
 
       {/* ── HERO ── */}
-      <div style={{ background: '#fff', borderBottom: '1px solid var(--border)', paddingBottom: 14, marginBottom: 20 }}>
+      <div style={{ background: '#fff', borderBottom: '1px solid var(--border)', padding: '16px 0 18px', marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', marginBottom: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -284,14 +382,20 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
         )}
 
         {nav52pct != null && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>₹{fmt(f.nav_52w_low)}</span>
-            <div style={{ flex: 1, height: 5, background: 'var(--bg-secondary)', borderRadius: 3, position: 'relative' }}>
-              <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${nav52pct.toFixed(1)}%`, background: 'linear-gradient(to right,#C46985,#912F63)', borderRadius: 3 }} />
-              <div style={{ position: 'absolute', top: -3, left: `${nav52pct.toFixed(1)}%`, width: 11, height: 11, borderRadius: '50%', background: 'var(--brand-dark)', border: '2px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,.2)', transform: 'translateX(-50%)' }} />
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1, height: 5, background: 'var(--bg-secondary)', borderRadius: 3, position: 'relative' }}>
+                <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${nav52pct.toFixed(1)}%`, background: 'linear-gradient(to right,#C46985,#912F63)', borderRadius: 3 }} />
+                <div style={{ position: 'absolute', top: -3, left: `${nav52pct.toFixed(1)}%`, width: 11, height: 11, borderRadius: '50%', background: 'var(--brand-dark)', border: '2px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,.2)', transform: 'translateX(-50%)' }} />
+              </div>
             </div>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>₹{fmt(f.nav_52w_high)}</span>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4 }}>52-week range</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 5, fontSize: 10 }}>
+              <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>52W Low ₹{fmt(f.nav_52w_low)}</span>
+              <span style={{ color: parseFloat(((parseFloat(f.nav)-parseFloat(f.nav_52w_low))/parseFloat(f.nav_52w_low)*100).toFixed(1))>=0?'#1A7A52':'#912F63', fontWeight: 600 }}>
+                {((parseFloat(f.nav)-parseFloat(f.nav_52w_low))/parseFloat(f.nav_52w_low)*100)>=0?'+':''}{((parseFloat(f.nav)-parseFloat(f.nav_52w_low))/parseFloat(f.nav_52w_low)*100).toFixed(1)}% from low
+              </span>
+              <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>52W High ₹{fmt(f.nav_52w_high)}</span>
+            </div>
           </div>
         )}
       </div>
@@ -308,15 +412,15 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
         {/* ① RETURN PILLS */}
         <SecLabel>Returns at a glance</SecLabel>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8,minmax(0,1fr))', gap: 6, marginBottom: 14 }}>
-          {[['1M',r['1m']],['3M',r['3m']],['6M',r['6m']],['1Y',r['1y'],true],['YTD',r['ytd']],['3Y',r['3y']],['5Y',r['5y']],['10Y',r['10y']]].map(([p,v,hi]) => (
+          {[['1M',r['1m']],['3M',r['3m']],['6M',r['6m']],['1Y',r['1y']],['YTD',r['ytd']],['3Y',r['3y']],['5Y',r['5y']],['10Y',r['10y']]].map(([p,v,hi]) => (
             <ReturnPill key={p} period={p} value={v} highlight={hi} />
           ))}
         </div>
 
-        {/* ② NAV SPARKLINE */}
-        <Card title="Historical NAV performance" subtitle="Indicative — based on 52W range">
-          <div style={{ padding: '12px 14px 4px' }}>
-            <NavSparkline nav={f.nav} nav52hi={f.nav_52w_high} nav52lo={f.nav_52w_low} />
+        {/* ② NAV CHART */}
+        <Card title="Historical NAV performance" subtitle={null}>
+          <div style={{ padding: '12px 14px' }}>
+            <NAVChart fund={selectedFund} selectedDate={selectedDate} />
           </div>
         </Card>
 
