@@ -59,7 +59,7 @@ WHITELIST_RANKINGS = {"R1", "R2"}
 CATEGORY_PREFIXES = ("India Fund", "India OE", "Cat:", "India ETF")
 
 # Thematic merge — any category starting with "Cat: Thematic" → "Thematic Funds"
-PARSER_VERSION = "1.1"  # Bump this whenever parser logic changes
+PARSER_VERSION = "1.4"  # Bump this whenever parser logic changes
 
 THEMATIC_PREFIX = "Cat: Thematic"
 THEMATIC_DISPLAY = "Thematic Funds"
@@ -614,6 +614,7 @@ def _build_fund(row: dict, col_map: dict, asset_class: str) -> dict:
 def _build_benchmark(row, col_map, bm_label, bm_name,
                      display_cat, raw_cat, asset_class,
                      sheet_name, data_date, email_date) -> dict:
+    """Build benchmark as a DailyFundData-compatible dict with is_benchmark=1."""
     def r(f): return safe_float(row.get(f))
     return {
         "data_date":       data_date,
@@ -622,8 +623,12 @@ def _build_benchmark(row, col_map, bm_label, bm_name,
         "raw_category":    raw_cat,
         "asset_class":     asset_class,
         "sheet_name":      sheet_name,
+        "is_benchmark":    1,
         "benchmark_label": bm_label,
-        "benchmark_name":  bm_name,
+        "name":            bm_name,
+        "isin":            None,
+        "amfi_code":       None,
+        "ranking":         None,
         "return_1d":    r("return_1d"),  "return_1w":  r("return_1w"),
         "return_1m":    r("return_1m"),  "return_3m":  r("return_3m"),
         "return_6m":    r("return_6m"),  "return_1y":  r("return_1y"),
@@ -633,4 +638,31 @@ def _build_benchmark(row, col_map, bm_label, bm_name,
         "return_cy2025":r("return_cy2025"),"return_cy2024":r("return_cy2024"),
         "return_cy2023":r("return_cy2023"),"return_cy2022":r("return_cy2022"),
         "return_cy2021":r("return_cy2021"),
+        "std_dev_1y":       r("std_dev_1y"),
+        "sharpe_ratio_1y":  r("sharpe_ratio_1y"),
+        "sortino_ratio_1y": r("sortino_ratio_1y"),
+        "treynor_ratio_1y": r("treynor_ratio_1y"),
+        "alpha_1y":         r("alpha_1y"),
+        "beta_1y":          r("beta_1y"),
+        "up_capture_1y":    r("up_capture_1y"),
+        "down_capture_1y":  r("down_capture_1y"),
+        "information_ratio_1y": r("information_ratio_1y"),
+        "std_dev_3y":       r("std_dev_3y"),
+        "sharpe_ratio_3y":  r("sharpe_ratio_3y"),
+        "sortino_ratio_3y": r("sortino_ratio_3y"),
+        "treynor_ratio_3y": r("treynor_ratio_3y"),
+        "alpha_3y":         r("alpha_3y"),
+        "beta_3y":          r("beta_3y"),
+        "up_capture_3y":    r("up_capture_3y"),
+        "down_capture_3y":  r("down_capture_3y"),
+        "information_ratio_3y": r("information_ratio_3y"),
+        "std_dev_5y":       r("std_dev_5y"),
+        "sharpe_ratio_5y":  r("sharpe_ratio_5y"),
+        "sortino_ratio_5y": r("sortino_ratio_5y"),
+        "treynor_ratio_5y": r("treynor_ratio_5y"),
+        "alpha_5y":         r("alpha_5y"),
+        "beta_5y":          r("beta_5y"),
+        "up_capture_5y":    r("up_capture_5y"),
+        "down_capture_5y":  r("down_capture_5y"),
+        "information_ratio_5y": r("information_ratio_5y"),
     }

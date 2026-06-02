@@ -53,6 +53,27 @@ async def gmail_poll_loop():
         await asyncio.sleep(5 * 60)
 
 
+async def migrate_benchmark_risk_columns():
+    """Add benchmark fields to daily_fund_data table if they don't exist."""
+    from sqlalchemy import text
+    cols = [
+        ("is_benchmark",    "INTEGER DEFAULT 0"),
+        ("benchmark_label", "VARCHAR(20)"),
+    ]
+    try:
+        from models.database import engine
+        with engine.connect() as conn:
+            for col_name, col_type in cols:
+                try:
+                    conn.execute(text(f"ALTER TABLE daily_fund_data ADD COLUMN {col_name} {col_type}"))
+                    conn.commit()
+                    logger.info(f"Migration: added daily_fund_data.{col_name}")
+                except Exception:
+                    conn.rollback()  # Column already exists
+    except Exception as e:
+        logger.warning(f"Migration skipped: {e}")
+
+
 async def check_parser_version():
     """
     On startup, check if parser version has changed.
@@ -101,6 +122,7 @@ async def check_parser_version():
 @app.on_event("startup")
 async def startup():
     init_db()
+    await migrate_benchmark_risk_columns()
     await check_parser_version()
     asyncio.create_task(gmail_poll_loop())
 

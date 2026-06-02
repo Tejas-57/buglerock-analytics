@@ -6,11 +6,6 @@ import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./buglerock.db")
 
-# Render provides postgres:// but SQLAlchemy needs postgresql://
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
-# connect_args only needed for SQLite
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
@@ -28,15 +23,37 @@ def get_db():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    # Run migrations for new columns
+    _migrate_benchmark_risk_columns()
 
 
-class AppSettings(Base):
-    """Key-value store for app configuration — used to persist Gmail token."""
-    __tablename__ = "app_settings"
-
-    key        = Column(String(100), primary_key=True)
-    value      = Column(Text, nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+def _migrate_benchmark_risk_columns():
+    """Add risk columns to benchmark_data table if they don't exist."""
+    new_cols = [
+        ("std_dev_1y",       "FLOAT"),
+        ("sharpe_ratio_1y",  "FLOAT"),
+        ("sortino_ratio_1y", "FLOAT"),
+        ("std_dev_3y",       "FLOAT"),
+        ("sharpe_ratio_3y",  "FLOAT"),
+        ("sortino_ratio_3y", "FLOAT"),
+        ("std_dev_5y",       "FLOAT"),
+        ("sharpe_ratio_5y",  "FLOAT"),
+        ("sortino_ratio_5y", "FLOAT"),
+    ]
+    try:
+        with engine.connect() as conn:
+            for col_name, col_type in new_cols:
+                try:
+                    conn.execute(
+                        __import__('sqlalchemy').text(
+                            f"ALTER TABLE benchmark_data ADD COLUMN {col_name} {col_type}"
+                        )
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()  # Column already exists — skip
+    except Exception:
+        pass  # SQLite or migration not needed
 
 
 class DailyFundData(Base):
@@ -169,6 +186,10 @@ class DailyFundData(Base):
     credit_below_b     = Column(Float)
     credit_nr          = Column(Float)
 
+    # Benchmark identifier fields
+    is_benchmark    = Column(Integer, default=0)  # 1 if this row is a benchmark
+    benchmark_label = Column(String(20))           # e.g. "Benchmark 1"
+
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -203,6 +224,16 @@ class BenchmarkData(Base):
     return_cy2022 = Column(Float)
     return_cy2021 = Column(Float)
 
+    std_dev_1y       = Column(Float)
+    sharpe_ratio_1y  = Column(Float)
+    sortino_ratio_1y = Column(Float)
+    std_dev_3y       = Column(Float)
+    sharpe_ratio_3y  = Column(Float)
+    sortino_ratio_3y = Column(Float)
+    std_dev_5y       = Column(Float)
+    sharpe_ratio_5y  = Column(Float)
+    sortino_ratio_5y = Column(Float)
+
 
 class EmailFetchLog(Base):
     __tablename__ = "email_fetch_log"
@@ -214,3 +245,10 @@ class EmailFetchLog(Base):
     status     = Column(String(20))
     message    = Column(Text)
     fetched_at = Column(DateTime, server_default=func.now())
+
+
+class AppSettings(Base):
+    __tablename__ = "app_settings"
+
+    key   = Column(String(100), primary_key=True)
+    value = Column(Text)

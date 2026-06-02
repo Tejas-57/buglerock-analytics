@@ -88,6 +88,9 @@ def save_parsed_data(parsed: dict):
 
         for bm in parsed["benchmarks"]:
             clean = coerce_dates(bm)
+            # Save benchmarks into DailyFundData with is_benchmark=1
+            db.add(DailyFundData(**{k: v for k, v in clean.items() if hasattr(DailyFundData, k)}))
+            # Also save to BenchmarkData for backward compatibility
             db.add(BenchmarkData(**{k: v for k, v in clean.items() if hasattr(BenchmarkData, k)}))
 
         db.commit()
@@ -261,16 +264,43 @@ def _risk_dict(f) -> dict:
 def get_benchmark_for_category(category: str, data_date: date) -> dict:
     db = get_session()
     try:
-        bm = db.query(BenchmarkData).filter(
-            BenchmarkData.data_date == data_date,
-            BenchmarkData.category == category,
-            BenchmarkData.benchmark_label == "Benchmark 1",
+        # First try new unified table
+        bm = db.query(DailyFundData).filter(
+            DailyFundData.data_date == data_date,
+            DailyFundData.category == category,
+            DailyFundData.is_benchmark == 1,
+            DailyFundData.benchmark_label == "Benchmark 1",
         ).first()
+
+        # Fall back to BenchmarkData for older records
         if not bm:
-            return None
+            bm_old = db.query(BenchmarkData).filter(
+                BenchmarkData.data_date == data_date,
+                BenchmarkData.category == category,
+                BenchmarkData.benchmark_label == "Benchmark 1",
+            ).first()
+            if not bm_old:
+                return None
+            def fmt(v): return round(v, 4) if v is not None else "-"
+            return {
+                "name": bm_old.benchmark_name,
+                "returns": {
+                    "1d": fmt(bm_old.return_1d), "1w": fmt(bm_old.return_1w),
+                    "1m": fmt(bm_old.return_1m), "3m": fmt(bm_old.return_3m),
+                    "6m": fmt(bm_old.return_6m), "1y": fmt(bm_old.return_1y),
+                    "2y": fmt(bm_old.return_2y), "3y": fmt(bm_old.return_3y),
+                    "5y": fmt(bm_old.return_5y), "7y": fmt(bm_old.return_7y),
+                    "10y": fmt(bm_old.return_10y), "ytd": fmt(bm_old.return_ytd),
+                    "cy2025": fmt(bm_old.return_cy2025), "cy2024": fmt(bm_old.return_cy2024),
+                    "cy2023": fmt(bm_old.return_cy2023), "cy2022": fmt(bm_old.return_cy2022),
+                    "cy2021": fmt(bm_old.return_cy2021),
+                },
+                "risk": {},
+            }
+
         def fmt(v): return round(v, 4) if v is not None else "-"
         return {
-            "name": bm.benchmark_name,
+            "name": bm.name,
             "returns": {
                 "1d": fmt(bm.return_1d), "1w": fmt(bm.return_1w),
                 "1m": fmt(bm.return_1m), "3m": fmt(bm.return_3m),
@@ -282,7 +312,29 @@ def get_benchmark_for_category(category: str, data_date: date) -> dict:
                 "cy2023": fmt(bm.return_cy2023), "cy2022": fmt(bm.return_cy2022),
                 "cy2021": fmt(bm.return_cy2021),
             },
-            "risk": {},
+            "risk": {
+                "std_dev_1y":       fmt(bm.std_dev_1y),
+                "sharpe_ratio_1y":  fmt(bm.sharpe_ratio_1y),
+                "sortino_ratio_1y": fmt(bm.sortino_ratio_1y),
+                "alpha_1y":         fmt(bm.alpha_1y),
+                "beta_1y":          fmt(bm.beta_1y),
+                "up_capture_1y":    fmt(bm.up_capture_1y),
+                "down_capture_1y":  fmt(bm.down_capture_1y),
+                "std_dev_3y":       fmt(bm.std_dev_3y),
+                "sharpe_ratio_3y":  fmt(bm.sharpe_ratio_3y),
+                "sortino_ratio_3y": fmt(bm.sortino_ratio_3y),
+                "alpha_3y":         fmt(bm.alpha_3y),
+                "beta_3y":          fmt(bm.beta_3y),
+                "up_capture_3y":    fmt(bm.up_capture_3y),
+                "down_capture_3y":  fmt(bm.down_capture_3y),
+                "std_dev_5y":       fmt(bm.std_dev_5y),
+                "sharpe_ratio_5y":  fmt(bm.sharpe_ratio_5y),
+                "sortino_ratio_5y": fmt(bm.sortino_ratio_5y),
+                "alpha_5y":         fmt(bm.alpha_5y),
+                "beta_5y":          fmt(bm.beta_5y),
+                "up_capture_5y":    fmt(bm.up_capture_5y),
+                "down_capture_5y":  fmt(bm.down_capture_5y),
+            },
         }
     finally:
         db.close()
