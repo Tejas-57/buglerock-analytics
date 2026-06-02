@@ -353,8 +353,6 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
     { l:'Beta',     vf:rk('beta'),         vb:null,                  fmt:v=>fmt(v),     sig:v=>parseFloat(v)<0.8?'Defensive':parseFloat(v)<1.1?'Market-like':'Aggressive' },
     { l:'Sharpe',   vf:rk('sharpe_ratio'), vb:bmRk('sharpe_ratio'), fmt:v=>fmt(v),     sig:v=>parseFloat(v)>0.8?'Strong':parseFloat(v)>0.5?'Adequate':'Weak' },
     { l:'Sortino',  vf:rk('sortino_ratio'),vb:bmRk('sortino_ratio'),fmt:v=>fmt(v),     sig:v=>parseFloat(v)>1?'Good':parseFloat(v)>0.6?'Moderate':'Weak' },
-    { l:'Up cap',   vf:rk('up_capture'),   vb:null,                  fmt:v=>fmt(v),     sig:v=>parseFloat(v)>100?'Beats mkt upside':'Lags upside' },
-    { l:'Down cap', vf:rk('down_capture'), vb:null,                  fmt:v=>fmt(v),     sig:v=>parseFloat(v)<90?'Protected':parseFloat(v)<100?'Moderate':'Poor protect' },
   ].filter(row => row.vf!=null&&row.vf!=='-');
 
   const nav52pct = f?.nav && f?.nav_52w_high && f?.nav_52w_low && f.nav!=='-' && f.nav_52w_high!=='-' && f.nav_52w_low!=='-'
