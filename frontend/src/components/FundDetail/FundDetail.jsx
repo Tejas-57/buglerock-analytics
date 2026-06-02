@@ -208,6 +208,7 @@ function RiskGauge({ label, value, lo, hi, thresh, lowerBetter }) {
 }
 
 function CYBarsChart({ fund, benchmark }) {
+  const [hovered, setHovered] = useState(null);
   const CY_KEYS = ['cy2021','cy2022','cy2023','cy2024','cy2025'];
   const CY_YRS  = ['2021','2022','2023','2024','2025'];
   const r = fund?.returns || {};
@@ -217,28 +218,55 @@ function CYBarsChart({ fund, benchmark }) {
   const allV = [...fVals, ...bVals].filter(v => v != null);
   if (!allV.length) return <div style={{ padding: 14, color: 'var(--text-muted)', fontSize: 12 }}>Calendar year data not available</div>;
   const maxV = Math.max(...allV.map(Math.abs)) || 10;
-  const CH = 130, ZH = 32, posH = CH - ZH;
+  const CH = 140, ZH = 24, posH = CH - ZH;
   return (
-    <div style={{ padding: '14px 14px 10px' }}>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', height: CH, position: 'relative', paddingBottom: 4 }}>
+    <div style={{ padding: '14px 20px 10px' }}>
+      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-end', height: CH, position: 'relative' }}>
         {CY_YRS.map((yr, i) => {
           const fv = fVals[i], bv = bVals[i];
           const diff = fv != null && bv != null ? (fv - bv).toFixed(1) : null;
-          const fH = fv != null ? Math.max(3, Math.abs(fv) / maxV * posH) : 0;
-          const bH = bv != null ? Math.max(3, Math.abs(bv) / maxV * posH) : 0;
+          const fH = fv != null ? Math.max(4, Math.abs(fv) / maxV * posH) : 0;
+          const bH = bv != null ? Math.max(4, Math.abs(bv) / maxV * posH) : 0;
+          const isHov = hovered === i;
           return (
-            <div key={yr} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-              {diff != null && <div style={{ fontSize: 8, fontWeight: 600, color: parseFloat(diff) >= 0 ? '#1A7A52' : '#912F63', marginBottom: 2, textAlign: 'center' }}>{parseFloat(diff) >= 0 ? '+' : ''}{diff}</div>}
-              {fv != null && <div style={{ fontSize: 8, fontWeight: 600, color: '#912F63', marginBottom: 1 }}>{fv >= 0 ? '+' : ''}{fv.toFixed(1)}%</div>}
-              <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', width: '100%' }}>
-                {fv != null && <div style={{ flex: 1, height: fH, background: fv >= 0 ? '#912F63' : '#C46985', borderRadius: '2px 2px 0 0', minHeight: 3 }} />}
-                {bv != null && <div style={{ flex: 1, height: bH, background: bv >= 0 ? '#A795AE' : '#D4C9DF', borderRadius: '2px 2px 0 0', minHeight: 3, opacity: 0.85 }} />}
+            <div key={yr} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)}
+            >
+              {/* Outperformance diff */}
+              {diff != null && (
+                <div style={{ fontSize: 9, fontWeight: 700, color: parseFloat(diff) >= 0 ? '#1A7A52' : '#912F63', marginBottom: 3, textAlign: 'center' }}>
+                  {parseFloat(diff) >= 0 ? '+' : ''}{diff}
+                </div>
+              )}
+              {/* Bars */}
+              <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', width: '70%' }}>
+                {fv != null && (
+                  <div style={{ flex: 1, position: 'relative' }}>
+                    {/* Hover tooltip on fund bar */}
+                    {isHov && fv != null && (
+                      <div style={{ position: 'absolute', bottom: fH + 4, left: '50%', transform: 'translateX(-50%)', background: 'var(--brand-dark)', color: '#fff', fontSize: 10, fontWeight: 600, padding: '3px 7px', borderRadius: 4, whiteSpace: 'nowrap', zIndex: 10 }}>
+                        {fv >= 0 ? '+' : ''}{fv.toFixed(2)}%
+                      </div>
+                    )}
+                    <div style={{ height: fH, background: fv >= 0 ? '#912F63' : '#C46985', borderRadius: '3px 3px 0 0', minHeight: 4, opacity: isHov ? 0.8 : 1, transition: 'opacity .15s' }} />
+                  </div>
+                )}
+                {bv != null && (
+                  <div style={{ flex: 1, position: 'relative' }}>
+                    {isHov && bv != null && (
+                      <div style={{ position: 'absolute', bottom: bH + 4, left: '50%', transform: 'translateX(-50%)', background: '#6D5479', color: '#fff', fontSize: 10, fontWeight: 600, padding: '3px 7px', borderRadius: 4, whiteSpace: 'nowrap', zIndex: 10 }}>
+                        {bv >= 0 ? '+' : ''}{bv.toFixed(2)}%
+                      </div>
+                    )}
+                    <div style={{ height: bH, background: bv >= 0 ? '#A795AE' : '#D4C9DF', borderRadius: '3px 3px 0 0', minHeight: 4, opacity: isHov ? 0.8 : 0.85, transition: 'opacity .15s' }} />
+                  </div>
+                )}
               </div>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', textAlign: 'center' }}>{yr}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 5, textAlign: 'center' }}>{yr}</div>
             </div>
           );
         })}
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: ZH, height: 1, background: 'var(--border)' }} />
       </div>
     </div>
   );
@@ -304,16 +332,16 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
   const bmR = benchmark?.returns || {};
 
   const retRows = [
-    ['1 Month',  r['1m'],  null],
-    ['3 Months', r['3m'],  null],
-    ['6 Months', r['6m'],  null],
+    ['1 Month',  r['1m'],  bmR['1m']],
+    ['3 Months', r['3m'],  bmR['3m']],
+    ['6 Months', r['6m'],  bmR['6m']],
     ['1 Year',   r['1y'],  bmR['1y']],
-    ['2 Year',   r['2y'],  null],
+    ['2 Year',   r['2y'],  bmR['2y']],
     ['3Y CAGR',  r['3y'],  bmR['3y']],
     ['5Y CAGR',  r['5y'],  bmR['5y']],
-    ['7Y CAGR',  r['7y'],  null],
-    ['10Y CAGR', r['10y'], null],
-    ['YTD',      r['ytd'], null],
+    ['7Y CAGR',  r['7y'],  bmR['7y']],
+    ['10Y CAGR', r['10y'], bmR['10y']],
+    ['YTD',      r['ytd'], bmR['ytd']],
   ].filter(([, fv]) => fv != null && fv !== '-');
 
   const riskRows = [
@@ -477,7 +505,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
             return (
               <div key={label} style={{ borderRadius: 10, padding: '12px 14px', textAlign: 'center', background: bg, border: `1px solid ${bg}` }}>
                 <div style={{ fontSize: 11, fontWeight: 500, color: c, marginBottom: 4 }}>{label}</div>
-                <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 600, lineHeight: 1, marginBottom: 3, letterSpacing: '-.02em', color: c }}>{v!=null?fmt(v)+'%':'—'}</div>
+                <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 600, lineHeight: 1, marginBottom: 3, letterSpacing: '-.02em', color: c }}>{v!=null?fmt(v):'—'}</div>
                 <div style={{ fontSize: 10, lineHeight: 1.45, color: c, opacity: .75 }}>{desc}</div>
               </div>
             );
@@ -519,26 +547,34 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
 
           <Card title="Portfolio composition">
             <div style={{ padding: 14 }}>
-              {(f.large_cap!=null&&f.large_cap!=='-')||(f.mid_cap!=null&&f.mid_cap!=='-')||(f.small_cap!=null&&f.small_cap!=='-') ? (<>
-                <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 8 }}>Market cap split</div>
-                <BarRow name="Large cap" value={f.large_cap} color="#912F63" />
-                <BarRow name="Mid cap"   value={f.mid_cap}   color="#6D5479" />
-                <BarRow name="Small cap" value={f.small_cap} color="#C46985" />
-              </>) : null}
-              {(f.equity_pct!=null&&f.equity_pct!=='-')||(f.bond_pct!=null&&f.bond_pct!=='-')||(f.cash_pct!=null&&f.cash_pct!=='-') ? (<>
-                <div style={{ height: 1, background: 'var(--bg-secondary)', margin: '10px 0' }} />
-                <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 8 }}>Asset allocation</div>
-                <BarRow name="Equity" value={f.equity_pct} color="#3E3452" />
-                <BarRow name="Bonds"  value={f.bond_pct}   color="#A795AE" />
-                <BarRow name="Cash"   value={f.cash_pct}   color="#A2A0A0" />
-              </>) : null}
-              {(f.pe_ratio!=null&&f.pe_ratio!=='-')||(f.pb_ratio!=null&&f.pb_ratio!=='-') ? (
-                <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--bg-secondary)' }}>
-                  {f.pe_ratio!=null&&f.pe_ratio!=='-' && <div style={{ flex:1,textAlign:'center',padding:8,background:'var(--bg-secondary)',borderRadius:8 }}><div style={{ fontFamily:'var(--font-serif)',fontSize:18,fontWeight:600,color:'var(--brand-dark)' }}>{fmt(f.pe_ratio)}</div><div style={{ fontSize:10,color:'var(--text-muted)',marginTop:2 }}>P/E ratio</div></div>}
-                  {f.pb_ratio!=null&&f.pb_ratio!=='-' && <div style={{ flex:1,textAlign:'center',padding:8,background:'var(--bg-secondary)',borderRadius:8 }}><div style={{ fontFamily:'var(--font-serif)',fontSize:18,fontWeight:600,color:'var(--brand-dark)' }}>{fmt(f.pb_ratio)}</div><div style={{ fontSize:10,color:'var(--text-muted)',marginTop:2 }}>P/B ratio</div></div>}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr', gap: 14 }}>
+                {/* Market cap split */}
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>Market cap</div>
+                  {(f.large_cap!=null&&f.large_cap!=='-')||(f.mid_cap!=null&&f.mid_cap!=='-')||(f.small_cap!=null&&f.small_cap!=='-') ? (<>
+                    <BarRow name="Large cap" value={f.large_cap} color="#912F63" />
+                    <BarRow name="Mid cap"   value={f.mid_cap}   color="#6D5479" />
+                    <BarRow name="Small cap" value={f.small_cap} color="#C46985" />
+                  </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>Data not available</div>}
+                  {(f.pe_ratio!=null&&f.pe_ratio!=='-')||(f.pb_ratio!=null&&f.pb_ratio!=='-') ? (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--bg-secondary)' }}>
+                      {f.pe_ratio!=null&&f.pe_ratio!=='-' && <div style={{ flex:1,textAlign:'center',padding:8,background:'var(--bg-secondary)',borderRadius:8 }}><div style={{ fontFamily:'var(--font-serif)',fontSize:18,fontWeight:600,color:'var(--brand-dark)' }}>{fmt(f.pe_ratio)}</div><div style={{ fontSize:10,color:'var(--text-muted)',marginTop:2 }}>P/E ratio</div></div>}
+                      {f.pb_ratio!=null&&f.pb_ratio!=='-' && <div style={{ flex:1,textAlign:'center',padding:8,background:'var(--bg-secondary)',borderRadius:8 }}><div style={{ fontFamily:'var(--font-serif)',fontSize:18,fontWeight:600,color:'var(--brand-dark)' }}>{fmt(f.pb_ratio)}</div><div style={{ fontSize:10,color:'var(--text-muted)',marginTop:2 }}>P/B ratio</div></div>}
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-              {!f.large_cap&&!f.equity_pct && <div style={{ color:'var(--text-muted)',fontSize:12,padding:'8px 0' }}>Composition data not available</div>}
+                {/* Divider */}
+                <div style={{ background: 'var(--border)' }} />
+                {/* Asset allocation */}
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>Asset allocation</div>
+                  {(f.equity_pct!=null&&f.equity_pct!=='-')||(f.bond_pct!=null&&f.bond_pct!=='-')||(f.cash_pct!=null&&f.cash_pct!=='-') ? (<>
+                    <BarRow name="Equity" value={f.equity_pct} color="#3E3452" />
+                    <BarRow name="Bonds"  value={f.bond_pct}   color="#A795AE" />
+                    <BarRow name="Cash"   value={f.cash_pct}   color="#A2A0A0" />
+                  </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>Data not available</div>}
+                </div>
+              </div>
             </div>
           </Card>
         </div>
