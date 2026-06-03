@@ -358,6 +358,29 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
     : null;
 
   const erVal = f?.expense_ratio != null && f.expense_ratio !== '-' ? parseFloat(f.expense_ratio) : null;
+
+  // Layout mode detection
+  const assetClass = selectedFund?.assetClass || f?.asset_class || '';
+  const category = selectedFund?.category || f?.category || '';
+  const isDebt = assetClass === 'Debt' || assetClass === 'ETF - Debt';
+  const isDebtHybrid = assetClass === 'Hybrid' && (
+    category.includes('Conservative') || category.includes('Credit Risk') ||
+    category.includes('Banking & PSU') || category.includes('Dynamic Bond')
+  );
+  const equityPct = f?.equity_pct != null && f.equity_pct !== '-' ? parseFloat(f.equity_pct) : null;
+  const isEquityHybrid = assetClass === 'Hybrid' && equityPct != null && equityPct >= 60;
+  const layoutMode = isDebt ? 'debt' : (isDebtHybrid || (assetClass === 'Hybrid' && !isEquityHybrid)) ? 'hybrid' : 'equity';
+
+  // Debt metrics
+  const hasDebtMetrics = f && (
+    (f.avg_maturity != null && f.avg_maturity !== '-') ||
+    (f.modified_duration != null && f.modified_duration !== '-') ||
+    (f.ytm != null && f.ytm !== '-')
+  );
+  const hasCreditData = f && (
+    (f.credit_aaa != null && f.credit_aaa !== '-') ||
+    (f.credit_aa != null && f.credit_aa !== '-')
+  );
   const erColor = erVal == null ? 'var(--text-muted)' : erVal <= 1.0 ? '#1A7A52' : erVal <= 1.5 ? '#7A5A10' : '#912F63';
   const erLabel = erVal == null ? '—' : erVal <= 0.5 ? 'Ultra-low cost' : erVal <= 1.0 ? 'Low cost' : erVal <= 1.5 ? 'Average' : erVal <= 2.0 ? 'Above average' : 'High cost';
 
@@ -488,34 +511,59 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
           <CYBarsChart fund={f} benchmark={benchmark} />
         </Card>
 
-        {/* ⑤ RISK */}
+        {/* ⑤ RISK — equity/hybrid show capture boxes, debt skips them */}
         <SecLabel extra={<span>{['1y','3y','5y'].map(periodBtn)}</span>}>Risk analytics</SecLabel>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-          {[
-            { label:`Up capture (${period.toUpperCase()})`, val:rk('up_capture'), isUp:true,  desc:'Captures this % of benchmark upside. >100 = outperforms in rising markets.' },
-            { label:`Down capture (${period.toUpperCase()})`, val:rk('down_capture'), isUp:false, desc:'Suffers this % of benchmark decline. <100 = better protection in corrections.' },
-          ].map(({ label, val, isUp, desc }) => {
-            const v = val!=null&&val!=='-' ? parseFloat(val) : null;
-            const good = v!=null&&(isUp?v>100:v<100);
-            const danger = v!=null&&(!isUp&&v>105||(isUp&&v<85));
-            const c = v==null?'var(--text-muted)':good?'#1A7A52':danger?'#912F63':'#7A5A10';
-            const bg = v==null?'var(--bg-secondary)':good?'rgba(26,122,82,.06)':danger?'rgba(145,47,99,.06)':'rgba(122,90,16,.06)';
-            return (
-              <div key={label} style={{ borderRadius: 10, padding: '12px 14px', textAlign: 'center', background: bg, border: `1px solid ${bg}` }}>
-                <div style={{ fontSize: 11, fontWeight: 500, color: c, marginBottom: 4 }}>{label}</div>
-                <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 600, lineHeight: 1, marginBottom: 3, letterSpacing: '-.02em', color: c }}>{v!=null?fmt(v):'—'}</div>
-                <div style={{ fontSize: 10, lineHeight: 1.45, color: c, opacity: .75 }}>{desc}</div>
-              </div>
-            );
-          })}
-        </div>
+        {layoutMode !== 'debt' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+            {[
+              { label:`Up capture (${period.toUpperCase()})`, val:rk('up_capture'), isUp:true,  desc:'Captures this % of benchmark upside. >100 = outperforms in rising markets.' },
+              { label:`Down capture (${period.toUpperCase()})`, val:rk('down_capture'), isUp:false, desc:'Suffers this % of benchmark decline. <100 = better protection in corrections.' },
+            ].map(({ label, val, isUp, desc }) => {
+              const v = val!=null&&val!=='-' ? parseFloat(val) : null;
+              const good = v!=null&&(isUp?v>100:v<100);
+              const danger = v!=null&&(!isUp&&v>105||(isUp&&v<85));
+              const c = v==null?'var(--text-muted)':good?'#1A7A52':danger?'#912F63':'#7A5A10';
+              const bg = v==null?'var(--bg-secondary)':good?'rgba(26,122,82,.06)':danger?'rgba(145,47,99,.06)':'rgba(122,90,16,.06)';
+              return (
+                <div key={label} style={{ borderRadius: 10, padding: '12px 14px', textAlign: 'center', background: bg, border: `1px solid ${bg}` }}>
+                  <div style={{ fontSize: 11, fontWeight: 500, color: c, marginBottom: 4 }}>{label}</div>
+                  <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 600, lineHeight: 1, marginBottom: 3, letterSpacing: '-.02em', color: c }}>{v!=null?fmt(v):'—'}</div>
+                  <div style={{ fontSize: 10, lineHeight: 1.45, color: c, opacity: .75 }}>{desc}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8, marginBottom: 14 }}>
+        {/* Debt key metrics boxes */}
+        {(layoutMode === 'debt' || layoutMode === 'hybrid') && hasDebtMetrics && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, marginBottom: 14 }}>
+            {[
+              { label: 'Avg Maturity', value: f?.avg_maturity, unit: 'yrs', desc: 'Weighted avg time to maturity of bonds' },
+              { label: 'Modified Duration', value: f?.modified_duration, unit: 'yrs', desc: 'Interest rate sensitivity — lower = less risk' },
+              { label: 'YTM', value: f?.ytm, unit: '%', desc: 'Expected annual return if held to maturity' },
+            ].map(({ label, value, unit, desc }) => {
+              const v = value != null && value !== '-' ? parseFloat(value) : null;
+              return (
+                <div key={label} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>{label}</div>
+                  <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, color: 'var(--brand-dark)', letterSpacing: '-.02em', lineHeight: 1, marginBottom: 4 }}>
+                    {v != null ? `${fmt(v)}${unit}` : '—'}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>{desc}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: layoutMode === 'debt' ? 'repeat(3,minmax(0,1fr))' : 'repeat(4,minmax(0,1fr))', gap: 8, marginBottom: 14 }}>
           <RiskGauge label={`Sharpe (${period.toUpperCase()})`}  value={rk('sharpe_ratio')}  lo={0}  hi={2}   thresh={0.5} lowerBetter={false} />
           <RiskGauge label={`Sortino (${period.toUpperCase()})`} value={rk('sortino_ratio')} lo={0}  hi={3}   thresh={0.8} lowerBetter={false} />
-          <RiskGauge label={`Alpha (${period.toUpperCase()})`}   value={rk('alpha')}          lo={-5} hi={10}  thresh={0}   lowerBetter={false} />
-          <RiskGauge label={`Beta (${period.toUpperCase()})`}    value={rk('beta')}           lo={0}  hi={1.5} thresh={1.1} lowerBetter={true}  />
+          {layoutMode !== 'debt' && <RiskGauge label={`Alpha (${period.toUpperCase()})`} value={rk('alpha')} lo={-5} hi={10} thresh={0} lowerBetter={false} />}
+          {layoutMode !== 'debt' && <RiskGauge label={`Beta (${period.toUpperCase()})`}  value={rk('beta')}  lo={0}  hi={1.5} thresh={1.1} lowerBetter={true} />}
+          {layoutMode === 'debt' && <RiskGauge label={`Std Dev (${period.toUpperCase()})`} value={rk('std_dev')} lo={0} hi={10} thresh={3} lowerBetter={true} />}
         </div>
 
         {/* ⑥ RISK TABLE + PORTFOLIO */}
@@ -546,34 +594,85 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
 
           <Card title="Portfolio composition">
             <div style={{ padding: 14 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr', gap: 14 }}>
-                {/* Market cap split */}
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>Market cap</div>
-                  {(f.large_cap!=null&&f.large_cap!=='-')||(f.mid_cap!=null&&f.mid_cap!=='-')||(f.small_cap!=null&&f.small_cap!=='-') ? (<>
-                    <BarRow name="Large cap" value={f.large_cap} color="#912F63" />
-                    <BarRow name="Mid cap"   value={f.mid_cap}   color="#6D5479" />
-                    <BarRow name="Small cap" value={f.small_cap} color="#C46985" />
-                  </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>Data not available</div>}
-                  {(f.pe_ratio!=null&&f.pe_ratio!=='-')||(f.pb_ratio!=null&&f.pb_ratio!=='-') ? (
-                    <div style={{ display: 'flex', gap: 8, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--bg-secondary)' }}>
-                      {f.pe_ratio!=null&&f.pe_ratio!=='-' && <div style={{ flex:1,textAlign:'center',padding:8,background:'var(--bg-secondary)',borderRadius:8 }}><div style={{ fontFamily:'var(--font-serif)',fontSize:18,fontWeight:600,color:'var(--brand-dark)' }}>{fmt(f.pe_ratio)}</div><div style={{ fontSize:10,color:'var(--text-muted)',marginTop:2 }}>P/E ratio</div></div>}
-                      {f.pb_ratio!=null&&f.pb_ratio!=='-' && <div style={{ flex:1,textAlign:'center',padding:8,background:'var(--bg-secondary)',borderRadius:8 }}><div style={{ fontFamily:'var(--font-serif)',fontSize:18,fontWeight:600,color:'var(--brand-dark)' }}>{fmt(f.pb_ratio)}</div><div style={{ fontSize:10,color:'var(--text-muted)',marginTop:2 }}>P/B ratio</div></div>}
-                    </div>
-                  ) : null}
+              {layoutMode === 'equity' ? (
+                // Equity — market cap + asset allocation
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr', gap: 14 }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>Market cap</div>
+                    {(f.large_cap!=null&&f.large_cap!=='-')||(f.mid_cap!=null&&f.mid_cap!=='-')||(f.small_cap!=null&&f.small_cap!=='-') ? (<>
+                      <BarRow name="Large cap" value={f.large_cap} color="#912F63" />
+                      <BarRow name="Mid cap"   value={f.mid_cap}   color="#6D5479" />
+                      <BarRow name="Small cap" value={f.small_cap} color="#C46985" />
+                    </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>Data not available</div>}
+                    {(f.pe_ratio!=null&&f.pe_ratio!=='-')||(f.pb_ratio!=null&&f.pb_ratio!=='-') ? (
+                      <div style={{ display: 'flex', gap: 8, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--bg-secondary)' }}>
+                        {f.pe_ratio!=null&&f.pe_ratio!=='-' && <div style={{ flex:1,textAlign:'center',padding:8,background:'var(--bg-secondary)',borderRadius:8 }}><div style={{ fontFamily:'var(--font-serif)',fontSize:18,fontWeight:600,color:'var(--brand-dark)' }}>{fmt(f.pe_ratio)}</div><div style={{ fontSize:10,color:'var(--text-muted)',marginTop:2 }}>P/E ratio</div></div>}
+                        {f.pb_ratio!=null&&f.pb_ratio!=='-' && <div style={{ flex:1,textAlign:'center',padding:8,background:'var(--bg-secondary)',borderRadius:8 }}><div style={{ fontFamily:'var(--font-serif)',fontSize:18,fontWeight:600,color:'var(--brand-dark)' }}>{fmt(f.pb_ratio)}</div><div style={{ fontSize:10,color:'var(--text-muted)',marginTop:2 }}>P/B ratio</div></div>}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div style={{ background: 'var(--border)' }} />
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>Asset allocation</div>
+                    {(f.equity_pct!=null&&f.equity_pct!=='-')||(f.bond_pct!=null&&f.bond_pct!=='-')||(f.cash_pct!=null&&f.cash_pct!=='-') ? (<>
+                      <BarRow name="Equity" value={f.equity_pct} color="#3E3452" />
+                      <BarRow name="Bonds"  value={f.bond_pct}   color="#A795AE" />
+                      <BarRow name="Cash"   value={f.cash_pct}   color="#A2A0A0" />
+                    </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>Data not available</div>}
+                  </div>
                 </div>
-                {/* Divider */}
-                <div style={{ background: 'var(--border)' }} />
-                {/* Asset allocation */}
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>Asset allocation</div>
-                  {(f.equity_pct!=null&&f.equity_pct!=='-')||(f.bond_pct!=null&&f.bond_pct!=='-')||(f.cash_pct!=null&&f.cash_pct!=='-') ? (<>
+              ) : layoutMode === 'debt' ? (
+                // Debt — credit quality + asset allocation
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr', gap: 14 }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>Credit quality</div>
+                    {hasCreditData ? (<>
+                      <BarRow name="AAA / Equiv" value={f.credit_aaa}     color="#1A7A52" />
+                      <BarRow name="AA"           value={f.credit_aa}      color="#2E9E6E" />
+                      <BarRow name="A"            value={f.credit_a}       color="#6D5479" />
+                      <BarRow name="BBB"          value={f.credit_bbb}     color="#B46B10" />
+                      <BarRow name="BB & below"   value={f.credit_bb}      color="#912F63" />
+                      <BarRow name="Not Rated"    value={f.credit_nr}      color="#A2A0A0" />
+                    </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>Data not available</div>}
+                    {f.avg_credit_quality && f.avg_credit_quality !== '-' && (
+                      <div style={{ marginTop: 12, padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: 8, display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Avg credit quality</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--brand-dark)' }}>{f.avg_credit_quality}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ background: 'var(--border)' }} />
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>Asset allocation</div>
                     <BarRow name="Equity" value={f.equity_pct} color="#3E3452" />
                     <BarRow name="Bonds"  value={f.bond_pct}   color="#A795AE" />
                     <BarRow name="Cash"   value={f.cash_pct}   color="#A2A0A0" />
-                  </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>Data not available</div>}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                // Hybrid — market cap + credit quality + asset allocation
+                <div>
+                  {(f.large_cap!=null&&f.large_cap!=='-')||(f.mid_cap!=null&&f.mid_cap!=='-') ? (<>
+                    <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 8 }}>Market cap (equity portion)</div>
+                    <BarRow name="Large cap" value={f.large_cap} color="#912F63" />
+                    <BarRow name="Mid cap"   value={f.mid_cap}   color="#6D5479" />
+                    <BarRow name="Small cap" value={f.small_cap} color="#C46985" />
+                    <div style={{ height: 1, background: 'var(--bg-secondary)', margin: '12px 0' }} />
+                  </>) : null}
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 8 }}>Asset allocation</div>
+                  <BarRow name="Equity" value={f.equity_pct} color="#3E3452" />
+                  <BarRow name="Bonds"  value={f.bond_pct}   color="#A795AE" />
+                  <BarRow name="Cash"   value={f.cash_pct}   color="#A2A0A0" />
+                  {hasCreditData && (<>
+                    <div style={{ height: 1, background: 'var(--bg-secondary)', margin: '12px 0' }} />
+                    <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 8 }}>Credit quality (debt portion)</div>
+                    <BarRow name="AAA / Equiv" value={f.credit_aaa} color="#1A7A52" />
+                    <BarRow name="AA"           value={f.credit_aa}  color="#2E9E6E" />
+                    <BarRow name="A"            value={f.credit_a}   color="#6D5479" />
+                    <BarRow name="BBB & below"  value={f.credit_bbb} color="#B46B10" />
+                  </>)}
+                </div>
+              )}
             </div>
           </Card>
         </div>

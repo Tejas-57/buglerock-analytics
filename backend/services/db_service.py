@@ -109,7 +109,8 @@ def get_asset_classes(data_date: date) -> list:
     db = get_session()
     try:
         rows = db.query(DailyFundData.asset_class).filter(
-            DailyFundData.data_date == data_date
+            DailyFundData.data_date == data_date,
+            (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
         ).distinct().all()
         return sorted([r[0] for r in rows if r[0]])
     finally:
@@ -122,6 +123,7 @@ def get_categories(data_date: date, asset_class: str) -> list:
         rows = db.query(DailyFundData.category).filter(
             DailyFundData.data_date == data_date,
             DailyFundData.asset_class == asset_class,
+            (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
         ).distinct().all()
         return sorted([r[0] for r in rows if r[0]])
     finally:
@@ -142,6 +144,7 @@ def get_funds_for_dropdown(data_date: date, asset_class: str, category: str) -> 
             DailyFundData.asset_class == asset_class,
             DailyFundData.category == category,
             DailyFundData.isin.isnot(None),
+            (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
         ).all()
 
         fund_list = [
@@ -347,6 +350,7 @@ def get_peer_avg(category: str, data_date: date, asset_class: str) -> dict:
             DailyFundData.data_date == data_date,
             DailyFundData.category == category,
             DailyFundData.isin.isnot(None),
+            (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
         ).all()
 
         if not funds:
@@ -419,6 +423,7 @@ def get_whitelisted_peers(category: str, data_date: date, asset_class: str) -> l
             DailyFundData.data_date == data_date,
             DailyFundData.category == category,
             DailyFundData.isin.isnot(None),
+            (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
         ).all()
         fund_dicts = [_fund_to_dict(f) for f in all_funds]
         ranked = [f for f in fund_dicts if f["ranking"] in WHITELIST]
@@ -506,6 +511,7 @@ def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> li
             DailyFundData.asset_class == asset_class,
             DailyFundData.category == category,
             DailyFundData.isin.isnot(None),
+            (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
         ).all()
 
         result = [{"isin": f.isin, "name": f.name, "ranking": f.ranking,
