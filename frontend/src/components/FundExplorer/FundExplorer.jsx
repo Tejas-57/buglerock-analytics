@@ -207,8 +207,13 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
       .catch(() => setAvailableCats(null));
   }, [selectedSubtype, dateStr]);
 
+  const fetchKeyRef = React.useRef(null);
+
   useEffect(() => {
     if (!selectedCat || !subtypeItem || !dateStr) return;
+    const fetchKey = `${selectedCat}|${selectedSubtype}|${dateStr}`;
+    if (fetchKeyRef.current === fetchKey) return; // already fetching/fetched this combination
+    fetchKeyRef.current = fetchKey;
     setLoading(true); setAllFunds([]); setPeerAvg1y(null); setPeerAvg3y(null); setPeerAvg1m(null); setPeerAvg3m(null);
     const ac = subtypeItem.asset_classes[0];
     const catNorm = normCat(selectedCat);
@@ -403,7 +408,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
                 {group.cats.filter(cat => availableCats && availableCatsSubtype === selectedSubtype && (availableCats.has(normCat(cat)) || MERGED_CATEGORIES[cat])).map(cat => {
                   const sel = selectedCat===cat;
                   return (
-                    <div key={cat} onClick={()=>setSelectedCat(cat)} style={{
+                    <div key={cat} onClick={()=>{ fetchKeyRef.current = null; setSelectedCat(cat); }} style={{
                       display:'flex', alignItems:'center', gap:7, padding:'5px 11px',
                       border:`1.5px solid ${sel?'var(--brand-primary)':'var(--border)'}`,
                       borderRadius:6, cursor:'pointer',
