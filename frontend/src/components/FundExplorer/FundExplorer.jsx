@@ -136,7 +136,6 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   const assetItem   = ASSET_STRUCTURE.find(a => a.id === selectedAsset);
   const subtypeItem = assetItem?.subtypes.find(s => s.id === selectedSubtype);
 
-  // Track user-initiated changes vs URL-restored state
   const userChangedAsset   = React.useRef(false);
   const userChangedSubtype = React.useRef(false);
 
@@ -154,7 +153,6 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     setSelectedSubtype(subtypeId);
   };
 
-  // Asset change — reset subtype and cat
   useEffect(() => {
     if (!userChangedAsset.current) return;
     userChangedAsset.current = false;
@@ -170,13 +168,11 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     }
   }, [selectedAsset]);
 
-  // Whitelist toggle based on subtype
   useEffect(() => {
     const noRankSubtypes = ['passive_index','passive_etf','debt_etf','global'];
     if (subtypeItem) setShowWhitelisted(!noRankSubtypes.includes(subtypeItem.id));
   }, [selectedSubtype]);
 
-  // Load categories for current subtype
   useEffect(() => {
     if (!subtypeItem || !dateStr) return;
     const ac = subtypeItem.asset_classes[0];
@@ -188,7 +184,6 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
         setAvailableCats(cats);
         setAvailableCatsSubtype(selectedSubtype);
 
-        // If user changed subtype manually, auto-select first cat
         if (userChangedSubtype.current) {
           userChangedSubtype.current = false;
           for (const group of subtypeItem.groups) {
@@ -199,12 +194,10 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
           return;
         }
 
-        // On URL restore / initial load — keep selectedCat if valid
         if (selectedCat && cats.has(normCat(selectedCat))) {
           return;
         }
 
-        // Otherwise auto-select first
         for (const group of subtypeItem.groups) {
           const first = group.cats.find(c => cats.has(normCat(c)));
           if (first) { setSelectedCat(first); return; }
@@ -228,7 +221,14 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
       fetch(fundsUrl).then(r=>r.json()),
       fetch(`${process.env.REACT_APP_API_URL || ''}/api/performance/peer-avg?category=${encodeURIComponent(catNorm)}&asset_class=${encodeURIComponent(ac)}&date=${dateStr}`).then(r=>r.json()).catch(()=>null),
     ]).then(([fd, pd]) => {
-      setAllFunds(fd.funds || []);
+      const funds = fd.funds || [];
+      const seen = new Set();
+      const unique = funds.filter(f => {
+        if (!f.isin || seen.has(f.isin)) return false;
+        seen.add(f.isin);
+        return true;
+      });
+      setAllFunds(unique);
       setPeerAvg1y(pd?.peer_avg?.returns?.['1y'] ?? null);
       setPeerAvg3y(pd?.peer_avg?.returns?.['3y'] ?? null);
       setPeerAvg1m(pd?.peer_avg?.returns?.['1m'] ?? null);
@@ -256,7 +256,6 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     ? (sortBy === '3m' ? '3M' : '1M')
     : (sortBy === '3y' ? '3Y' : '1Y');
 
-  // Global search effect
   useEffect(() => {
     if (!searchQuery.trim() || searchQuery.trim().length < 2) {
       setSearchResults([]);
