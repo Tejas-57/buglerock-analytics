@@ -19,9 +19,7 @@ function col(v) {
 function fmtInr(v) {
   if (!v || v === '-') return '—';
   const n = parseFloat(v);
-  if (n >= 10000) return '₹' + (n / 100).toFixed(0) + ' Cr';
-  if (n >= 1000) return '₹' + (n / 100).toFixed(1) + ' Cr';
-  return '₹' + n.toFixed(0) + ' Cr';
+  return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 }) + ' Cr';
 }
 function stars(n) {
   if (!n || n === '-') return null;
