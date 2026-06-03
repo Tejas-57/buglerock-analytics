@@ -329,7 +329,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
             }}>
               {searchResults.map((fund, idx) => (
                 <div
-                  key={fund.isin || idx}
+                  key={fund.isin || fund.amfi_code || `search-${idx}`}
                   tabIndex={0}
                   onClick={() => {
                     setSearchQuery('');
@@ -494,7 +494,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
           const catDisplay = cleanLabel(selectedCat || '');
 
           return (
-            <div key={fund.isin || idx}
+            <div key={`${fund.isin || fund.amfi_code || fund.name || 'fund'}-${idx}`}
               onClick={()=>handleFundClick(fund)}
               style={{ display:'flex', alignItems:'center', gap:10, padding:'11px 16px', borderBottom: idx<displayFunds.length-1 ? '1px solid var(--border)' : 'none', cursor:'pointer', transition:'background .1s' }}
               onMouseEnter={e=>e.currentTarget.style.background='var(--bg-secondary)'}
