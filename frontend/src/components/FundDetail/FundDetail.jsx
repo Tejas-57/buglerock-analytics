@@ -343,6 +343,9 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
   ].filter(([, fv]) => fv != null && fv !== '-');
 
   const bmRisk = benchmark?.risk || {};
+  // Helper — true only if value is a real number (not null, not '-', not 0 for capture ratios)
+  const hasVal = (v) => v != null && v !== '-' && !isNaN(parseFloat(v));
+  const hasEquityRisk = hasVal(rk('up_capture')) || hasVal(rk('alpha')) || hasVal(rk('beta'));
   const bmRk = (base) => { const v = bmRisk[`${base}_${period}`]; return v != null && v !== '-' ? v : null; };
 
   const riskRows = [
@@ -511,60 +514,93 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
           <CYBarsChart fund={f} benchmark={benchmark} />
         </Card>
 
-        {/* ⑤ RISK — equity/hybrid show capture boxes, debt skips them */}
-        <SecLabel extra={<span>{['1y','3y','5y'].map(periodBtn)}</span>}>Risk analytics</SecLabel>
+        {/* ⑤ RISK SECTION — data-driven, shows what's available */}
 
-        {layoutMode !== 'debt' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-            {[
-              { label:`Up capture (${period.toUpperCase()})`, val:rk('up_capture'), isUp:true,  desc:'Captures this % of benchmark upside. >100 = outperforms in rising markets.' },
-              { label:`Down capture (${period.toUpperCase()})`, val:rk('down_capture'), isUp:false, desc:'Suffers this % of benchmark decline. <100 = better protection in corrections.' },
-            ].map(({ label, val, isUp, desc }) => {
-              const v = val!=null&&val!=='-' ? parseFloat(val) : null;
-              const good = v!=null&&(isUp?v>100:v<100);
-              const danger = v!=null&&(!isUp&&v>105||(isUp&&v<85));
-              const c = v==null?'var(--text-muted)':good?'#1A7A52':danger?'#912F63':'#7A5A10';
-              const bg = v==null?'var(--bg-secondary)':good?'rgba(26,122,82,.06)':danger?'rgba(145,47,99,.06)':'rgba(122,90,16,.06)';
+        {/* Equity risk metrics — only if equity risk data exists */}
+        {hasEquityRisk && (
+          <>
+            <SecLabel extra={<span>{['1y','3y','5y'].map(periodBtn)}</span>}>Risk Analytics</SecLabel>
+
+            {/* Up/Down capture — only if data exists */}
+            {((rk('up_capture')!=null&&rk('up_capture')!=='-'&&parseFloat(rk('up_capture'))!==0) || (rk('down_capture')!=null&&rk('down_capture')!=='-'&&parseFloat(rk('down_capture'))!==0)) && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+                {[
+                  { label:`Up capture (${period.toUpperCase()})`, val:rk('up_capture'), isUp:true,  desc:'Captures this % of benchmark upside. >100 = outperforms in rising markets.' },
+                  { label:`Down capture (${period.toUpperCase()})`, val:rk('down_capture'), isUp:false, desc:'Suffers this % of benchmark decline. <100 = better protection in corrections.' },
+                ].map(({ label, val, isUp, desc }) => {
+                  const v = val!=null&&val!=='-' ? parseFloat(val) : null;
+                  const good = v!=null&&(isUp?v>100:v<100);
+                  const danger = v!=null&&(!isUp&&v>105||(isUp&&v<85));
+                  const c = v==null?'var(--text-muted)':good?'#1A7A52':danger?'#912F63':'#7A5A10';
+                  const bg = v==null?'var(--bg-secondary)':good?'rgba(26,122,82,.06)':danger?'rgba(145,47,99,.06)':'rgba(122,90,16,.06)';
+                  return (
+                    <div key={label} style={{ borderRadius: 10, padding: '12px 14px', textAlign: 'center', background: bg, border: `1px solid ${bg}` }}>
+                      <div style={{ fontSize: 11, fontWeight: 500, color: c, marginBottom: 4 }}>{label}</div>
+                      <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 600, lineHeight: 1, marginBottom: 3, letterSpacing: '-.02em', color: c }}>{v!=null?fmt(v):'—'}</div>
+                      <div style={{ fontSize: 10, lineHeight: 1.45, color: c, opacity: .75 }}>{desc}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Risk gauges — only render gauges that have data */}
+            {(() => {
+              const gauges = [
+                (rk('sharpe_ratio')!=null&&rk('sharpe_ratio')!=='-') && { label:`Sharpe (${period.toUpperCase()})`,  value:rk('sharpe_ratio'),  lo:0,  hi:2,   thresh:0.5, lowerBetter:false },
+                (rk('sortino_ratio')!=null&&rk('sortino_ratio')!=='-') && { label:`Sortino (${period.toUpperCase()})`, value:rk('sortino_ratio'), lo:0,  hi:3,   thresh:0.8, lowerBetter:false },
+                (rk('alpha')!=null&&rk('alpha')!=='-') && { label:`Alpha (${period.toUpperCase()})`,   value:rk('alpha'),         lo:-5, hi:10,  thresh:0,   lowerBetter:false },
+                (rk('beta')!=null&&rk('beta')!=='-') && { label:`Beta (${period.toUpperCase()})`,    value:rk('beta'),          lo:0,  hi:1.5, thresh:1.1, lowerBetter:true  },
+              ].filter(Boolean);
+              if (!gauges.length) return null;
               return (
-                <div key={label} style={{ borderRadius: 10, padding: '12px 14px', textAlign: 'center', background: bg, border: `1px solid ${bg}` }}>
-                  <div style={{ fontSize: 11, fontWeight: 500, color: c, marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 600, lineHeight: 1, marginBottom: 3, letterSpacing: '-.02em', color: c }}>{v!=null?fmt(v):'—'}</div>
-                  <div style={{ fontSize: 10, lineHeight: 1.45, color: c, opacity: .75 }}>{desc}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${gauges.length},minmax(0,1fr))`, gap: 8, marginBottom: 14 }}>
+                  {gauges.map(g => <RiskGauge key={g.label} label={g.label} value={g.value} lo={g.lo} hi={g.hi} thresh={g.thresh} lowerBetter={g.lowerBetter} />)}
                 </div>
               );
-            })}
-          </div>
+            })()}
+          </>
         )}
 
-        {/* Debt key metrics boxes */}
-        {(layoutMode === 'debt' || layoutMode === 'hybrid') && hasDebtMetrics && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, marginBottom: 14 }}>
-            {[
-              { label: 'Avg Maturity', value: f?.avg_maturity, unit: 'yrs', desc: 'Weighted avg time to maturity of bonds' },
-              { label: 'Modified Duration', value: f?.modified_duration, unit: 'yrs', desc: 'Interest rate sensitivity — lower = less risk' },
-              { label: 'YTM', value: f?.ytm, unit: '%', desc: 'Expected annual return if held to maturity' },
-            ].map(({ label, value, unit, desc }) => {
-              const v = value != null && value !== '-' ? parseFloat(value) : null;
-              return (
-                <div key={label} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>{label}</div>
-                  <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, color: 'var(--brand-dark)', letterSpacing: '-.02em', lineHeight: 1, marginBottom: 4 }}>
-                    {v != null ? `${fmt(v)}${unit}` : '—'}
+        {/* Debt parameters — only if debt metrics exist */}
+        {hasDebtMetrics && (
+          <>
+            <SecLabel>Debt Parameters</SecLabel>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, marginBottom: 14 }}>
+              {[
+                { label: 'Avg Maturity',      value: f?.avg_maturity,       unit: 'yrs', desc: 'Weighted avg time to maturity of bonds' },
+                { label: 'Modified Duration', value: f?.modified_duration,  unit: 'yrs', desc: 'Interest rate sensitivity — lower = less risk' },
+                { label: 'YTM',               value: f?.ytm,                unit: '%',   desc: 'Expected annual return if held to maturity' },
+              ].filter(({ value }) => value != null && value !== '-').map(({ label, value, unit, desc }) => {
+                const v = parseFloat(value);
+                return (
+                  <div key={label} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>{label}</div>
+                    <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, color: 'var(--brand-dark)', letterSpacing: '-.02em', lineHeight: 1, marginBottom: 4 }}>
+                      {`${fmt(v)}${unit}`}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>{desc}</div>
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>{desc}</div>
+                );
+              })}
+            </div>
+
+            {/* Sharpe/Sortino/Std Dev for debt — only if data exists */}
+            {(() => {
+              const gauges = [
+                (hasVal(rk('sharpe_ratio'))) && { label:`Sharpe (${period.toUpperCase()})`,   value:rk('sharpe_ratio'),  lo:0, hi:2,  thresh:0.5, lowerBetter:false },
+                (hasVal(rk('sortino_ratio'))) && { label:`Sortino (${period.toUpperCase()})`,  value:rk('sortino_ratio'), lo:0, hi:3,  thresh:0.8, lowerBetter:false },
+                (hasVal(rk('std_dev')))       && { label:`Std Dev (${period.toUpperCase()})`,  value:rk('std_dev'),       lo:0, hi:10, thresh:3,   lowerBetter:true  },
+              ].filter(Boolean);
+              if (!gauges.length) return null;
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${gauges.length},minmax(0,1fr))`, gap: 8, marginBottom: 14 }}>
+                  {gauges.map(g => <RiskGauge key={g.label} label={g.label} value={g.value} lo={g.lo} hi={g.hi} thresh={g.thresh} lowerBetter={g.lowerBetter} />)}
                 </div>
               );
-            })}
-          </div>
+            })()}
+          </>
         )}
-
-        <div style={{ display: 'grid', gridTemplateColumns: layoutMode === 'debt' ? 'repeat(3,minmax(0,1fr))' : 'repeat(4,minmax(0,1fr))', gap: 8, marginBottom: 14 }}>
-          <RiskGauge label={`Sharpe (${period.toUpperCase()})`}  value={rk('sharpe_ratio')}  lo={0}  hi={2}   thresh={0.5} lowerBetter={false} />
-          <RiskGauge label={`Sortino (${period.toUpperCase()})`} value={rk('sortino_ratio')} lo={0}  hi={3}   thresh={0.8} lowerBetter={false} />
-          {layoutMode !== 'debt' && <RiskGauge label={`Alpha (${period.toUpperCase()})`} value={rk('alpha')} lo={-5} hi={10} thresh={0} lowerBetter={false} />}
-          {layoutMode !== 'debt' && <RiskGauge label={`Beta (${period.toUpperCase()})`}  value={rk('beta')}  lo={0}  hi={1.5} thresh={1.1} lowerBetter={true} />}
-          {layoutMode === 'debt' && <RiskGauge label={`Std Dev (${period.toUpperCase()})`} value={rk('std_dev')} lo={0} hi={10} thresh={3} lowerBetter={true} />}
-        </div>
 
         {/* ⑥ RISK TABLE + PORTFOLIO */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
