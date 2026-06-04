@@ -4,6 +4,7 @@ import Navbar from './components/Layout/Navbar';
 import Header from './components/Layout/Header';
 import FundExplorer from './components/FundExplorer/FundExplorer';
 import FundDetail from './components/FundDetail/FundDetail';
+import Watchlist from './components/Watchlist/Watchlist';
 import Performance from './components/Performance/Performance';
 import PeerComparison from './components/PeerComparison/PeerComparison';
 import Simulator from './components/Simulator/Simulator';
@@ -69,6 +70,9 @@ export default function App() {
               } />
               <Route path="/home" element={
                 <FundDetail selectedDate={selectedDate} selectedFund={selectedFund} setSelectedFund={handleFundSelect} />
+              } />
+              <Route path="/watchlist" element={
+                <Watchlist selectedDate={selectedDate} setSelectedFund={handleFundSelect} />
               } />
               <Route path="/performance" element={
                 <Performance selectedDate={selectedDate} selectedFund={selectedFund} />

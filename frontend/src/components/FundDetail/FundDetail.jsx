@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { addToWatchlist, isInWatchlist } from '../Watchlist/Watchlist';
 
 const API = process.env.REACT_APP_API_URL || '';
 
@@ -293,6 +294,13 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [period, setPeriod] = useState('3y');
+  const [inWatchlist, setInWatchlist] = useState(() => selectedFund ? isInWatchlist(selectedFund?.isin) : false);
+
+  const handleAddToWatchlist = () => {
+    if (!selectedFund) return;
+    addToWatchlist(selectedFund);
+    setInWatchlist(true);
+  };
 
   const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
 
@@ -421,7 +429,9 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
               </>
             ) : null}
             <div style={{ display: 'flex', gap: 6, marginTop: 10, justifyContent: 'flex-end' }}>
-              <button onClick={() => navigate('/performance')} style={{ padding: '6px 12px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>Performance ↗</button>
+              <button onClick={handleAddToWatchlist} style={{ padding: '6px 12px', fontSize: 12, border: `1px solid ${inWatchlist ? '#1A7A52' : 'var(--brand-primary)'}`, borderRadius: 8, background: inWatchlist ? 'rgba(26,122,82,0.08)' : 'rgba(145,47,99,0.06)', cursor: 'pointer', color: inWatchlist ? '#1A7A52' : 'var(--brand-primary)', fontWeight: 500 }}>
+                {inWatchlist ? '★ In Watchlist' : '☆ Add to Watchlist'}
+              </button>
               <button onClick={() => navigate('/peer-comparison')} style={{ padding: '6px 12px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>Compare peers ↗</button>
             </div>
           </div>
@@ -779,7 +789,9 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
                 </div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <button onClick={() => navigate('/performance')} style={{ width: '100%', padding: 8, background: 'var(--brand-primary)', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>View full performance ↗</button>
+                <button onClick={handleAddToWatchlist} style={{ width: '100%', padding: 8, background: inWatchlist ? '#1A7A52' : 'var(--brand-primary)', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>
+                  {inWatchlist ? '★ Added to Watchlist' : '☆ Add to Watchlist'}
+                </button>
                 <button onClick={() => navigate('/peer-comparison')} style={{ width: '100%', padding: 8, background: 'var(--brand-dark)', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>Compare with peers ↗</button>
                 <button onClick={() => navigate('/simulator')} style={{ width: '100%', padding: 8, background: '#fff', color: 'var(--brand-primary)', border: '1px solid var(--brand-primary)', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>Run SIP simulation ↗</button>
               </div>
