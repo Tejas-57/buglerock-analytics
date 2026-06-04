@@ -135,7 +135,7 @@ function FundCard({ fund, data, onRemove, onSelect, selected, onToggleSelect, da
 
       {/* Risk metrics */}
       {f && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 2, marginBottom: 10, padding: '6px 0', borderTop: '1px solid var(--bg-secondary)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 2, marginBottom: 10, padding: '6px 0', borderTop: '1px solid var(--bg-secondary)' }}>
           {[
             ['SHARPE', risk.sharpe_ratio_3y],
             ['ALPHA', risk.alpha_3y],
@@ -242,8 +242,7 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
   const SORT_KEYS = {
     '1y': f => parseFloat(fundData[f.isin]?.returns?.['1y'] || -999),
     '3y': f => parseFloat(fundData[f.isin]?.returns?.['3y'] || -999),
-    'sharpe': f => parseFloat(fundData[f.isin]?.risk?.sharpe_ratio_3y || -999),
-    'alpha': f => parseFloat(fundData[f.isin]?.risk?.alpha_3y || -999),
+    
   };
 
   const displayList = watchlist
@@ -297,7 +296,7 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
           placeholder="Search fund, AMC or ISIN..."
           style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, width: 220, outline: 'none' }}
         />
-        {[['1y', '1Y return'], ['3y', '3Y CAGR'], ['sharpe', 'Sharpe'], ['alpha', 'Alpha']].map(([k, l]) => (
+        {[['1y', '1Y return'], ['3y', '3Y CAGR']].map(([k, l]) => (
           <button key={k} onClick={() => setSortKey(k)} style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, border: '1px solid', borderColor: sortKey === k ? 'var(--brand-primary)' : 'var(--border)', borderRadius: 20, background: sortKey === k ? 'var(--brand-primary)' : 'transparent', color: sortKey === k ? '#fff' : 'var(--text-secondary)', cursor: 'pointer' }}>{l}</button>
         ))}
         <button onClick={clearAll} style={{ marginLeft: 'auto', padding: '6px 14px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-muted)' }}>Clear all</button>
@@ -305,15 +304,15 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
 
       {/* Summary bar */}
       {Object.keys(fundData).length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 1, marginBottom: 16, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: '#fff', boxShadow: 'var(--shadow-card)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 1, marginBottom: 16, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: '#fff', boxShadow: 'var(--shadow-card)' }}>
           {[
-            { label: 'Funds tracked', value: watchlist.length, sub: 'All healthy', mono: false },
+            { label: 'Funds tracked', value: watchlist.length, sub: '', mono: false },
             { label: 'Avg 1Y return', value: avg1y != null ? (avg1y >= 0 ? '+' : '') + avg1y.toFixed(2) + '%' : '—', sub: 'across watchlist', color: avg1y != null ? col(avg1y) : undefined },
             { label: 'Avg 3Y CAGR', value: avg3y != null ? (avg3y >= 0 ? '+' : '') + avg3y.toFixed(2) + '%' : '—', sub: 'annualised', color: avg3y != null ? col(avg3y) : undefined },
             { label: 'Avg Sharpe (3Y)', value: avgSharpe != null ? avgSharpe.toFixed(2) : '—', sub: 'risk-adjusted' },
   
           ].filter(Boolean).map((item, i) => (
-            <div key={i} style={{ padding: '12px 16px', borderRight: i < 2 ? '1px solid var(--border)' : 'none' }}>
+            <div key={i} style={{ padding: '12px 16px', borderRight: i < 3 ? '1px solid var(--border)' : 'none' }}>
               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>{item.label}</div>
               <div style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 600, color: item.color || 'var(--brand-dark)', letterSpacing: '-.02em', lineHeight: 1, marginBottom: 2 }}>{item.value}</div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{item.sub}</div>
@@ -360,11 +359,11 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
                   ['1Y', 'right', '1y'],
                   ['3Y CAGR', 'right', '3y'],
                   ['5Y CAGR', 'right', null],
-                  ['SHARPE', 'right', 'sharpe'],
-                  ['ALPHA', 'right', 'alpha'],
-                  ['BETA', 'right', null],
-                  ['UP CAP', 'right', null],
-                  ['DN CAP', 'right', null],
+                  
+                  
+                  
+                  
+                  
                   ['AUM', 'right', null],
                   ['TER', 'right', null],
                   ['RATING', 'right', null],

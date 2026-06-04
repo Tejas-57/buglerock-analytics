@@ -122,7 +122,7 @@ export default function PeerComparison({ selectedDate, selectedFund }) {
                     ))}
                     {peerData.peer_avg && (
                       <tr className="avg-row">
-                        <td style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Peer Average</td>
+                        <td style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Category Average</td>
                         <td>—</td>
                         {RETURN_COLS.map(k => <ReturnTd key={k} value={peerData.peer_avg.returns?.[k]} />)}
                       </tr>
@@ -158,7 +158,7 @@ export default function PeerComparison({ selectedDate, selectedFund }) {
                     ))}
                     {peerData.peer_avg && (
                       <tr className="avg-row">
-                        <td style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Peer Average</td>
+                        <td style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Category Average</td>
                         <td>—</td>
                         <td>{fmt(peerData.peer_avg.risk?.[`std_dev_${riskTf}`], '%')}</td>
                         <td>{fmt(peerData.peer_avg.risk?.[`alpha_${riskTf}`])}</td>

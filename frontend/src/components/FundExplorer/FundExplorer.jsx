@@ -466,7 +466,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
       {selectedCat && peerAvg != null && peerAvg !== '-' && (
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 14px', background:'rgba(145,47,99,0.04)', border:'1px solid rgba(145,47,99,0.12)', borderRadius:6, margin:'8px 0 0' }}>
           <span style={{ fontSize:12, color:'var(--brand-mid)', fontWeight:600 }}>
-            Peer avg {sortLbl}: {parseFloat(peerAvg)>=0?'+':''}{parseFloat(peerAvg).toFixed(2)}%
+            Category avg {sortLbl}: {parseFloat(peerAvg)>=0?'+':''}{parseFloat(peerAvg).toFixed(2)}%
           </span>
           <span style={{ fontSize:11, color:'var(--text-muted)' }}>
             {displayFunds.length} fund{displayFunds.length!==1?'s':''}
