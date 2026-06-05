@@ -137,9 +137,6 @@ function FundCard({ fund, data, onRemove, onSelect, selected, onToggleSelect, da
       {f && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 2, marginBottom: 10, padding: '6px 0', borderTop: '1px solid var(--bg-secondary)' }}>
           {[
-            ['SHARPE', risk.sharpe_ratio_3y],
-            ['ALPHA', risk.alpha_3y],
-            ['DN CAP', risk.down_capture_3y],
             ['TER', f.expense_ratio],
           ].map(([label, val]) => (
             <div key={label} style={{ textAlign: 'center' }}>
@@ -186,6 +183,7 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
   const [view, setView] = useState('cards'); // 'cards' | 'table'
   const [fundData, setFundData] = useState({}); // isin → snapshot
   const [sortKey, setSortKey] = useState('1y');
+  const [sortDir, setSortDir] = useState('desc');
   const [selected, setSelected] = useState(new Set());
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
@@ -240,22 +238,25 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
 
   // Sort + filter
   const SORT_KEYS = {
+    '1m': f => parseFloat(fundData[f.isin]?.returns?.['1m'] || -999),
+    '3m': f => parseFloat(fundData[f.isin]?.returns?.['3m'] || -999),
+    '6m': f => parseFloat(fundData[f.isin]?.returns?.['6m'] || -999),
+    '5y': f => parseFloat(fundData[f.isin]?.returns?.['5y'] || -999),
+    'aum': f => parseFloat(fundData[f.isin]?.fund_size || -999),
+    'ter': f => parseFloat(fundData[f.isin]?.expense_ratio || -999),
     '1y': f => parseFloat(fundData[f.isin]?.returns?.['1y'] || -999),
     '3y': f => parseFloat(fundData[f.isin]?.returns?.['3y'] || -999),
-    
   };
 
   const displayList = watchlist
     .filter(f => !search || f.name.toLowerCase().includes(search.toLowerCase()) || f.isin?.includes(search))
-    .sort((a, b) => (SORT_KEYS[sortKey]?.(b) || 0) - (SORT_KEYS[sortKey]?.(a) || 0));
+    .sort((a, b) => sortDir === 'desc' ? (SORT_KEYS[sortKey]?.(b) || 0) - (SORT_KEYS[sortKey]?.(a) || 0) : (SORT_KEYS[sortKey]?.(a) || 0) - (SORT_KEYS[sortKey]?.(b) || 0));
 
   // Summary stats
   const allReturns1y = watchlist.map(f => parseFloat(fundData[f.isin]?.returns?.['1y'])).filter(v => !isNaN(v));
   const allReturns3y = watchlist.map(f => parseFloat(fundData[f.isin]?.returns?.['3y'])).filter(v => !isNaN(v));
-  const allSharpe = watchlist.map(f => parseFloat(fundData[f.isin]?.risk?.sharpe_ratio_3y)).filter(v => !isNaN(v));
   const avg1y = allReturns1y.length ? (allReturns1y.reduce((a, b) => a + b, 0) / allReturns1y.length) : null;
   const avg3y = allReturns3y.length ? (allReturns3y.reduce((a, b) => a + b, 0) / allReturns3y.length) : null;
-  const avgSharpe = allSharpe.length ? (allSharpe.reduce((a, b) => a + b, 0) / allSharpe.length) : null;
 
 
   if (!watchlist.length) {
@@ -296,9 +297,6 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
           placeholder="Search fund, AMC or ISIN..."
           style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, width: 220, outline: 'none' }}
         />
-        {[['1y', '1Y return'], ['3y', '3Y CAGR']].map(([k, l]) => (
-          <button key={k} onClick={() => setSortKey(k)} style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, border: '1px solid', borderColor: sortKey === k ? 'var(--brand-primary)' : 'var(--border)', borderRadius: 20, background: sortKey === k ? 'var(--brand-primary)' : 'transparent', color: sortKey === k ? '#fff' : 'var(--text-secondary)', cursor: 'pointer' }}>{l}</button>
-        ))}
         <button onClick={clearAll} style={{ marginLeft: 'auto', padding: '6px 14px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-muted)' }}>Clear all</button>
       </div>
 
@@ -309,7 +307,6 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
             { label: 'Funds tracked', value: watchlist.length, sub: '', mono: false },
             { label: 'Avg 1Y return', value: avg1y != null ? (avg1y >= 0 ? '+' : '') + avg1y.toFixed(2) + '%' : '—', sub: 'across watchlist', color: avg1y != null ? col(avg1y) : undefined },
             { label: 'Avg 3Y CAGR', value: avg3y != null ? (avg3y >= 0 ? '+' : '') + avg3y.toFixed(2) + '%' : '—', sub: 'annualised', color: avg3y != null ? col(avg3y) : undefined },
-            { label: 'Avg Sharpe (3Y)', value: avgSharpe != null ? avgSharpe.toFixed(2) : '—', sub: 'risk-adjusted' },
   
           ].filter(Boolean).map((item, i) => (
             <div key={i} style={{ padding: '12px 16px', borderRight: i < 3 ? '1px solid var(--border)' : 'none' }}>
@@ -353,25 +350,20 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
                 {[
                   ['FUND', 'left', null],
                   ['NAV', 'right', null],
-                  ['1M', 'right', null],
-                  ['3M', 'right', null],
-                  ['6M', 'right', null],
+                  ['1M', 'right', '1m'],
+                  ['3M', 'right', '3m'],
+                  ['6M', 'right', '6m'],
                   ['1Y', 'right', '1y'],
                   ['3Y CAGR', 'right', '3y'],
-                  ['5Y CAGR', 'right', null],
-                  
-                  
-                  
-                  
-                  
-                  ['AUM', 'right', null],
-                  ['TER', 'right', null],
+                  ['5Y CAGR', 'right', '5y'],
+                  ['AUM', 'right', 'aum'],
+                  ['TER', 'right', 'ter'],
                   ['RATING', 'right', null],
                   ['', 'right', null],
                 ].map(([h, align, sk]) => (
-                  <th key={h} onClick={sk ? () => setSortKey(sk) : undefined}
+                  <th key={h} onClick={sk ? () => { if (sortKey === sk) setSortDir(d => d === 'desc' ? 'asc' : 'desc'); else { setSortKey(sk); setSortDir('desc'); } } : undefined}
                     style={{ padding: '10px 8px', textAlign: align, fontSize: 10, fontWeight: 700, letterSpacing: '.06em', color: sk && sortKey === sk ? 'var(--brand-primary)' : 'var(--text-muted)', cursor: sk ? 'pointer' : 'default', whiteSpace: 'nowrap', background: sk && sortKey === sk ? 'rgba(145,47,99,0.04)' : 'transparent' }}>
-                    {h}{sk && sortKey === sk ? ' ↓' : ''}
+                    {h}{sk && sortKey === sk ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
                   </th>
                 ))}
               </tr>
@@ -398,13 +390,8 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
                     </td>
                     <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{f?.nav && f.nav !== '-' ? `₹${fmt(f.nav)}` : '—'}</td>
                     {[r['1m'], r['3m'], r['6m'], r['1y'], r['3y'], r['5y']].map((v, i) => (
-                      <td key={i} style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: [3,4].includes(i) ? 600 : 400, color: col(v) }}>{pct(v)}</td>
+                      <td key={i} style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 400, color: col(v) }}>{pct(v)}</td>
                     ))}
-                    <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{risk.sharpe_ratio_3y != null && risk.sharpe_ratio_3y !== '-' ? fmt(risk.sharpe_ratio_3y) : '—'}</td>
-                    <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: col(risk.alpha_3y) }}>{risk.alpha_3y != null && risk.alpha_3y !== '-' ? (parseFloat(risk.alpha_3y) >= 0 ? '+' : '') + fmt(risk.alpha_3y) + '%' : '—'}</td>
-                    <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{risk.beta_3y != null && risk.beta_3y !== '-' ? fmt(risk.beta_3y) : '—'}</td>
-                    <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{risk.up_capture_3y != null && risk.up_capture_3y !== '-' ? fmt(risk.up_capture_3y) + '%' : '—'}</td>
-                    <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{risk.down_capture_3y != null && risk.down_capture_3y !== '-' ? fmt(risk.down_capture_3y) + '%' : '—'}</td>
                     <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{f?.fund_size != null && f.fund_size !== '-' ? '₹' + parseFloat(f.fund_size).toLocaleString('en-IN', { maximumFractionDigits: 0 }) + ' Cr' : '—'}</td>
                     <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{f?.expense_ratio != null && f.expense_ratio !== '-' ? fmt(f.expense_ratio) + '%' : '—'}</td>
                     <td style={{ padding: '10px 8px', textAlign: 'right', fontSize: 13, color: '#B46B10', letterSpacing: -1 }}>{f?.morningstar_rating && f.morningstar_rating !== '-' ? stars(f.morningstar_rating) : '—'}</td>
