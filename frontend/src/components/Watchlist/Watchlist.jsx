@@ -137,6 +137,9 @@ function FundCard({ fund, data, onRemove, onSelect, selected, onToggleSelect, da
       {f && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 2, marginBottom: 10, padding: '6px 0', borderTop: '1px solid var(--bg-secondary)' }}>
           {[
+            ['SHARPE', risk?.sharpe_ratio_3y],
+            ['ALPHA', risk?.alpha_3y],
+            ['DN CAP', risk?.down_capture_3y],
             ['TER', f.expense_ratio],
           ].map(([label, val]) => (
             <div key={label} style={{ textAlign: 'center' }}>
@@ -257,6 +260,8 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
   const allReturns3y = watchlist.map(f => parseFloat(fundData[f.isin]?.returns?.['3y'])).filter(v => !isNaN(v));
   const avg1y = allReturns1y.length ? (allReturns1y.reduce((a, b) => a + b, 0) / allReturns1y.length) : null;
   const avg3y = allReturns3y.length ? (allReturns3y.reduce((a, b) => a + b, 0) / allReturns3y.length) : null;
+  const allReturns6m = watchlist.map(f => parseFloat(fundData[f.isin]?.returns?.['6m'])).filter(v => !isNaN(v));
+  const avg6m = allReturns6m.length ? (allReturns6m.reduce((a, b) => a + b, 0) / allReturns6m.length) : null;
 
 
   if (!watchlist.length) {
@@ -305,8 +310,9 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 1, marginBottom: 16, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: '#fff', boxShadow: 'var(--shadow-card)' }}>
           {[
             { label: 'Funds tracked', value: watchlist.length, sub: '', mono: false },
-            { label: 'Avg 1Y return', value: avg1y != null ? (avg1y >= 0 ? '+' : '') + avg1y.toFixed(2) + '%' : '—', sub: 'across watchlist', color: avg1y != null ? col(avg1y) : undefined },
-            { label: 'Avg 3Y CAGR', value: avg3y != null ? (avg3y >= 0 ? '+' : '') + avg3y.toFixed(2) + '%' : '—', sub: 'annualised', color: avg3y != null ? col(avg3y) : undefined },
+            { label: 'Avg 6M return', value: avg6m != null ? (avg6m >= 0 ? '+' : '') + avg6m.toFixed(2) + '%' : '—', sub: '', color: avg6m != null ? col(avg6m) : undefined },
+            { label: 'Avg 1Y return', value: avg1y != null ? (avg1y >= 0 ? '+' : '') + avg1y.toFixed(2) + '%' : '—', sub: '', color: avg1y != null ? col(avg1y) : undefined },
+            { label: 'Avg 3Y CAGR', value: avg3y != null ? (avg3y >= 0 ? '+' : '') + avg3y.toFixed(2) + '%' : '—', sub: '', color: avg3y != null ? col(avg3y) : undefined },
   
           ].filter(Boolean).map((item, i) => (
             <div key={i} style={{ padding: '12px 16px', borderRight: i < 3 ? '1px solid var(--border)' : 'none' }}>
