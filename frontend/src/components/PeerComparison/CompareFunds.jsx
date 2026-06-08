@@ -281,6 +281,12 @@ export default function CompareFunds({ selectedDate }) {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><FundHeader /></thead>
             <tbody>
+              <SectionHead label="1-year risk metrics" />
+              <Row label="Sharpe (1Y)"    vals={F.map(f => f.data?.risk?.sharpe_ratio_1y)}    fmtFn={v => fmt(v)} showBar />
+              <Row label="Alpha (1Y)"     vals={F.map(f => f.data?.risk?.alpha_1y)}            fmtFn={pct} showBar />
+              <Row label="Beta (1Y)"      vals={F.map(f => f.data?.risk?.beta_1y)}             fmtFn={v => fmt(v)} lowerBetter />
+              <Row label="Up cap (1Y)"    vals={F.map(f => f.data?.risk?.up_capture_1y)}       fmtFn={pctc} />
+              <Row label="Down cap (1Y)"  vals={F.map(f => f.data?.risk?.down_capture_1y)}     fmtFn={pctc} lowerBetter />
               <SectionHead label="3-year risk metrics" />
               <Row label="Sharpe ratio"   vals={F.map(f => f.data?.risk?.sharpe_ratio_3y)}   fmtFn={v => fmt(v)} showBar />
               <Row label="Sortino ratio"  vals={F.map(f => f.data?.risk?.sortino_ratio_3y)}  fmtFn={v => fmt(v)} showBar />
@@ -289,12 +295,6 @@ export default function CompareFunds({ selectedDate }) {
               <Row label="Up capture"     vals={F.map(f => f.data?.risk?.up_capture_3y)}      fmtFn={pctc} />
               <Row label="Down capture"   vals={F.map(f => f.data?.risk?.down_capture_3y)}    fmtFn={pctc} lowerBetter />
               <Row label="Std deviation"  vals={F.map(f => f.data?.risk?.std_dev_3y)}         fmtFn={pctc} lowerBetter />
-              <SectionHead label="1-year risk metrics" />
-              <Row label="Sharpe (1Y)"    vals={F.map(f => f.data?.risk?.sharpe_ratio_1y)}    fmtFn={v => fmt(v)} />
-              <Row label="Alpha (1Y)"     vals={F.map(f => f.data?.risk?.alpha_1y)}            fmtFn={pct} />
-              <Row label="Beta (1Y)"      vals={F.map(f => f.data?.risk?.beta_1y)}             fmtFn={v => fmt(v)} lowerBetter />
-              <Row label="Up cap (1Y)"    vals={F.map(f => f.data?.risk?.up_capture_1y)}       fmtFn={pctc} />
-              <Row label="Down cap (1Y)"  vals={F.map(f => f.data?.risk?.down_capture_1y)}     fmtFn={pctc} lowerBetter />
               <SectionHead label="Cost & rating" />
               <Row label="Expense ratio"  vals={F.map(f => f.data?.expense_ratio)}             fmtFn={pctc} lowerBetter showBar />
               <Row label="Morningstar ★"  vals={F.map(f => f.data?.morningstar_rating)}        fmtFn={v => (v && v !== '-') ? `${Math.round(parseFloat(v))} ★` : '—'} />
