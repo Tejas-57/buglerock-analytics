@@ -52,7 +52,12 @@ function highlight(vals, lowerBetter = false) {
 }
 
 export default function CompareFunds({ selectedDate }) {
-  const [funds, setFunds] = useState([]);          // { isin, name, category, asset_class, color, data }
+  const [funds, setFunds] = useState(() => {
+    try {
+      const saved = localStorage.getItem('compareFunds_state');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [activeTab, setActiveTab] = useState('returns');
   const [slotSearchQ, setSlotSearchQ] = useState(['', '', '', '']);
   const [slotResults, setSlotResults] = useState([[], [], [], []]);
@@ -63,6 +68,35 @@ export default function CompareFunds({ selectedDate }) {
 
   const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
   const MAX = 4;
+
+
+  // Persist funds to localStorage on every change
+  useEffect(() => {
+    try {
+      localStorage.setItem('compareFunds_state', JSON.stringify(funds));
+    } catch {}
+  }, [funds]);
+
+  // Load funds passed from Watchlist via sessionStorage
+  useEffect(() => {
+    const stored = sessionStorage.getItem('compareFunds');
+    if (stored) {
+      try {
+        const preselected = JSON.parse(stored);
+        sessionStorage.removeItem('compareFunds');
+        setFunds([]); // clear existing before loading watchlist selection
+        preselected.slice(0, MAX).forEach((fund, idx) => {
+          fetchFundData(fund.isin).then(data => {
+            const color = CMP_COLORS[idx % CMP_COLORS.length];
+            setFunds(prev => {
+              if (prev.find(f => f.isin === fund.isin)) return prev;
+              return [...prev, { ...fund, color, data }];
+            });
+          });
+        });
+      } catch {}
+    }
+  }, []);
 
   // Close dropdown only when focus leaves the entire slot wrapper
   function handleSlotBlur(idx, e) {
