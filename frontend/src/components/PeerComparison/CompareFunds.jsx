@@ -157,7 +157,7 @@ export default function CompareFunds({ selectedDate }) {
   // Load watchlist for dropdown
   function openWlDropdown() {
     try {
-      const wl = JSON.parse(localStorage.getItem('buglerock_watchlist') || '[]');
+      const wl = JSON.parse(localStorage.getItem('watchlist_default') || '[]');
       setWatchlistFunds(wl);
       setWlDropdownOpen(true);
     } catch {}
