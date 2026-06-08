@@ -6,7 +6,7 @@ import FundExplorer from './components/FundExplorer/FundExplorer';
 import FundDetail from './components/FundDetail/FundDetail';
 import Watchlist from './components/Watchlist/Watchlist';
 import Performance from './components/Performance/Performance';
-import PeerComparison from './components/PeerComparison/PeerComparison';
+import CompareFunds from './components/PeerComparison/CompareFunds';
 import Simulator from './components/Simulator/Simulator';
 import RollingAnalytics from './components/RollingAnalytics/RollingAnalytics';
 import ChatButton from './components/Chat/ChatButton';
@@ -78,7 +78,7 @@ export default function App() {
                 <Performance selectedDate={selectedDate} selectedFund={selectedFund} />
               } />
               <Route path="/peer-comparison" element={
-                <PeerComparison selectedDate={selectedDate} selectedFund={selectedFund} />
+                <CompareFunds selectedDate={selectedDate} />
               } />
               <Route path="/simulator" element={
                 <Simulator selectedFund={selectedFund} setSelectedFund={handleFundSelect} />

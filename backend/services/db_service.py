@@ -532,15 +532,18 @@ def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> li
 # ── Global fund search ───────────────────────────────────────────────────────
 
 def search_funds_global(query: str, data_date: date, limit: int = 50) -> list:
-    """Search all funds by name or ISIN across all categories with partial word matching."""
+    """Search all funds by name or ISIN with relevance-ranked results."""
     db = get_session()
     try:
         from sqlalchemy import and_, func
-        words = [w.strip() for w in query.lower().split() if w.strip()]
+        q = query.lower().strip()
+        words = [w.strip() for w in q.split() if w.strip()]
         if not words:
             return []
+
+        # Broad filter — fetch all funds matching any word anywhere
         word_filters = [
-            (DailyFundData.name.ilike(f"%{w}%")) | (DailyFundData.isin.ilike(f"%{w}%"))
+            DailyFundData.name.ilike(f"%{w}%") | DailyFundData.isin.ilike(f"%{w}%")
             for w in words
         ]
         funds = db.query(DailyFundData).filter(
@@ -548,7 +551,22 @@ def search_funds_global(query: str, data_date: date, limit: int = 50) -> list:
             DailyFundData.isin != None,
             DailyFundData.name != None,
             and_(*word_filters)
-        ).order_by(func.lower(DailyFundData.name)).limit(limit).all()
+        ).limit(300).all()
+
+        def score(f):
+            name = (f.name or "").lower()
+            name_words = name.split()
+            # 1. Exact full query in name — top priority
+            if q in name:
+                return (0, 0, name)
+            # 2. Count words that match START of any word in fund name
+            matched = sum(1 for w in words if any(part.startswith(w) for part in name_words))
+            all_matched = matched == len(words)
+            # All words matched as prefixes → priority 1
+            # Partial match → priority 2
+            return (1 if all_matched else 2, -matched, name)
+
+        funds_sorted = sorted(funds, key=score)[:limit]
 
         return [{
             "isin": f.isin,
@@ -558,7 +576,7 @@ def search_funds_global(query: str, data_date: date, limit: int = 50) -> list:
             "category": f.category,
             "asset_class": f.asset_class,
             "return_1y": f.return_1y,
-        } for f in funds]
+        } for f in funds_sorted]
     finally:
         db.close()
 
