@@ -189,9 +189,29 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
   const [sortDir, setSortDir] = useState('desc');
   const [selected, setSelected] = useState(new Set());
   const [search, setSearch] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [addedIsins, setAddedIsins] = useState(new Set());
   const [loading, setLoading] = useState(false);
 
   const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
+
+  // Live search useEffect
+  React.useEffect(() => {
+    if (!search.trim() || search.trim().length < 2) {
+      setSearchResults([]); setSearchOpen(false); return;
+    }
+    setSearchLoading(true);
+    const t = setTimeout(() => {
+      fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/search?q=${encodeURIComponent(search.trim())}&date=${dateStr}`)
+        .then(r => r.json())
+        .then(d => { setSearchResults(d.funds || []); setSearchOpen(true); setSearchLoading(false); })
+        .catch(() => setSearchLoading(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search, dateStr]);
+
 
   // Fetch snapshots for all watchlist funds
   useEffect(() => {
@@ -297,11 +317,79 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
 
       {/* Search + sort */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
-        <input
-          value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Search fund, AMC or ISIN..."
-          style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, width: 220, outline: 'none' }}
-        />
+        <div style={{ position: 'relative' }} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setSearchOpen(false); }}>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            onFocus={() => { if (searchResults.length > 0) setSearchOpen(true); }}
+            placeholder="Search any fund, AMC or ISIN..."
+            style={{ padding: '7px 12px 7px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, width: 260, outline: 'none', paddingRight: search ? 28 : 12 }}
+          />
+          {search && (
+            <span onClick={() => { setSearch(''); setSearchResults([]); setSearchOpen(false); }}
+              style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: 'var(--text-muted)', cursor: 'pointer', lineHeight: 1, userSelect: 'none' }}>×</span>
+          )}
+          {searchLoading && !search && <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: 'var(--text-muted)' }}>...</span>}
+          {searchOpen && searchResults.length > 0 && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, width: 420, maxHeight: 320,
+              overflowY: 'auto', background: '#fff', border: '1px solid var(--border)',
+              borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 1000, marginTop: 4,
+            }}>
+              {searchResults.map((fund, idx) => {
+                const alreadyIn = watchlist.some(f => f.isin === fund.isin);
+                const justAdded = addedIsins.has(fund.isin);
+                return (
+                  <div
+                    key={fund.isin || `s-${idx}`}
+                    tabIndex={0}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px',
+                      borderBottom: idx < searchResults.length - 1 ? '1px solid var(--border)' : 'none',
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    onClick={() => { setSearch(''); setSearchOpen(false); }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fund.name}</div>
+                      <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                        <span style={{ fontSize: 10, color: 'var(--brand-mid)', background: 'rgba(109,84,121,0.08)', padding: '1px 5px', borderRadius: 3 }}>
+                          {fund.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      tabIndex={0}
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (alreadyIn || justAdded) {
+                          removeFromWatchlist(fund.isin);
+                          setAddedIsins(prev => { const s = new Set(prev); s.delete(fund.isin); return s; });
+                          setWatchlist(loadWatchlist());
+                        } else {
+                          addToWatchlist(fund);
+                          setAddedIsins(prev => new Set([...prev, fund.isin]));
+                          setWatchlist(loadWatchlist());
+                        }
+                      }}
+                      style={{
+                        fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6, border: 'none',
+                        cursor: 'pointer',
+                        background: alreadyIn || justAdded ? 'rgba(16,185,129,0.1)' : 'var(--brand-primary)',
+                        color: alreadyIn || justAdded ? '#059669' : '#fff',
+                        whiteSpace: 'nowrap', flexShrink: 0,
+                      }}
+                    >
+                      {alreadyIn || justAdded ? '✓ Added' : '+ Watchlist'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
         <button onClick={clearAll} style={{ marginLeft: 'auto', padding: '6px 14px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-muted)' }}>Clear all</button>
       </div>
 
