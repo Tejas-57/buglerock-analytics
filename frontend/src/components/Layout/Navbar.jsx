@@ -14,7 +14,7 @@ const NAV_SECTIONS = [
     section: 'ANALYSE',
     items: [
       { path: '/home',            label: 'Fund Detail',    icon: HomeIcon },
-      { path: '/peer-comparison', label: 'Compare Peers',  icon: PeerIcon },
+      { path: '/peer-comparison', label: 'Compare Funds',  icon: PeerIcon },
     ],
   },
   {
