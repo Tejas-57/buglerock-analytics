@@ -172,14 +172,14 @@ def download_attachment(service, message_id: str) -> tuple:
     return None, None
 
 
-def fetch_latest(check_days: int = 3) -> bool:
+def fetch_latest(check_days: int = 5) -> bool:
     """
     Try to fetch the most recent available Morningstar email.
     Checks today and up to check_days back.
     data_date = email_date - 1 day.
     Returns True if new data was loaded.
     """
-    from services.db_service import has_data_for_date
+    from services.db_service import has_data_for_date, has_email_for_date
 
     try:
         service = get_gmail_service()
@@ -192,8 +192,9 @@ def fetch_latest(check_days: int = 3) -> bool:
         email_date = today - timedelta(days=days_back)
         data_date  = email_date - timedelta(days=1)
 
-        if has_data_for_date(data_date):
-            logger.info(f"Data already present for {data_date}, skipping")
+        # Check by email_date — avoids skipping weekend emails where data_date != email_date - 1
+        if has_email_for_date(email_date):
+            logger.info(f"Email already processed for {email_date}, skipping")
             continue
 
         logger.info(f"Checking Gmail for email_date={email_date} (data_date={data_date})")
