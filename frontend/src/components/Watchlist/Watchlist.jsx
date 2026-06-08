@@ -310,7 +310,19 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
               <button key={v} onClick={() => setView(v)} style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, border: 'none', cursor: 'pointer', background: view === v ? 'var(--brand-primary)' : '#fff', color: view === v ? '#fff' : 'var(--text-secondary)', transition: 'all .15s' }}>{l}</button>
             ))}
           </div>
-          <button onClick={() => navigate('/peer-comparison')} style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>Compare ↗</button>
+          <button onClick={() => {
+              if (selected.size < 2) {
+                alert('Please select at least 2 funds to compare.');
+                return;
+              }
+              if (selected.size > 4) {
+                alert('Only 4 funds can be compared at a time. Please select up to 4 funds.');
+                return;
+              }
+              const selectedFunds = watchlist.filter(f => selected.has(f.isin));
+              sessionStorage.setItem('compareFunds', JSON.stringify(selectedFunds));
+              navigate('/peer-comparison');
+            }} style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>Compare ↗</button>
           <button onClick={() => navigate('/simulator')} style={{ padding: '6px 14px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 8, background: 'var(--brand-primary)', cursor: 'pointer', color: '#fff' }}>✦ Build portfolio ↗</button>
         </div>
       </div>

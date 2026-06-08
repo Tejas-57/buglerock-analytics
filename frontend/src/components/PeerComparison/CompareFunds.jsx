@@ -64,6 +64,9 @@ export default function CompareFunds({ selectedDate }) {
   const [slotOpen, setSlotOpen] = useState([false, false, false, false]);
   const [slotLoading, setSlotLoading] = useState([false, false, false, false]);
   const [loadingIsins, setLoadingIsins] = useState(new Set());
+  const [wlDropdownOpen, setWlDropdownOpen] = useState(false);
+  const [watchlistFunds, setWatchlistFunds] = useState([]);
+  const wlRef = useRef(null);
   const slotRefs = [useRef(null), useRef(null), useRef(null), useRef(null)];
 
   const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
@@ -151,16 +154,25 @@ export default function CompareFunds({ selectedDate }) {
     setFunds(prev => prev.filter(f => f.isin !== isin));
   }
 
-  // Add from watchlist
-  function addFromWatchlist() {
+  // Load watchlist for dropdown
+  function openWlDropdown() {
     try {
       const wl = JSON.parse(localStorage.getItem('buglerock_watchlist') || '[]');
-      const usedIsins = funds.map(f => f.isin);
-      const toAdd = wl.filter(f => !usedIsins.includes(f.isin)).slice(0, MAX - funds.length);
-      if (!toAdd.length) return;
-      toAdd.forEach(f => addFund(f));
+      setWatchlistFunds(wl);
+      setWlDropdownOpen(true);
     } catch {}
   }
+
+  // Close watchlist dropdown on outside click
+  useEffect(() => {
+    function handle(e) {
+      if (wlRef.current && !wlRef.current.contains(e.target)) {
+        setWlDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, []);
 
   // ── Table helpers ──────────────────────────────────────────────────────────
 
@@ -404,9 +416,47 @@ export default function CompareFunds({ selectedDate }) {
           <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 26, fontWeight: 600, color: 'var(--brand-dark)', marginBottom: 3, letterSpacing: '-.02em' }}>Fund comparison</h1>
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Compare up to 4 funds across returns, risk, calendar years and composition</div>
         </div>
-        <button onClick={addFromWatchlist} style={{ padding: '7px 14px', fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>
-          + From watchlist
-        </button>
+        <div ref={wlRef} style={{ position: 'relative' }}>
+          <button onClick={openWlDropdown} style={{ padding: '7px 14px', fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>
+            + From watchlist
+          </button>
+          {wlDropdownOpen && (
+            <div style={{ position: 'absolute', top: '100%', right: 0, width: 320, maxHeight: 320, overflowY: 'auto', background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 1000, marginTop: 4 }}>
+              {watchlistFunds.length === 0 ? (
+                <div style={{ padding: 16, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>Your watchlist is empty</div>
+              ) : (
+                watchlistFunds.map((wf, idx) => {
+                  const alreadyIn = funds.some(f => f.isin === wf.isin);
+                  const isFull = funds.length >= MAX;
+                  return (
+                    <div key={wf.isin} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', borderBottom: idx < watchlistFunds.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{wf.name}</div>
+                        <div style={{ fontSize: 10, color: 'var(--brand-mid)', marginTop: 2 }}>{wf.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}</div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (alreadyIn || isFull) return;
+                          addFund(wf);
+                          setWlDropdownOpen(false);
+                        }}
+                        style={{
+                          fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6, border: 'none',
+                          cursor: alreadyIn || isFull ? 'default' : 'pointer',
+                          background: alreadyIn ? 'rgba(16,185,129,0.1)' : isFull ? 'var(--bg-secondary)' : 'var(--brand-primary)',
+                          color: alreadyIn ? '#059669' : isFull ? 'var(--text-muted)' : '#fff',
+                          whiteSpace: 'nowrap', flexShrink: 0,
+                        }}
+                      >
+                        {alreadyIn ? '✓ Added' : isFull ? 'Full' : '+ Compare'}
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
             {/* 4-slot fund boxes */}
