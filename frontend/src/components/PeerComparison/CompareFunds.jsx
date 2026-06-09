@@ -40,7 +40,7 @@ function stars(r) {
 function highlight(vals, lowerBetter = false) {
   const nums = vals.map(v => (v !== null && v !== undefined && v !== '-') ? parseFloat(v) : null);
   const valid = nums.filter(v => v !== null && !isNaN(v));
-  if (valid.length < 2) return vals.map(() => '');
+  if (valid.length < 2) return vals.map(() => ''); // no highlighting for single fund
   const best = lowerBetter ? Math.min(...valid) : Math.max(...valid);
   const worst = lowerBetter ? Math.max(...valid) : Math.min(...valid);
   return nums.map(v => {
@@ -187,7 +187,9 @@ export default function CompareFunds({ selectedDate }) {
         onMouseLeave={e => [...e.currentTarget.cells].forEach(c => c.style.background = '')}
       >
         <td style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500, whiteSpace: 'nowrap', width: 160, minWidth: 160, background: '#fff' }}>{label}</td>
-        {vals.map((v, i) => {
+        {[0,1,2,3].map((idx) => {
+          const v = vals[idx];
+          const i = idx;
           const cls = hl[i];
           const bg = cls === 'best' ? 'rgba(16,185,129,0.08)' : cls === 'worst' ? 'rgba(239,68,68,0.08)' : '#fff';
           const color = cls === 'best' ? '#059669' : cls === 'worst' ? '#DC2626' : 'var(--text-primary)';
@@ -215,7 +217,7 @@ export default function CompareFunds({ selectedDate }) {
     return (
       <tr>
         <td style={{ padding: '7px 14px', fontSize: 9, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--brand-primary)', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>{label}</td>
-        {funds.map((_, i) => (
+        {[0,1,2,3].map((i) => (
           <td key={i} style={{ padding: '7px 14px', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', borderLeft: '1px solid var(--border)' }} />
         ))}
       </tr>
@@ -226,34 +228,39 @@ export default function CompareFunds({ selectedDate }) {
     return (
       <tr style={{ position: 'sticky', top: 0, zIndex: 10, background: '#fff', boxShadow: '0 1px 0 var(--border)' }}>
         <th style={{ padding: 0, width: 160, minWidth: 160, background: '#fff' }} />
-        {funds.map((f, i) => (
-          <th key={f.isin} style={{ padding: '12px 14px 10px', borderLeft: '1px solid var(--border)', borderTop: `3px solid ${f.color}`, verticalAlign: 'top', minWidth: 180, fontWeight: 'normal', background: '#fff' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--brand-dark)', lineHeight: 1.3, marginBottom: 4 }}>{f.name}</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <div>
-                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(145,47,99,0.08)', color: 'var(--brand-primary)', fontWeight: 500 }}>
-                  {f.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}
-                </span>
-                {f.data?.fund_size && f.data.fund_size !== '-' && (
-                  <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(109,84,121,0.08)', color: 'var(--brand-mid)', fontWeight: 500, marginLeft: 4 }}>{fmtAum(f.data.fund_size)}</span>
-                )}
-              </div>
-              <div style={{ marginTop: 2 }}>
-                <span style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, color: f.color }}>
-                  {f.data?.nav && f.data.nav !== '-' ? `₹${parseFloat(f.data.nav).toFixed(2)}` : '—'}
-                </span>
-                {f.data?.returns?.['1d'] && f.data.returns['1d'] !== '-' && (
-                  <span style={{ fontSize: 11, fontWeight: 500, marginLeft: 6, color: parseFloat(f.data.returns['1d']) >= 0 ? '#059669' : '#DC2626' }}>
-                    {pct(f.data.returns['1d'])} today
+        {[0,1,2,3].map(idx => {
+          const f = funds[idx];
+          return f ? (
+            <th key={f.isin} style={{ padding: '12px 14px 10px', borderLeft: '1px solid var(--border)', borderTop: `3px solid ${f.color}`, verticalAlign: 'top', width: '25%', fontWeight: 'normal', background: '#fff' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--brand-dark)', lineHeight: 1.3, marginBottom: 4 }}>{f.name}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div>
+                  <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(145,47,99,0.08)', color: 'var(--brand-primary)', fontWeight: 500 }}>
+                    {f.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}
                   </span>
+                  {f.data?.fund_size && f.data.fund_size !== '-' && (
+                    <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(109,84,121,0.08)', color: 'var(--brand-mid)', fontWeight: 500, marginLeft: 4 }}>{fmtAum(f.data.fund_size)}</span>
+                  )}
+                </div>
+                <div style={{ marginTop: 2 }}>
+                  <span style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, color: f.color }}>
+                    {f.data?.nav && f.data.nav !== '-' ? `₹${parseFloat(f.data.nav).toFixed(2)}` : '—'}
+                  </span>
+                  {f.data?.returns?.['1d'] && f.data.returns['1d'] !== '-' && (
+                    <span style={{ fontSize: 11, fontWeight: 500, marginLeft: 6, color: parseFloat(f.data.returns['1d']) >= 0 ? '#059669' : '#DC2626' }}>
+                      {pct(f.data.returns['1d'])} today
+                    </span>
+                  )}
+                </div>
+                {f.data?.morningstar_rating && f.data.morningstar_rating !== '-' && (
+                  <div style={{ fontSize: 12, color: '#B46B10', letterSpacing: -1 }}>{stars(f.data.morningstar_rating)}</div>
                 )}
               </div>
-              {f.data?.morningstar_rating && f.data.morningstar_rating !== '-' && (
-                <div style={{ fontSize: 12, color: '#B46B10', letterSpacing: -1 }}>{stars(f.data.morningstar_rating)}</div>
-              )}
-            </div>
-          </th>
-        ))}
+            </th>
+          ) : (
+            <th key={`empty-${idx}`} style={{ padding: '12px 14px', borderLeft: '1px solid var(--border)', borderTop: '3px solid var(--border)', width: '25%', background: 'var(--bg-secondary)' }} />
+          );
+        })}
       </tr>
     );
   }
@@ -275,7 +282,7 @@ export default function CompareFunds({ selectedDate }) {
 
   // ── Render tabs ────────────────────────────────────────────────────────────
   function renderTable() {
-    if (funds.length < 2) return null;
+    if (funds.length < 1) return null;
     const F = funds;
 
     if (activeTab === 'returns') {
@@ -302,7 +309,8 @@ export default function CompareFunds({ selectedDate }) {
               <Row label="CY 2023"  vals={F.map(f => f.data?.returns?.['cy2023'])} fmtFn={pct} showBar />
               <Row label="CY 2022"  vals={F.map(f => f.data?.returns?.['cy2022'])} fmtFn={pct} showBar />
               <Row label="CY 2021"  vals={F.map(f => f.data?.returns?.['cy2021'])} fmtFn={pct} showBar />
-              {/* Tally row */}
+              {/* Tally row - only when 2+ funds */}
+              {F.length >= 2 && (
               <tr>
                 <td style={{ padding: '10px 14px', background: 'var(--bg-secondary)', borderTop: '2px solid var(--border)', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)' }}>Periods won</td>
                 {wins.map((w, i) => {
@@ -315,6 +323,7 @@ export default function CompareFunds({ selectedDate }) {
                   );
                 })}
               </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -543,18 +552,18 @@ export default function CompareFunds({ selectedDate }) {
       </div>
 
       {/* Empty state */}
-      {funds.length < 2 && (
+      {funds.length === 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 60, color: 'var(--text-muted)', textAlign: 'center', background: '#fff', borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}>
           <div style={{ fontSize: 32, opacity: .25 }}>⊞</div>
           <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, color: 'var(--brand-dark)' }}>Add funds to compare</div>
           <div style={{ fontSize: 13, maxWidth: 240, color: 'var(--text-muted)' }}>
-            {funds.length === 0 ? 'Search and add 2–4 funds using the input above.' : 'Add one more fund to start comparing.'}
+            'Search and add 2–4 funds using the input above.'
           </div>
         </div>
       )}
 
       {/* Comparison table */}
-      {funds.length >= 2 && (
+      {funds.length >= 1 && (
         <div style={{ background: '#fff', borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
           {/* Tabs */}
           <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 16px', background: '#fff' }}>
