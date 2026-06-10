@@ -22,4 +22,5 @@ backend/test_gemini.py
 
 # OS
 .DS_Store
-Thumbs.db
+Thumbs.db"backend/test_*.py" 
+"backend/reauth_*.py" 
