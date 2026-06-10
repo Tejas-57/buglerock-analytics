@@ -31,18 +31,7 @@ def has_data_for_date(data_date: date) -> bool:
     finally:
         db.close()
 
-def has_email_for_date(email_date: date) -> bool:
-    """Check if we already successfully processed an email for this email_date."""
-    db = get_session()
-    try:
-        return db.query(EmailFetchLog).filter(
-            EmailFetchLog.email_date == email_date,
-            EmailFetchLog.status == 'success'
-        ).count() > 0
-    finally:
-        db.close()
-
-def has_email_for_date(email_date: date) -> bool:
+def has_email_for_date(email_date) -> bool:
     """Check if we already successfully processed an email for this email_date."""
     db = get_session()
     try:
@@ -463,12 +452,18 @@ def get_latest_data_status() -> dict:
             DailyFundData.data_date.desc()
         ).first()
         if not latest:
-            return {"data_as_of": None, "is_fresh": False}
+            return {"data_as_of": None, "is_fresh": False, "mail_date": None}
         latest_date = latest[0]
-        today = date.today()
+        # Get stored mail_date for reference
+        from models.database import AppSettings
+        mail_row = db.query(AppSettings).filter(AppSettings.key == 'mail_date').first()
+        mail_date = mail_row.value if mail_row else None
+        from datetime import date as date_type
+        is_fresh = mail_date == str(date_type.today())
         return {
             "data_as_of": str(latest_date),
-            "is_fresh": latest_date == today,
+            "is_fresh": is_fresh,  # True only if today's email has been fetched
+            "mail_date": mail_date,
         }
     finally:
         db.close()
@@ -607,5 +602,17 @@ def set_setting(key: str, value: str):
         else:
             db.add(AppSettings(key=key, value=value))
         db.commit()
+    finally:
+        db.close()
+
+def get_amfi_code_for_isin(isin: str) -> str:
+    """Get AMFI code for an Indian fund by ISIN."""
+    db = get_session()
+    try:
+        result = db.query(DailyFundData.amfi_code).filter(
+            DailyFundData.isin == isin,
+            DailyFundData.amfi_code != None
+        ).first()
+        return result[0] if result else None
     finally:
         db.close()

@@ -183,10 +183,10 @@ export default function CompareFunds({ selectedDate }) {
 
     return (
       <tr style={{ borderBottom: '1px solid var(--border)' }}
-        onMouseEnter={e => [...e.currentTarget.cells].forEach(c => c.style.background = 'var(--bg-secondary)')}
-        onMouseLeave={e => [...e.currentTarget.cells].forEach(c => c.style.background = '')}
+        onMouseEnter={e => [...e.currentTarget.cells].forEach(c => c.dataset.bg && (c.style.background = 'var(--bg-secondary)'))}
+        onMouseLeave={e => [...e.currentTarget.cells].forEach(c => c.dataset.bg && (c.style.background = c.dataset.bg))}
       >
-        <td style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500, whiteSpace: 'nowrap', width: 160, minWidth: 160, background: '#fff' }}>{label}</td>
+        <td data-bg='#fff' style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500, whiteSpace: 'nowrap', width: 160, minWidth: 160, background: '#fff' }}>{label}</td>
         {[0,1,2,3].map((idx) => {
           const v = vals[idx];
           const i = idx;
@@ -197,7 +197,7 @@ export default function CompareFunds({ selectedDate }) {
           const barW = (showBar && v !== null && v !== '-') ? (Math.abs(parseFloat(v)) / maxAbs * 100).toFixed(0) : 0;
           const barClr = cls === 'best' ? '#059669' : cls === 'worst' ? '#DC2626' : '#A795AE';
           return (
-            <td key={i} style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, background: bg, color, borderLeft: '1px solid var(--border)', transition: 'background .1s' }}>
+            <td key={i} data-bg={bg} style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, background: bg, color, borderLeft: '1px solid var(--border)', transition: 'background .1s' }}>
               {showBar && v !== null && v !== '-' ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                   <div style={{ width: 40, height: 4, background: 'var(--bg-secondary)', borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>

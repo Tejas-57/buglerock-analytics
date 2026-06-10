@@ -8,7 +8,7 @@ from datetime import date
 
 load_dotenv()
 
-from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail
+from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav
 from models.database import init_db
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ app.include_router(rolling.router,     prefix="/api/rolling")
 app.include_router(chat.router,        prefix="/api/chat")
 app.include_router(funds.router,       prefix="/api/funds")
 app.include_router(gmail.router,       prefix="/api/gmail")
+app.include_router(nav.router,         prefix="/api/nav")
 
 
 async def gmail_poll_loop():
@@ -42,9 +43,19 @@ async def gmail_poll_loop():
         try:
             logger.info("Gmail poll: checking for latest data...")
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, fetch_latest, 3)
+            result = await loop.run_in_executor(None, fetch_latest, 5)
             if result:
                 logger.info("Gmail poll: new data loaded successfully")
+                # Append latest NAV to nav_history for all tracked ISINs
+                try:
+                    from services.nav_fetcher import get_tracked_isins, append_daily_nav
+                    isins = get_tracked_isins()
+                    if isins:
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(None, append_daily_nav, isins)
+                        logger.info(f"NAV append: updated {len(isins)} funds")
+                except Exception as nav_err:
+                    logger.warning(f"NAV daily append failed: {nav_err}")
             else:
                 logger.info("Gmail poll: no new data found")
         except Exception as e:
@@ -130,6 +141,14 @@ async def startup():
 @app.get("/api/health")
 def health():
     return {"status": "ok", "app": "BugleRock Analytics", "version": "2.0.0"}
+
+@app.post("/api/gmail/fetch-now")
+async def fetch_now():
+    """Manually trigger a Gmail fetch for latest data."""
+    from services.gmail_watcher import fetch_latest
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, fetch_latest, 7)
+    return {"success": result, "message": "Fetch completed" if result else "No new data found"}
 
 
 if __name__ == "__main__":

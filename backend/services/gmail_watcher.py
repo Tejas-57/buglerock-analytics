@@ -174,12 +174,13 @@ def download_attachment(service, message_id: str) -> tuple:
 
 def fetch_latest(check_days: int = 5) -> bool:
     """
-    Try to fetch the most recent available Morningstar email.
-    Checks today and up to check_days back.
-    data_date = email_date - 1 day.
+    Fetch the most recent Morningstar email.
+    data_date is taken directly from the nav_date in the Excel (most common nav_date).
+    mail_date (email arrival date) is stored separately in AppSettings for reference.
     Returns True if new data was loaded.
     """
-    from services.db_service import has_data_for_date, has_email_for_date
+    from services.db_service import has_data_for_date, has_email_for_date, set_setting
+    from collections import Counter
 
     try:
         service = get_gmail_service()
@@ -190,14 +191,13 @@ def fetch_latest(check_days: int = 5) -> bool:
     today = date.today()
     for days_back in range(0, check_days):
         email_date = today - timedelta(days=days_back)
-        data_date  = email_date - timedelta(days=1)
 
-        # Check by email_date — avoids skipping weekend emails where data_date != email_date - 1
+        # Skip if we already successfully processed this email
         if has_email_for_date(email_date):
             logger.info(f"Email already processed for {email_date}, skipping")
             continue
 
-        logger.info(f"Checking Gmail for email_date={email_date} (data_date={data_date})")
+        logger.info(f"Checking Gmail for email_date={email_date}")
         messages = search_emails_for_date(service, email_date)
         if not messages:
             logger.info(f"No email found for {email_date}")
@@ -215,27 +215,60 @@ def fetch_latest(check_days: int = 5) -> bool:
             tmp.close()
 
         try:
+            # Parse with a placeholder data_date; real date comes from nav_date in Excel
             parsed = parse_excel_file(
                 file_path=tmp_path,
-                data_date=str(data_date),
+                data_date=str(email_date),  # temporary, will be overridden below
                 email_date=str(email_date),
                 file_name=file_name,
             )
+
+            # Derive actual data_date from most common nav_date in the parsed funds
+            nav_dates = [f.get("nav_date") for f in parsed["funds"] if f.get("nav_date") and f["nav_date"] != "-"]
+            if nav_dates:
+                most_common_nav_date = Counter(str(d) for d in nav_dates).most_common(1)[0][0]
+                parsed["data_date"] = most_common_nav_date
+                logger.info(f"Derived data_date={most_common_nav_date} from nav_dates in Excel")
+            else:
+                # fallback to email_date - 1 if no nav_dates found
+                parsed["data_date"] = str(email_date - timedelta(days=1))
+                logger.warning(f"No nav_dates found, falling back to email_date-1={parsed['data_date']}")
+
+            data_date = parsed["data_date"]
+
+            # Skip if we already have this nav_date in DB
+            from datetime import date as date_type
+            dd = date_type.fromisoformat(data_date) if isinstance(data_date, str) else data_date
+            if has_data_for_date(dd):
+                logger.info(f"Data already present for nav_date={data_date}, skipping")
+                log_email_fetch(
+                    email_date=str(email_date),
+                    data_date=str(data_date),
+                    file_name=file_name,
+                    status="success",
+                    message=f"Data already present for {data_date}",
+                )
+                continue
+
             save_parsed_data(parsed)
+
+            # Store mail_date in AppSettings for reference
+            set_setting("mail_date", str(email_date))
+
             log_email_fetch(
                 email_date=str(email_date),
                 data_date=str(data_date),
                 file_name=file_name,
                 status="success",
-                message=f"Parsed {len(parsed['funds'])} funds",
+                message=f"Parsed {len(parsed['funds'])} funds for nav_date={data_date}",
             )
-            logger.info(f"Loaded {len(parsed['funds'])} funds for {data_date}")
+            logger.info(f"Loaded {len(parsed['funds'])} funds for nav_date={data_date} from email_date={email_date}")
             return True
         except Exception as e:
             logger.error(f"Parse/save failed: {e}", exc_info=True)
             log_email_fetch(
                 email_date=str(email_date),
-                data_date=str(data_date),
+                data_date=str(email_date),
                 file_name=file_name or "",
                 status="error",
                 message=str(e),

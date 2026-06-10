@@ -295,6 +295,24 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
   const [error, setError] = useState(null);
   const [period, setPeriod] = useState('3y');
   const [inWatchlist, setInWatchlist] = useState(() => selectedFund ? isInWatchlist(selectedFund?.isin) : false);
+  const [showCompareWarning, setShowCompareWarning] = useState(false);
+
+  const handleCompare = () => {
+    const existing = JSON.parse(localStorage.getItem('compareFunds_state') || '[]');
+    if (existing.length > 0) {
+      setShowCompareWarning(true);
+    } else {
+      goToCompare();
+    }
+  };
+
+  const goToCompare = () => {
+    if (!selectedFund) return;
+    const fund = { isin: selectedFund.isin, name: selectedFund.name, category: selectedFund.category, asset_class: selectedFund.asset_class };
+    sessionStorage.setItem('compareFunds', JSON.stringify([fund]));
+    setShowCompareWarning(false);
+    navigate('/peer-comparison');
+  };
 
   const handleAddToWatchlist = () => {
     if (!selectedFund) return;
@@ -318,6 +336,23 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
       setLoading(false);
     }).catch(() => { setError('Failed to load fund data.'); setLoading(false); });
   }, [selectedFund, dateStr]);
+
+  if (showCompareWarning) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ background: '#fff', borderRadius: 12, padding: 28, maxWidth: 400, width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--brand-dark)', marginBottom: 10 }}>Clear existing comparison?</div>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20, lineHeight: 1.6 }}>
+            This action will clear existing funds in the Fund comparison tab and start a new comparison with <strong>{selectedFund?.name}</strong>.
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button onClick={() => setShowCompareWarning(false)} style={{ padding: '8px 16px', fontSize: 13, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>Cancel</button>
+            <button onClick={goToCompare} style={{ padding: '8px 16px', fontSize: 13, border: 'none', borderRadius: 8, background: 'var(--brand-primary)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>Yes, proceed</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!selectedFund) {
     return (
@@ -432,7 +467,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
               <button onClick={handleAddToWatchlist} style={{ padding: '6px 12px', fontSize: 12, border: `1px solid ${inWatchlist ? '#1A7A52' : 'var(--brand-primary)'}`, borderRadius: 8, background: inWatchlist ? 'rgba(26,122,82,0.08)' : 'rgba(145,47,99,0.06)', cursor: 'pointer', color: inWatchlist ? '#1A7A52' : 'var(--brand-primary)', fontWeight: 500 }}>
                 {inWatchlist ? '★ In Watchlist' : '☆ Add to Watchlist'}
               </button>
-              <button onClick={() => navigate('/peer-comparison')} style={{ padding: '6px 12px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>Compare peers ↗</button>
+              <button onClick={handleCompare} style={{ padding: '6px 12px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>Compare peers ↗</button>
             </div>
           </div>
         </div>
@@ -792,7 +827,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
                 <button onClick={handleAddToWatchlist} style={{ width: '100%', padding: 8, background: inWatchlist ? '#1A7A52' : 'var(--brand-primary)', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>
                   {inWatchlist ? '★ Added to Watchlist' : '☆ Add to Watchlist'}
                 </button>
-                <button onClick={() => navigate('/peer-comparison')} style={{ width: '100%', padding: 8, background: 'var(--brand-dark)', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>Compare with peers ↗</button>
+                <button onClick={handleCompare} style={{ width: '100%', padding: 8, background: 'var(--brand-dark)', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>Compare with peers ↗</button>
                 <button onClick={() => navigate('/simulator')} style={{ width: '100%', padding: 8, background: '#fff', color: 'var(--brand-primary)', border: '1px solid var(--brand-primary)', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>Run SIP simulation ↗</button>
               </div>
             </div>

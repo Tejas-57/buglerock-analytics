@@ -252,3 +252,28 @@ class AppSettings(Base):
 
     key   = Column(String(100), primary_key=True)
     value = Column(Text)
+
+class NavHistory(Base):
+    __tablename__ = "nav_history"
+
+    id           = Column(Integer, primary_key=True)
+    isin         = Column(String(20), nullable=False, index=True)
+    date         = Column(Date, nullable=False, index=True)
+    nav          = Column(Float)
+    total_return = Column(Float)
+    created_at   = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        __import__('sqlalchemy').UniqueConstraint('isin', 'date', name='uq_nav_history_isin_date'),
+    )
+
+
+class NavFetchLog(Base):
+    __tablename__ = "nav_fetch_log"
+
+    id         = Column(Integer, primary_key=True)
+    isin       = Column(String(20), nullable=False, index=True)
+    status     = Column(String(20))
+    rows_added = Column(Integer, default=0)
+    message    = Column(Text)
+    fetched_at = Column(DateTime, server_default=func.now())
