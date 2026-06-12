@@ -43,19 +43,9 @@ async def gmail_poll_loop():
         try:
             logger.info("Gmail poll: checking for latest data...")
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, fetch_latest, 5)
+            result = await loop.run_in_executor(None, fetch_latest, 3)
             if result:
                 logger.info("Gmail poll: new data loaded successfully")
-                # Append latest NAV to nav_history for all tracked ISINs
-                try:
-                    from services.nav_fetcher import get_tracked_isins, append_daily_nav
-                    isins = get_tracked_isins()
-                    if isins:
-                        loop = asyncio.get_event_loop()
-                        await loop.run_in_executor(None, append_daily_nav, isins)
-                        logger.info(f"NAV append: updated {len(isins)} funds")
-                except Exception as nav_err:
-                    logger.warning(f"NAV daily append failed: {nav_err}")
             else:
                 logger.info("Gmail poll: no new data found")
         except Exception as e:
@@ -136,19 +126,47 @@ async def startup():
     await migrate_benchmark_risk_columns()
     await check_parser_version()
     asyncio.create_task(gmail_poll_loop())
+    asyncio.create_task(nav_daily_cron())
 
 
 @app.get("/api/health")
 def health():
     return {"status": "ok", "app": "BugleRock Analytics", "version": "2.0.0"}
 
-@app.post("/api/gmail/fetch-now")
-async def fetch_now():
-    """Manually trigger a Gmail fetch for latest data."""
-    from services.gmail_watcher import fetch_latest
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, fetch_latest, 7)
-    return {"success": result, "message": "Fetch completed" if result else "No new data found"}
+
+async def nav_daily_cron():
+    """Independent daily cron — appends latest NAV for all tracked ISINs at midnight."""
+    import asyncio
+    from datetime import datetime, timedelta
+    from services.nav_fetcher import get_tracked_isins, append_daily_nav
+    from services.db_service import set_setting
+
+    logger.info("NAV daily cron started")
+    while True:
+        try:
+            now = datetime.now()
+            # Schedule next run at 00:05 AM
+            next_run = (now + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
+            sleep_secs = (next_run - now).total_seconds()
+            logger.info(f"NAV cron: next run at {next_run.strftime('%Y-%m-%d %H:%M:%S')} (in {int(sleep_secs/3600)}h {int((sleep_secs%3600)/60)}m)")
+            await asyncio.sleep(sleep_secs)
+
+            # Run append
+            logger.info("NAV daily cron: starting append...")
+            isins = get_tracked_isins()
+            if isins:
+                results = await asyncio.get_event_loop().run_in_executor(None, append_daily_nav, isins)
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                log_msg = f"NAV daily append completed at {now_str} — success:{results['success']} failed:{results['failed']} up_to_date:{results['up_to_date']} total_funds:{len(isins)}"
+                logger.info(log_msg)
+                # Store last append time in DB for reference
+                set_setting("nav_last_append", now_str)
+                set_setting("nav_last_append_result", str(results))
+            else:
+                logger.info("NAV daily cron: no tracked ISINs yet, skipping")
+        except Exception as e:
+            logger.error(f"NAV daily cron error: {e}", exc_info=True)
+            await asyncio.sleep(3600)  # retry in 1 hour if error
 
 
 if __name__ == "__main__":

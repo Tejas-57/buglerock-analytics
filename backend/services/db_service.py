@@ -616,3 +616,34 @@ def get_amfi_code_for_isin(isin: str) -> str:
         return result[0] if result else None
     finally:
         db.close()
+
+
+def get_fund_name_for_isin(isin: str) -> str:
+    """Get fund name for an ISIN from the DB."""
+    db = get_session()
+    try:
+        result = db.query(DailyFundData.name).filter(
+            DailyFundData.isin == isin,
+            DailyFundData.name != None
+        ).first()
+        return result[0] if result else None
+    finally:
+        db.close()
+
+
+def get_all_isins_with_amfi_code() -> list:
+    """Get all unique ISINs that have AMFI code, excluding SIF asset class."""
+    db = get_session()
+    try:
+        from sqlalchemy import distinct
+        results = db.query(
+            distinct(DailyFundData.isin)
+        ).filter(
+            DailyFundData.amfi_code != None,
+            DailyFundData.amfi_code != '',
+            DailyFundData.isin != None,
+            DailyFundData.asset_class != 'SIF'
+        ).all()
+        return [r[0] for r in results]
+    finally:
+        db.close()

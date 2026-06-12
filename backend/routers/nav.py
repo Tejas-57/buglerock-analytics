@@ -136,3 +136,134 @@ async def daily_append(background_tasks: BackgroundTasks):
 
     background_tasks.add_task(append_daily_nav, isins)
     return {"status": "started", "isin_count": len(isins)}
+
+
+@router.post("/fetch-all")
+async def fetch_all_funds(background_tasks: BackgroundTasks, force: bool = False):
+    """
+    One-time bulk load — fetches NAV history for all funds with AMFI code (excluding SIF).
+    Runs in background. Check progress via GET /api/nav/fetch-all/status.
+    """
+    from services.db_service import get_all_isins_with_amfi_code
+    from services.nav_fetcher import fetch_nav_history
+    from models.database import SessionLocal
+    from sqlalchemy import text
+
+    isins = get_all_isins_with_amfi_code()
+    if not isins:
+        return {"status": "error", "message": "No ISINs found with AMFI code"}
+
+    # Reset progress counter in app_settings
+    from services.db_service import set_setting
+    import json
+    set_setting("nav_bulk_progress", json.dumps({
+        "total": len(isins),
+        "completed": 0,
+        "failed": 0,
+        "running": True
+    }))
+
+    def bulk_fetch():
+        import json
+        from services.db_service import set_setting
+        completed = 0
+        failed = 0
+        skipped = 0
+        import time
+        for isin in isins:
+            try:
+                result = fetch_nav_history(isin, force_full=force)
+                if result['status'] == 'success':
+                    completed += 1
+                elif result['status'] == 'up_to_date':
+                    completed += 1
+                elif result['status'] == 'skipped':
+                    skipped += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+            time.sleep(0.2)  # small delay to allow server to handle other requests
+            # Update progress every 5 funds
+            if (completed + failed + skipped) % 5 == 0:
+                set_setting("nav_bulk_progress", json.dumps({
+                    "total": len(isins),
+                    "completed": completed,
+                    "failed": failed,
+                    "skipped": skipped,
+                    "running": True,
+                    "percent": round((completed + failed + skipped) / len(isins) * 100, 1)
+                }))
+        set_setting("nav_bulk_progress", json.dumps({
+            "total": len(isins),
+            "completed": completed,
+            "failed": failed,
+            "skipped": skipped,
+            "running": False,
+            "percent": 100.0
+        }))
+
+    import asyncio
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, bulk_fetch)
+    return {
+        "status": "started",
+        "total_funds": len(isins),
+        "message": f"Fetching NAV history for {len(isins)} funds in background"
+    }
+
+
+@router.get("/fetch-all/status")
+def fetch_all_status():
+    """Check progress of bulk NAV fetch."""
+    from services.db_service import get_setting
+    from models.database import SessionLocal, NavHistory
+    from sqlalchemy import func
+    import json
+
+    progress_raw = get_setting("nav_bulk_progress")
+    progress = json.loads(progress_raw) if progress_raw else None
+
+    db = SessionLocal()
+    try:
+        total_rows = db.query(func.count(NavHistory.id)).scalar()
+        unique_isins = db.query(func.count(func.distinct(NavHistory.isin))).scalar()
+    finally:
+        db.close()
+
+    return {
+        "bulk_load": progress,
+        "nav_history": {
+            "total_rows": total_rows,
+            "unique_funds": unique_isins,
+        }
+    }
+
+
+@router.get("/append/status")
+def append_status():
+    """Check last daily NAV append time and result."""
+    from services.db_service import get_setting
+    from models.database import SessionLocal, NavHistory
+    from sqlalchemy import func
+
+    last_append = get_setting("nav_last_append")
+    last_result = get_setting("nav_last_append_result")
+
+    db = SessionLocal()
+    try:
+        unique_isins = db.query(func.count(func.distinct(NavHistory.isin))).scalar()
+        total_rows = db.query(func.count(NavHistory.id)).scalar()
+        latest_date = db.query(func.max(NavHistory.date)).scalar()
+    finally:
+        db.close()
+
+    return {
+        "last_append_at": last_append or "never",
+        "last_append_result": last_result or "none",
+        "nav_history": {
+            "unique_funds": unique_isins,
+            "total_rows": total_rows,
+            "latest_nav_date": str(latest_date) if latest_date else None,
+        }
+    }

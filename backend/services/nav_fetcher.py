@@ -130,6 +130,29 @@ def fetch_via_mfapi(amfi_code: str, start_date: date, end_date: date) -> list:
     return rows
 
 
+def search_amfi_code_by_name(fund_name: str) -> str:
+    """Search mfapi by fund name to find AMFI code when not in DB."""
+    try:
+        import urllib.parse
+        query = ' '.join(fund_name.lower().split()[:4])  # use first 4 words
+        url = f"https://api.mfapi.in/mf/search?q={urllib.parse.quote(query)}"
+        resp = requests.get(url, headers=HEADERS, timeout=10)
+        resp.raise_for_status()
+        results = resp.json()
+        if not results:
+            return None
+        # Find best match by name similarity
+        fund_name_lower = fund_name.lower()
+        for r in results[:10]:
+            if r.get('schemeName', '').lower()[:20] in fund_name_lower or                fund_name_lower[:20] in r.get('schemeName', '').lower():
+                return str(r['schemeCode'])
+        # Fallback: return first result
+        return str(results[0]['schemeCode'])
+    except Exception as e:
+        logger.warning(f"mfapi search failed for '{fund_name}': {e}")
+        return None
+
+
 def fetch_via_morningstar(isin: str, start_date: date, end_date: date) -> list:
     """
     Fetch NAV history from Morningstar public timeseries API.
@@ -204,7 +227,7 @@ def fetch_nav_history(isin: str, force_full: bool = False) -> dict:
             if start >= today:
                 return {'isin': isin, 'rows_added': 0, 'status': 'up_to_date', 'message': 'Already up to date'}
         else:
-            start = date(today.year - 10, today.month, today.day)
+            start = date(1970, 1, 1)  # fetch from inception
 
         end = today
         logger.info(f"Fetching NAV for {isin} from {start} to {end}")
@@ -212,13 +235,15 @@ def fetch_nav_history(isin: str, force_full: bool = False) -> dict:
         rows = []
         source = ''
 
-        # All AMFI-registered funds (equity, debt, hybrid, SIF, global, ETF) use mfapi
+        # All AMFI-registered funds (equity, debt, hybrid, global, ETF) use mfapi
+        # SIF funds and funds without AMFI code are skipped
         source = 'mfapi'
         try:
             from services.db_service import get_amfi_code_for_isin
             amfi_code = get_amfi_code_for_isin(isin)
             if not amfi_code:
-                raise ValueError(f"No AMFI code found for {isin}")
+                logger.info(f"No AMFI code for {isin} — skipping")
+                return {'isin': isin, 'rows_added': 0, 'status': 'skipped', 'message': 'No AMFI code — SIF or unsupported fund'}
             rows = fetch_via_mfapi(amfi_code, start, end)
             logger.info(f"mfapi returned {len(rows)} rows for {isin}")
         except Exception as e:
