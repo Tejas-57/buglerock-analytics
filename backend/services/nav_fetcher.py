@@ -111,7 +111,7 @@ def is_indian_isin(isin: str) -> bool:
 def fetch_via_mfapi(amfi_code: str, start_date: date, end_date: date) -> list:
     """Fetch NAV history from mfapi.in for Indian funds using AMFI code."""
     url = f"{MFAPI_BASE}/{amfi_code}"
-    resp = requests.get(url, headers=HEADERS, timeout=15)
+    resp = requests.get(url, headers=HEADERS, timeout=30)
     resp.raise_for_status()
     data = resp.json()
 
