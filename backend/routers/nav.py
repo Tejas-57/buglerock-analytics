@@ -164,48 +164,56 @@ async def fetch_all_funds(background_tasks: BackgroundTasks, force: bool = False
     }))
 
     def bulk_fetch():
-        import json
+        import json, traceback, time
+        print(f"[BULK] thread started — {len(isins)} ISINs", flush=True)
         from services.db_service import set_setting
-        completed = 0
-        failed = 0
-        skipped = 0
-        import time
-        for isin in isins:
-            try:
-                result = fetch_nav_history(isin, force_full=force)
-                if result['status'] == 'success':
-                    completed += 1
-                elif result['status'] == 'up_to_date':
-                    completed += 1
-                elif result['status'] == 'skipped':
-                    skipped += 1
-                else:
+        try:
+            completed = 0
+            failed = 0
+            skipped = 0
+            for idx, isin in enumerate(isins):
+                try:
+                    if idx < 3 or idx % 50 == 0:
+                        print(f"[BULK] processing {idx+1}/{len(isins)}: {isin}", flush=True)
+                    result = fetch_nav_history(isin, force_full=force)
+                    if result['status'] == 'success':
+                        completed += 1
+                    elif result['status'] == 'up_to_date':
+                        completed += 1
+                    elif result['status'] == 'skipped':
+                        skipped += 1
+                    else:
+                        failed += 1
+                except Exception as fe:
                     failed += 1
-            except Exception:
-                failed += 1
-            time.sleep(0.2)  # small delay to allow server to handle other requests
-            # Update progress every 5 funds
-            if (completed + failed + skipped) % 5 == 0:
-                set_setting("nav_bulk_progress", json.dumps({
-                    "total": len(isins),
-                    "completed": completed,
-                    "failed": failed,
-                    "skipped": skipped,
-                    "running": True,
-                    "percent": round((completed + failed + skipped) / len(isins) * 100, 1)
-                }))
-        set_setting("nav_bulk_progress", json.dumps({
-            "total": len(isins),
-            "completed": completed,
-            "failed": failed,
-            "skipped": skipped,
-            "running": False,
-            "percent": 100.0
-        }))
+                    print(f"[BULK] fetch failed for {isin}: {fe}", flush=True)
+                # Update progress every 5 funds
+                if (completed + failed + skipped) % 5 == 0:
+                    set_setting("nav_bulk_progress", json.dumps({
+                        "total": len(isins),
+                        "completed": completed,
+                        "failed": failed,
+                        "skipped": skipped,
+                        "running": True,
+                        "percent": round((completed + failed + skipped) / len(isins) * 100, 1)
+                    }))
+            # Final update — done
+            set_setting("nav_bulk_progress", json.dumps({
+                "total": len(isins),
+                "completed": completed,
+                "failed": failed,
+                "skipped": skipped,
+                "running": False,
+                "percent": 100.0
+            }))
+            print(f"[BULK] completed — success:{completed} failed:{failed} skipped:{skipped}", flush=True)
+        except Exception as e:
+            print(f"[BULK] CRASHED: {e}", flush=True)
+            print(traceback.format_exc(), flush=True)
 
-    import asyncio
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(None, bulk_fetch)
+    import threading
+    t = threading.Thread(target=bulk_fetch, daemon=True)
+    t.start()
     return {
         "status": "started",
         "total_funds": len(isins),

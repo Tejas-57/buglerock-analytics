@@ -274,6 +274,9 @@ def fetch_nav_history(isin: str, force_full: bool = False) -> dict:
         #         return {'isin': isin, 'rows_added': 0, 'status': 'error', 'message': str(e)}
 
         if not rows:
+            # If fund already has data in DB, it's just up to date (no new rows in range)
+            if latest:
+                return {'isin': isin, 'rows_added': 0, 'status': 'up_to_date', 'message': 'Already up to date'}
             _log_fetch(isin, 0, 'no_data', f"No rows from {source}")
             return {'isin': isin, 'rows_added': 0, 'status': 'no_data', 'message': 'No data returned'}
 
