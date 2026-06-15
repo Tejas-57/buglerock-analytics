@@ -109,25 +109,36 @@ def is_indian_isin(isin: str) -> bool:
 
 
 def fetch_via_mfapi(amfi_code: str, start_date: date, end_date: date) -> list:
-    """Fetch NAV history from mfapi.in for Indian funds using AMFI code."""
+    """Fetch NAV history from mfapi.in for Indian funds using AMFI code. Retries on timeout."""
     url = f"{MFAPI_BASE}/{amfi_code}"
-    resp = requests.get(url, headers=HEADERS, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-
-    rows = []
-    for r in data.get('data', []):
+    
+    # Retry up to 3 times with increasing timeout
+    last_error = None
+    for attempt, timeout in enumerate([30, 60, 90], 1):
         try:
-            d = datetime.strptime(r['date'], "%d-%m-%Y").date()
-            if start_date <= d <= end_date:
-                rows.append({
-                    'date': d,
-                    'nav': float(r['nav']),
-                    'total_return': None,
-                })
-        except Exception:
+            resp = requests.get(url, headers=HEADERS, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            rows = []
+            for r in data.get('data', []):
+                try:
+                    d = datetime.strptime(r['date'], "%d-%m-%Y").date()
+                    if start_date <= d <= end_date:
+                        rows.append({
+                            'date': d,
+                            'nav': float(r['nav']),
+                            'total_return': None,
+                        })
+                except Exception:
+                    continue
+            return rows
+        except requests.exceptions.Timeout as e:
+            last_error = e
+            logger.warning(f"mfapi timeout (attempt {attempt}/3, timeout={timeout}s) for {amfi_code}")
             continue
-    return rows
+        except Exception as e:
+            raise e
+    raise last_error
 
 
 def search_amfi_code_by_name(fund_name: str) -> str:
