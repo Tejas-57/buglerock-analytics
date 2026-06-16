@@ -33,7 +33,6 @@ app.include_router(chat.router,        prefix="/api/chat")
 app.include_router(funds.router,       prefix="/api/funds")
 app.include_router(gmail.router,       prefix="/api/gmail")
 app.include_router(nav.router,         prefix="/api/nav")
-app.include_router(export.router,      prefix="/api/export")
 
 
 async def gmail_poll_loop():
