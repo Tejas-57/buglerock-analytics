@@ -275,3 +275,84 @@ def append_status():
             "latest_nav_date": str(latest_date) if latest_date else None,
         }
     }
+
+
+@router.post("/fetch-missing")
+async def fetch_missing(background_tasks: BackgroundTasks, force: bool = False):
+    """
+    Fetch NAV history ONLY for funds with AMFI code that are NOT yet in nav_history.
+    Much faster than fetch-all — skips already-loaded funds entirely.
+    """
+    from services.db_service import get_all_isins_with_amfi_code, set_setting
+    from services.nav_fetcher import get_tracked_isins, fetch_nav_history
+    import json
+
+    all_isins = set(get_all_isins_with_amfi_code())
+    tracked = set(get_tracked_isins())
+    missing = list(all_isins - tracked)
+
+    if not missing:
+        return {"status": "complete", "message": "All funds already in nav_history", "missing": 0}
+
+    set_setting("nav_bulk_progress", json.dumps({
+        "total": len(missing),
+        "completed": 0,
+        "failed": 0,
+        "skipped": 0,
+        "running": True,
+        "percent": 0.0,
+        "mode": "fetch-missing"
+    }))
+
+    def bulk_fetch():
+        import json, traceback
+        print(f"[FETCH-MISSING] started — {len(missing)} funds to fetch", flush=True)
+        from services.db_service import set_setting
+        completed = 0
+        failed = 0
+        try:
+            for idx, isin in enumerate(missing):
+                try:
+                    if idx < 3 or idx % 10 == 0:
+                        print(f"[FETCH-MISSING] {idx+1}/{len(missing)}: {isin}", flush=True)
+                    result = fetch_nav_history(isin, force_full=force)
+                    if result['status'] in ('success', 'up_to_date'):
+                        completed += 1
+                    else:
+                        failed += 1
+                except Exception as fe:
+                    failed += 1
+                    print(f"[FETCH-MISSING] failed for {isin}: {fe}", flush=True)
+                if (completed + failed) % 5 == 0:
+                    set_setting("nav_bulk_progress", json.dumps({
+                        "total": len(missing),
+                        "completed": completed,
+                        "failed": failed,
+                        "skipped": 0,
+                        "running": True,
+                        "percent": round((completed + failed) / len(missing) * 100, 1),
+                        "mode": "fetch-missing"
+                    }))
+            set_setting("nav_bulk_progress", json.dumps({
+                "total": len(missing),
+                "completed": completed,
+                "failed": failed,
+                "skipped": 0,
+                "running": False,
+                "percent": 100.0,
+                "mode": "fetch-missing"
+            }))
+            print(f"[FETCH-MISSING] done — success:{completed} failed:{failed}", flush=True)
+        except Exception as e:
+            print(f"[FETCH-MISSING] CRASHED: {e}", flush=True)
+            print(traceback.format_exc(), flush=True)
+
+    import threading
+    t = threading.Thread(target=bulk_fetch, daemon=True)
+    t.start()
+
+    return {
+        "status": "started",
+        "missing_funds": len(missing),
+        "message": f"Fetching NAV for {len(missing)} missing funds only — skipping {len(tracked)} already loaded"
+    }

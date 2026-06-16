@@ -8,7 +8,7 @@ from datetime import date
 
 load_dotenv()
 
-from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav
+from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, export
 from models.database import init_db
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ app.include_router(chat.router,        prefix="/api/chat")
 app.include_router(funds.router,       prefix="/api/funds")
 app.include_router(gmail.router,       prefix="/api/gmail")
 app.include_router(nav.router,         prefix="/api/nav")
+app.include_router(export.router,      prefix="/api/export")
 
 
 async def gmail_poll_loop():
@@ -46,6 +47,36 @@ async def gmail_poll_loop():
             result = await loop.run_in_executor(None, fetch_latest, 3)
             if result:
                 logger.info("Gmail poll: new data loaded successfully")
+                # Append latest NAV for all tracked funds + fetch any new funds
+                try:
+                    from services.nav_fetcher import get_tracked_isins, append_daily_nav, fetch_nav_history
+                    from services.db_service import get_all_isins_with_amfi_code
+
+                    # Step 1: Append new NAV rows for existing tracked funds
+                    tracked_isins = get_tracked_isins()
+                    if tracked_isins:
+                        await loop.run_in_executor(None, append_daily_nav, tracked_isins)
+                        logger.info(f"NAV append: updated {len(tracked_isins)} funds")
+
+                    # Step 2: Auto-fetch NAV history for any NEW funds in today's email
+                    all_isins = set(get_all_isins_with_amfi_code())
+                    tracked_set = set(tracked_isins)
+                    new_funds = all_isins - tracked_set
+                    if new_funds:
+                        logger.info(f"New funds detected: {len(new_funds)} — fetching NAV history automatically")
+                        import threading
+                        def fetch_new_funds():
+                            for isin in new_funds:
+                                try:
+                                    fetch_nav_history(isin, force_full=False)
+                                    logger.info(f"NAV fetched for new fund: {isin}")
+                                except Exception as e:
+                                    logger.warning(f"NAV fetch failed for new fund {isin}: {e}")
+                        threading.Thread(target=fetch_new_funds, daemon=True).start()
+                    else:
+                        logger.info("No new funds in today's email")
+                except Exception as nav_err:
+                    logger.warning(f"NAV update failed: {nav_err}")
             else:
                 logger.info("Gmail poll: no new data found")
         except Exception as e:

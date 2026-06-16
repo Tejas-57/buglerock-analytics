@@ -224,11 +224,28 @@ def fetch_latest(check_days: int = 5) -> bool:
             )
 
             # Derive actual data_date from most common nav_date in the parsed funds
-            nav_dates = [f.get("nav_date") for f in parsed["funds"] if f.get("nav_date") and f["nav_date"] != "-"]
+            # nav_date values from parser are already "YYYY-MM-DD" strings via safe_date()
+            nav_dates = [f.get("nav_date") for f in parsed["funds"]
+                        if f.get("nav_date") and f["nav_date"] not in ("-", None, "")]
             if nav_dates:
-                most_common_nav_date = Counter(str(d) for d in nav_dates).most_common(1)[0][0]
-                parsed["data_date"] = most_common_nav_date
-                logger.info(f"Derived data_date={most_common_nav_date} from nav_dates in Excel")
+                # Filter to valid YYYY-MM-DD format dates only
+                valid_dates = []
+                for d in nav_dates:
+                    try:
+                        from datetime import date as dt
+                        parsed_d = dt.fromisoformat(str(d))
+                        # Sanity check: nav_date should not be in the future
+                        if parsed_d <= email_date:
+                            valid_dates.append(str(parsed_d))
+                    except Exception:
+                        pass
+                if valid_dates:
+                    most_common_nav_date = Counter(valid_dates).most_common(1)[0][0]
+                    parsed["data_date"] = most_common_nav_date
+                    logger.info(f"Derived data_date={most_common_nav_date} from {len(valid_dates)} valid nav_dates in Excel")
+                else:
+                    parsed["data_date"] = str(email_date - timedelta(days=1))
+                    logger.warning(f"No valid nav_dates found, falling back to email_date-1={parsed['data_date']}")
             else:
                 # fallback to email_date - 1 if no nav_dates found
                 parsed["data_date"] = str(email_date - timedelta(days=1))
