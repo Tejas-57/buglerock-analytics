@@ -20,6 +20,7 @@ const NAV_SECTIONS = [
   {
     section: 'BUILD',
     items: [
+      { path: '/portfolio',        label: 'Portfolio Builder', icon: PortfolioIcon },
       { path: '/simulator',        label: 'Simulator',         icon: SimulatorIcon },
       { path: '/rolling-analytics',label: 'Rolling Analytics', icon: RollingIcon },
     ],
@@ -86,18 +87,19 @@ function HomeIcon() {
     </svg>
   );
 }
-function PerformanceIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/>
-    </svg>
-  );
-}
 function PeerIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
       <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+    </svg>
+  );
+}
+function PortfolioIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/>
+      <line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/>
     </svg>
   );
 }

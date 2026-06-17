@@ -10,6 +10,7 @@ import CompareFunds from './components/PeerComparison/CompareFunds';
 import Simulator from './components/Simulator/Simulator';
 import RollingAnalytics from './components/RollingAnalytics/RollingAnalytics';
 import ChatButton from './components/Chat/ChatButton';
+import PortfolioBuilder from './components/PortfolioBuilder/PortfolioBuilder';
 import './styles/global.css';
 import './App.css';
 
@@ -25,7 +26,6 @@ function loadFromStorage(key, fallback) {
 }
 
 export default function App() {
-  // null = not resolved yet — routes won't render until date is fetched
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedFund, setSelectedFund] = useState(() => loadFromStorage('br_selected_fund', null));
 
@@ -47,7 +47,6 @@ export default function App() {
     saveToStorage('br_selected_fund', fund);
   };
 
-  // Don't render routes until date is resolved — prevents double-fetch in FundExplorer
   if (!selectedDate) {
     return (
       <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', color:'var(--text-muted)', fontSize:13 }}>
@@ -85,6 +84,9 @@ export default function App() {
               } />
               <Route path="/rolling-analytics" element={
                 <RollingAnalytics selectedFund={selectedFund} setSelectedFund={handleFundSelect} />
+              } />
+              <Route path="/portfolio" element={
+                <PortfolioBuilder selectedDate={selectedDate} />
               } />
             </Routes>
           </main>
