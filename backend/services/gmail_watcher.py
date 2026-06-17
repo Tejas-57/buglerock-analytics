@@ -235,7 +235,7 @@ def fetch_latest(check_days: int = 5) -> bool:
                         from datetime import date as dt
                         parsed_d = dt.fromisoformat(str(d))
                         # Sanity check: nav_date should not be in the future
-                        if parsed_d <= email_date:
+                        if parsed_d < email_date:  # strictly less than email date — nav_date must be a previous day
                             valid_dates.append(str(parsed_d))
                     except Exception:
                         pass
