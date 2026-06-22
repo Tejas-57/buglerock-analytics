@@ -448,21 +448,45 @@ def get_whitelisted_peers(category: str, data_date: date, asset_class: str) -> l
 def get_latest_data_status() -> dict:
     db = get_session()
     try:
+        # Get the latest data_date batch
         latest = db.query(DailyFundData.data_date).order_by(
             DailyFundData.data_date.desc()
         ).first()
         if not latest:
             return {"data_as_of": None, "is_fresh": False, "mail_date": None}
-        latest_date = latest[0]
-        # Get stored mail_date for reference
+        latest_data_date = latest[0]
+
+        # Use EmailFetchLog data_date — it's already computed as most common nav_date
+        log_row = db.query(EmailFetchLog).filter(
+            EmailFetchLog.status == 'success'
+        ).order_by(EmailFetchLog.fetched_at.desc()).first()
+
+        if log_row and log_row.data_date:
+            data_as_of = str(log_row.data_date)
+        else:
+            # Fallback: most common nav_date in latest batch
+            from sqlalchemy import func
+            nav_date_row = db.query(
+                DailyFundData.nav_date,
+                func.count(DailyFundData.id).label('cnt')
+            ).filter(
+                DailyFundData.data_date == latest_data_date,
+                DailyFundData.nav_date != None,
+                (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
+            ).group_by(DailyFundData.nav_date
+            ).order_by(func.count(DailyFundData.id).desc()).first()
+            data_as_of = str(nav_date_row.nav_date) if nav_date_row else str(latest_data_date)
+
+        # mail_date from AppSettings
         from models.database import AppSettings
         mail_row = db.query(AppSettings).filter(AppSettings.key == 'mail_date').first()
         mail_date = mail_row.value if mail_row else None
         from datetime import date as date_type
         is_fresh = mail_date == str(date_type.today())
+
         return {
-            "data_as_of": str(latest_date),
-            "is_fresh": is_fresh,  # True only if today's email has been fetched
+            "data_as_of": data_as_of,
+            "is_fresh": is_fresh,
             "mail_date": mail_date,
         }
     finally:

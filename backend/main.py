@@ -8,7 +8,7 @@ from datetime import date
 
 load_dotenv()
 
-from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav
+from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, benchmarks
 from models.database import init_db
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ app.include_router(chat.router,        prefix="/api/chat")
 app.include_router(funds.router,       prefix="/api/funds")
 app.include_router(gmail.router,       prefix="/api/gmail")
 app.include_router(nav.router,         prefix="/api/nav")
+app.include_router(benchmarks.router,  prefix="/api")
 
 
 async def gmail_poll_loop():
@@ -175,13 +176,11 @@ async def nav_daily_cron():
     while True:
         try:
             now = datetime.now()
-            # Schedule next run at 00:05 AM
             next_run = (now + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
             sleep_secs = (next_run - now).total_seconds()
             logger.info(f"NAV cron: next run at {next_run.strftime('%Y-%m-%d %H:%M:%S')} (in {int(sleep_secs/3600)}h {int((sleep_secs%3600)/60)}m)")
             await asyncio.sleep(sleep_secs)
 
-            # Run append
             logger.info("NAV daily cron: starting append...")
             isins = get_tracked_isins()
             if isins:
@@ -189,14 +188,13 @@ async def nav_daily_cron():
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 log_msg = f"NAV daily append completed at {now_str} — success:{results['success']} failed:{results['failed']} up_to_date:{results['up_to_date']} total_funds:{len(isins)}"
                 logger.info(log_msg)
-                # Store last append time in DB for reference
                 set_setting("nav_last_append", now_str)
                 set_setting("nav_last_append_result", str(results))
             else:
                 logger.info("NAV daily cron: no tracked ISINs yet, skipping")
         except Exception as e:
             logger.error(f"NAV daily cron error: {e}", exc_info=True)
-            await asyncio.sleep(3600)  # retry in 1 hour if error
+            await asyncio.sleep(3600)
 
 
 if __name__ == "__main__":

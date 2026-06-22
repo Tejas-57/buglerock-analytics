@@ -1,6 +1,96 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
-export default function ClientIPS({ ips, setIps, onSave, onSkip }) {
+const API = process.env.REACT_APP_API_URL || '';
+
+function BenchmarkPicker({ selectedDate, value, onChange }) {
+  const [allBMs, setAllBMs] = useState([]);
+  const [open, setOpen] = useState(false);
+  const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().slice(0, 10) : (selectedDate || '');
+
+  useEffect(() => {
+    const url = dateStr ? `${API}/api/benchmarks?date=${dateStr}` : `${API}/api/benchmarks`;
+    fetch(url).then(r => r.json()).then(d => setAllBMs(d.benchmarks || [])).catch(() => {});
+  }, [dateStr]);
+
+  const selected = value || [];
+
+  function toggleBM(bm) {
+    const exists = selected.find(s => s.name === bm.name);
+    if (exists) {
+      const remaining = selected.filter(s => s.name !== bm.name);
+      if (remaining.length > 0) {
+        const eq = Math.floor(100 / remaining.length);
+        onChange(remaining.map((s, i) => ({ ...s, weight: i === remaining.length - 1 ? 100 - eq * (remaining.length - 1) : eq })));
+      } else onChange([]);
+    } else {
+      const newSel = [...selected, { ...bm, weight: 0 }];
+      const eq = Math.floor(100 / newSel.length);
+      onChange(newSel.map((s, i) => ({ ...s, weight: i === newSel.length - 1 ? 100 - eq * (newSel.length - 1) : eq })));
+    }
+  }
+
+  function updateWeight(name, w) {
+    const v = Math.max(0, Math.min(100, parseInt(w) || 0));
+    onChange(selected.map(s => s.name === name ? { ...s, weight: v } : s));
+  }
+
+  const totalW = selected.reduce((s, b) => s + (b.weight || 0), 0);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      {selected.length > 0 && (
+        <div style={{ marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {selected.map(bm => (
+            <div key={bm.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', background: 'var(--bg-secondary)', borderRadius: 8, border: '1px solid var(--border)' }}>
+              <div style={{ flex: 1, fontSize: 12, fontWeight: 500, color: 'var(--brand-dark)' }}>{bm.display_name}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="number" min="0" max="100" value={bm.weight || 0} onChange={e => updateWeight(bm.name, e.target.value)}
+                  style={{ width: 52, padding: '3px 6px', border: `1px solid ${totalW === 100 ? 'var(--border)' : 'var(--brand-primary)'}`, borderRadius: 6, fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textAlign: 'center' }} />
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>%</span>
+              </div>
+              <button onClick={() => toggleBM(bm)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 14, padding: '0 2px', lineHeight: 1 }}>✕</button>
+            </div>
+          ))}
+          <div style={{ fontSize: 10, color: totalW === 100 ? 'var(--pos)' : 'var(--brand-primary)', fontWeight: 600, paddingLeft: 4 }}>
+            {totalW === 100 ? '✓ Weights sum to 100%' : `⚠ Weights sum to ${totalW}% — must equal 100%`}
+          </div>
+        </div>
+      )}
+      <button onClick={() => setOpen(v => !v)}
+        style={{ padding: '6px 12px', border: '1px dashed var(--brand-primary)', borderRadius: 8, background: 'rgba(145,47,99,.04)', color: 'var(--brand-primary)', fontSize: 11, fontWeight: 500, cursor: 'pointer', width: '100%' }}>
+        {open ? '✕ Close' : `+ Add benchmark${selected.length > 0 ? ' / change' : ''}`}
+        {allBMs.length > 0 && <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>({allBMs.length} available)</span>}
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 999, background: '#fff', border: '1px solid var(--border)', borderRadius: 10, boxShadow: '0 8px 24px rgba(62,52,82,.12)', maxHeight: 280, overflowY: 'auto', marginTop: 4 }}>
+          {allBMs.length === 0 ? (
+            <div style={{ padding: 16, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>Loading benchmarks…</div>
+          ) : allBMs.map(bm => {
+            const isSel = selected.some(s => s.name === bm.name);
+            return (
+              <div key={bm.name} onClick={() => toggleBM(bm)}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)', background: isSel ? 'rgba(145,47,99,.04)' : '#fff' }}
+                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+                onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = '#fff'; }}>
+                <div style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${isSel ? 'var(--brand-primary)' : 'var(--border)'}`, background: isSel ? 'var(--brand-primary)' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {isSel && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>{bm.display_name}</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                    1Y {bm.return_1y != null ? (bm.return_1y >= 0 ? '+' : '') + bm.return_1y.toFixed(1) + '%' : '—'} · 3Y {bm.return_3y != null ? (bm.return_3y >= 0 ? '+' : '') + bm.return_3y.toFixed(1) + '%' : '—'}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function ClientIPS({ ips, setIps, onSave, onSkip, selectedDate }) {
   function update(field, value) {
     setIps(prev => ({ ...prev, [field]: value }));
   }
@@ -14,7 +104,7 @@ export default function ClientIPS({ ips, setIps, onSave, onSkip }) {
         <div className="ips-max">
 
           {/* Header */}
-          <div style={{ marginBottom: 20 }}>
+          <div style={{ marginBottom: 20, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
             <div style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 600, color: 'var(--brand-dark)', marginBottom: 3 }}>
               Investment Policy Statement
             </div>
@@ -24,6 +114,31 @@ export default function ClientIPS({ ips, setIps, onSave, onSkip }) {
                 Skip and build without IPS →
               </button>
             </div>
+            <button
+              onClick={() => {
+                if (window.confirm('Clear all IPS fields?')) {
+                  setIps({
+                    name: '', pan: '', amount: '', rm: 'BugleRock Capital',
+                    email: '', taxStatus: 'Resident individual',
+                    proposalDate: new Date().toISOString().slice(0, 10), nextReviewDate: '',
+                    primaryObjective: 'Wealth creation', secondaryObjective: '—',
+                    tenure: 'Very long-term (7+ years)', targetReturn: '',
+                    deploymentMode: 'Lump sum — single tranche', monthlySIP: '',
+                    reviewFrequency: 'Quarterly', retirementAge: '',
+                    riskProfile: 'Moderate', riskScore: '', maxDrawdown: '10–20%',
+                    liquidity: 'Moderate (≤10% in 3 months)', experience: '3–7 years',
+                    sourceOfFunds: 'Salary / Business income', annualIncome: 'Below ₹10L', netWorth: 'Below ₹25L',
+                    benchmarks: [], maxFunds: '5', minAUM: '', maxER: '',
+                    constraints: '', existingHoldings: '',
+                    deploymentNotes: '', rebalancing: 'Annual rebalancing', adviserNotes: '',
+                    alloc: { eqMin: 60, eqMax: 100, lcMin: 30, lcMax: 70, mcMin: 15, mcMax: 40, scMin: 0, scMax: 25, intlMin: 0, intlMax: 15, debtMin: 0, debtMax: 30, goldMin: 0, goldMax: 10, cashMin: 0, cashMax: 10 },
+                  });
+                }
+              }}
+              style={{ padding: '6px 14px', border: 'none', borderRadius: 20, background: 'var(--brand-primary,#912F63)', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0, marginTop: 4, whiteSpace: 'nowrap' }}
+            >
+              ✕ Clear details
+            </button>
           </div>
 
           {/* Section A — Client Information */}
@@ -185,13 +300,13 @@ export default function ClientIPS({ ips, setIps, onSave, onSkip }) {
           <div style={{ marginBottom: 18 }}>
             <div className="ips-s-hd"><span className="ips-s-num">E</span>Benchmark, constraints &amp; guidelines</div>
             <div className="ips-g4" style={{ marginBottom: 10 }}>
-              <div className="ips-f"><label>Portfolio benchmark</label>
-                <select value={ips.benchmark || 'nifty50'} onChange={e => update('benchmark', e.target.value)}>
-                  <option value="nifty50">Nifty 50 TRI</option><option value="nifty100">Nifty 100 TRI</option>
-                  <option value="nifty500">Nifty 500 TRI</option><option value="midcap150">Nifty Midcap 150 TRI</option>
-                  <option value="smallcap250">Nifty Smallcap 250 TRI</option><option value="largmid250">Nifty Large Midcap 250 TRI</option>
-                  <option value="hybrid7525">Nifty 50 Hybrid 75:25 TRI</option><option value="sensex">BSE Sensex TRI</option>
-                </select>
+              <div className="ips-f" style={{ gridColumn: 'span 2' }}>
+                <label>Portfolio benchmarks <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(select one or more, assign weights)</span></label>
+                <BenchmarkPicker
+                  selectedDate={selectedDate}
+                  value={ips.benchmarks || []}
+                  onChange={v => update('benchmarks', v)}
+                />
               </div>
               <div className="ips-f"><label>Max funds</label>
                 <select value={ips.maxFunds || '5'} onChange={e => update('maxFunds', e.target.value)}>
@@ -234,10 +349,12 @@ export default function ClientIPS({ ips, setIps, onSave, onSkip }) {
       </div>
 
       {/* Footer */}
-      <div className="ips-footer">
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>All fields optional — save what you have</span>
-        <button className="btn" onClick={onSkip} style={{ color: 'var(--text-muted)' }}>Skip</button>
-        <button className="btn btn-primary" onClick={onSave}>Save IPS &amp; continue →</button>
+      <div className="ips-footer" style={{ justifyContent: 'flex-end' }}>
+        <div style={{ maxWidth: 900, width: '100%', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>All fields optional — save what you have</span>
+          <button className="btn" onClick={onSkip} style={{ color: 'var(--text-muted)' }}>Skip</button>
+          <button className="btn btn-primary" onClick={onSave}>Save IPS &amp; continue →</button>
+        </div>
       </div>
     </div>
   );
