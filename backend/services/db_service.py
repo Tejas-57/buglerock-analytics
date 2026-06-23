@@ -13,6 +13,20 @@ logger = logging.getLogger(__name__)
 
 WHITELIST = {"R1", "R2"}
 
+# Categories that should be displayed as "Precious Metals" asset class
+PRECIOUS_METALS_CATEGORIES = {
+    "Cat: India Fund Sector - Precious Metals-Gold",
+    "Cat: India Fund Sector - Precious Metals-Silver",
+    "India Fund Sector - Precious Metals",
+    "India ETF Sector - Precious Metals",
+}
+
+def remap_asset_class(asset_class: str, category: str) -> str:
+    """Remap Equity Index / ETF - Equity precious metals to Precious Metals."""
+    if category in PRECIOUS_METALS_CATEGORIES:
+        return "Precious Metals"
+    return asset_class
+
 
 # ── Session helper ───────────────────────────────────────────────────────────
 
@@ -119,11 +133,15 @@ def save_parsed_data(parsed: dict):
 def get_asset_classes(data_date: date) -> list:
     db = get_session()
     try:
-        rows = db.query(DailyFundData.asset_class).filter(
+        rows = db.query(DailyFundData.asset_class, DailyFundData.category).filter(
             DailyFundData.data_date == data_date,
             (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
         ).distinct().all()
-        return sorted([r[0] for r in rows if r[0]])
+        classes = set()
+        for r in rows:
+            if r[0]:
+                classes.add(remap_asset_class(r[0], r[1] or ""))
+        return sorted(list(classes))
     finally:
         db.close()
 
@@ -131,11 +149,20 @@ def get_asset_classes(data_date: date) -> list:
 def get_categories(data_date: date, asset_class: str) -> list:
     db = get_session()
     try:
-        rows = db.query(DailyFundData.category).filter(
-            DailyFundData.data_date == data_date,
-            DailyFundData.asset_class == asset_class,
-            (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
-        ).distinct().all()
+        if asset_class == "Precious Metals":
+            # Return precious metals categories from both Equity Index and ETF - Equity
+            rows = db.query(DailyFundData.category).filter(
+                DailyFundData.data_date == data_date,
+                DailyFundData.category.in_(list(PRECIOUS_METALS_CATEGORIES)),
+                (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
+            ).distinct().all()
+        else:
+            rows = db.query(DailyFundData.category).filter(
+                DailyFundData.data_date == data_date,
+                DailyFundData.asset_class == asset_class,
+                ~DailyFundData.category.in_(list(PRECIOUS_METALS_CATEGORIES)),
+                (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
+            ).distinct().all()
         return sorted([r[0] for r in rows if r[0]])
     finally:
         db.close()
@@ -145,18 +172,32 @@ def get_funds_for_dropdown(data_date: date, asset_class: str, category: str) -> 
     """Return whitelisted funds. If no R1/R2 in category, return all."""
     db = get_session()
     try:
-        all_funds = db.query(
-            DailyFundData.isin,
-            DailyFundData.name,
-            DailyFundData.ranking,
-            DailyFundData.amfi_code,
-        ).filter(
-            DailyFundData.data_date == data_date,
-            DailyFundData.asset_class == asset_class,
-            DailyFundData.category == category,
-            DailyFundData.isin.isnot(None),
-            (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
-        ).all()
+        # For Precious Metals, query by category only (not asset_class)
+        if asset_class == "Precious Metals":
+            all_funds = db.query(
+                DailyFundData.isin,
+                DailyFundData.name,
+                DailyFundData.ranking,
+                DailyFundData.amfi_code,
+            ).filter(
+                DailyFundData.data_date == data_date,
+                DailyFundData.category == category,
+                DailyFundData.isin.isnot(None),
+                (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
+            ).all()
+        else:
+            all_funds = db.query(
+                DailyFundData.isin,
+                DailyFundData.name,
+                DailyFundData.ranking,
+                DailyFundData.amfi_code,
+            ).filter(
+                DailyFundData.data_date == data_date,
+                DailyFundData.asset_class == asset_class,
+                DailyFundData.category == category,
+                DailyFundData.isin.isnot(None),
+                (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
+            ).all()
 
         fund_list = [
             {"isin": f.isin, "name": f.name, "ranking": f.ranking, "amfi_code": f.amfi_code}
@@ -188,7 +229,7 @@ def _fund_to_dict(f: DailyFundData) -> dict:
     return {
         "isin": f.isin, "name": f.name, "ranking": f.ranking,
         "category": f.category, "raw_category": fmt(f.raw_category),
-        "asset_class": f.asset_class,
+        "asset_class": remap_asset_class(f.asset_class or "", f.category or ""),
         "morningstar_category": fmt(f.morningstar_category),
         "morningstar_rating": fmt(f.morningstar_rating),
         "inception_date": str(f.inception_date) if f.inception_date else "-",
@@ -538,6 +579,12 @@ def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> li
     db = get_session()
     RANK_ORDER = {'R1': 1, 'R2': 2, 'R3': 3, 'R4': 4, 'R5': 5}
     try:
+        # For Precious Metals, query by category only
+        ac_filter = (
+            [DailyFundData.category == category]
+            if asset_class == "Precious Metals"
+            else [DailyFundData.asset_class == asset_class, DailyFundData.category == category]
+        )
         funds = db.query(
             DailyFundData.isin,
             DailyFundData.name,
@@ -549,8 +596,7 @@ def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> li
             DailyFundData.return_3y,
         ).filter(
             DailyFundData.data_date == data_date,
-            DailyFundData.asset_class == asset_class,
-            DailyFundData.category == category,
+            *ac_filter,
             DailyFundData.isin.isnot(None),
             (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
         ).all()
@@ -597,7 +643,7 @@ def search_funds_global(query: str, data_date: date, limit: int = 50) -> list:
             "ranking": f.ranking,
             "amfi_code": f.amfi_code,
             "category": f.category,
-            "asset_class": f.asset_class,
+            "asset_class": remap_asset_class(f.asset_class or "", f.category or ""),
             "return_1y": f.return_1y,
         } for f in funds]
     finally:
