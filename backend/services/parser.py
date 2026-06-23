@@ -19,6 +19,9 @@ Category detection rules:
 Thematic merge:
   Any category starting with "Cat: Thematic" → merged as "Thematic Funds"
 
+Precious metals override:
+  4 categories → asset_class overridden to "Precious Metals" regardless of sheet
+
 Exclusions (Equity sheet only):
   Any category containing "Cat: Index MF" → excluded
 
@@ -59,13 +62,21 @@ WHITELIST_RANKINGS = {"R1", "R2"}
 CATEGORY_PREFIXES = ("India Fund", "India OE", "Cat:", "India ETF")
 
 # Thematic merge — any category starting with "Cat: Thematic" → "Thematic Funds"
-PARSER_VERSION = "1.4"  # Bump this whenever parser logic changes
+PARSER_VERSION = "1.5"  # Bumped — precious metals override added
 
 THEMATIC_PREFIX = "Cat: Thematic"
 THEMATIC_DISPLAY = "Thematic Funds"
 
 # Index MF exclusion keyword (Equity sheet only)
 INDEX_MF_KEYWORD = "Cat: Index MF"
+
+# Precious metals categories — override asset_class to 'Precious Metals'
+PRECIOUS_METALS_CATS = {
+    "Cat: India Fund Sector - Precious Metals-Gold",
+    "Cat: India Fund Sector - Precious Metals-Silver",
+    "India Fund Sector - Precious Metals",
+    "India ETF Sector - Precious Metals",
+}
 
 # Return metric keyword → DB field (lowercase substring matching)
 RETURN_METRIC_MAP = [
@@ -94,7 +105,6 @@ RETURN_METRIC_MAP = [
 ]
 
 # Risk metric column suffix → DB field prefix
-# Full column name: e.g. "Sharpe Ratio 1Y", "Sharpe Ratio 3Y", "Sharpe Ratio 5Y"
 RISK_METRIC_MAP = [
     ("up capture",       "up_capture"),
     ("down capture",     "down_capture"),
@@ -147,7 +157,6 @@ def cell_str(val) -> str:
 
 
 def is_category_header(name: str) -> bool:
-    """Row is a category header if name starts with a known prefix."""
     if not name:
         return False
     return any(name.startswith(p) for p in CATEGORY_PREFIXES)
@@ -156,29 +165,27 @@ def is_category_header(name: str) -> bool:
 THEMATIC_EXCEPTIONS = {"Cat: Thematic - Quant", "Cat: Thematic - Business Cycle"}
 
 def get_display_category(raw_name: str) -> str:
-    """Merge all Cat: Thematic - X into Thematic Funds except the exceptions."""
     if raw_name.startswith(THEMATIC_PREFIX) and raw_name not in THEMATIC_EXCEPTIONS:
         return THEMATIC_DISPLAY
     return raw_name
 
 
 def should_exclude_category(raw_name: str, exclude_index_mf: bool) -> bool:
-    """Return True if this category should be completely skipped."""
     if exclude_index_mf and "index mf" in raw_name.lower():
         return True
     return False
 
 
+def get_effective_asset_class(display_cat: str, raw_cat: str, default_asset_class: str) -> str:
+    """Override asset_class to 'Precious Metals' for precious metals categories."""
+    if display_cat in PRECIOUS_METALS_CATS or raw_cat in PRECIOUS_METALS_CATS:
+        return "Precious Metals"
+    return default_asset_class
+
+
 # ── Column map builder ───────────────────────────────────────────────────────
 
 def build_column_map(rows: list) -> dict:
-    """
-    Dynamically build a column index map by reading:
-    - Metric header row (row 1): '1 Day', '1 Week', '3 Year', 'Sharpe Ratio 3Y' etc.
-    - ISIN header row: 'ISIN', 'Group/Investment', 'Return', 'Peer group rank' etc.
-
-    Returns {"isin_row_idx": int, "col_map": dict}
-    """
     metric_row_idx = None
     isin_row_idx = None
 
@@ -195,7 +202,6 @@ def build_column_map(rows: list) -> dict:
     isin_row = [cell_str(c) for c in rows[isin_row_idx]]
     col_map = {}
 
-    # ── Standard named columns from ISIN header row ──
     for idx, h in enumerate(isin_row):
         hl = h.lower()
 
@@ -257,7 +263,6 @@ def build_column_map(rows: list) -> dict:
             col_map.setdefault("cash_pct", idx)
         elif "asset alloc other" in hl:
             col_map.setdefault("other_pct", idx)
-        # Equity region
         elif "equity region americas" in hl:
             col_map.setdefault("region_americas", idx)
         elif "equity region greater europe" in hl:
@@ -266,7 +271,6 @@ def build_column_map(rows: list) -> dict:
             col_map.setdefault("region_asia", idx)
         elif "equity region emerging" in hl:
             col_map.setdefault("region_emerging", idx)
-        # Factor profile
         elif "factor profile momentum" in hl:
             col_map.setdefault("factor_momentum", idx)
         elif "factor profile quality" in hl:
@@ -281,7 +285,6 @@ def build_column_map(rows: list) -> dict:
             col_map.setdefault("factor_yield", idx)
         elif "factor profile liquidity" in hl:
             col_map.setdefault("factor_liquidity", idx)
-        # Debt specific
         elif "average maturity" in hl:
             col_map.setdefault("avg_maturity", idx)
         elif "modified duration" in hl:
@@ -290,7 +293,6 @@ def build_column_map(rows: list) -> dict:
             col_map.setdefault("ytm", idx)
         elif "average credit quality" in hl:
             col_map.setdefault("avg_credit_quality", idx)
-        # Credit quality breakdown
         elif "credit qual aaa" in hl:
             col_map.setdefault("credit_aaa", idx)
         elif "credit qual aa %" in hl:
@@ -300,11 +302,8 @@ def build_column_map(rows: list) -> dict:
         elif "credit qual bbb" in hl:
             col_map.setdefault("credit_bbb", idx)
 
-    # ── Return columns: cross-reference metric_row with isin_row ──
     if metric_row_idx is not None:
         metric_row = [cell_str(c) for c in rows[metric_row_idx]]
-
-        # Forward-fill metric names (merged cells show value only in first cell)
         metric_filled = []
         last = ""
         for c in metric_row:
@@ -312,25 +311,16 @@ def build_column_map(rows: list) -> dict:
                 last = c
             metric_filled.append(last)
 
-        # For each isin_row column where header == "Return",
-        # match the metric name at same column index
         for col_idx, header_val in enumerate(isin_row):
             if header_val.lower() != "return":
                 continue
             metric_name = metric_filled[col_idx] if col_idx < len(metric_filled) else ""
             metric_lower = metric_name.lower()
-
-            # Check return periods first
-            matched = False
             for keyword, db_field in RETURN_METRIC_MAP:
                 if keyword in metric_lower:
                     col_map.setdefault(db_field, col_idx)
-                    matched = True
                     break
 
-    # ── Risk metric columns from ISIN header row ──
-    # e.g. "Sharpe Ratio 1Y", "Up Capture Ratio 3Y", "Std Dev 5Y"
-    # Note: Morningstar has typo "Up Capture Raio 3Y" — handle via substring match
     for col_idx, header_val in enumerate(isin_row):
         hl = header_val.lower()
         if not hl:
@@ -409,11 +399,7 @@ def _parse_sheet(ws, asset_class, sheet_name, data_date, email_date,
     isin_row_idx = mapping["isin_row_idx"]
     col_map = mapping["col_map"]
 
-    # ── Two-pass: first collect all rows per category,
-    #    then decide which categories to keep ──
-
-    # Pass 1: segment rows by category
-    segments = []  # list of {raw_cat, display_cat, skip, fund_rows, bm_rows}
+    segments = []
     current_seg = None
 
     for row_vals in rows[isin_row_idx + 1:]:
@@ -424,13 +410,10 @@ def _parse_sheet(ws, asset_class, sheet_name, data_date, email_date,
         if not name:
             continue
 
-        # Category header detection
         if is_category_header(name) and not isin:
-            # Determine if this category should be excluded
             skip = should_exclude_category(name, exclude_index_mf)
             display = get_display_category(name)
 
-            # For thematic merge — check if we already have a segment for this display name
             if display == THEMATIC_DISPLAY and segments:
                 existing = next((s for s in segments if s["display_cat"] == THEMATIC_DISPLAY), None)
                 if existing:
@@ -450,7 +433,6 @@ def _parse_sheet(ws, asset_class, sheet_name, data_date, email_date,
         if current_seg is None or current_seg["skip"]:
             continue
 
-        # Benchmark row
         if name.startswith("Benchmark"):
             bm_label = name.split(":")[0].strip()
             bm_name  = name.split(":", 1)[1].strip() if ":" in name else name
@@ -458,15 +440,12 @@ def _parse_sheet(ws, asset_class, sheet_name, data_date, email_date,
                 current_seg["bm_rows"].append((bm_label, bm_name, row))
             continue
 
-        # Peer group — skip
         if name.startswith("Peer Group"):
             continue
 
-        # Fund row — must have ISIN
         if isin and isin not in ("None", "nan", ""):
             current_seg["fund_rows"].append(row)
 
-    # Pass 2: build output, applying empty category rule
     funds = []
     benchmarks = []
     categories_seen = []
@@ -475,23 +454,25 @@ def _parse_sheet(ws, asset_class, sheet_name, data_date, email_date,
         if seg["skip"]:
             continue
 
-        # Empty category rule: skip if zero funds of any ranking
         if len(seg["fund_rows"]) == 0:
             continue
 
         display_cat = seg["display_cat"]
         raw_cat     = seg["raw_cat"]
 
+        # Determine effective asset class — override for precious metals
+        effective_asset_class = get_effective_asset_class(display_cat, raw_cat, asset_class)
+
         if display_cat not in categories_seen:
             categories_seen.append(display_cat)
 
         # Process funds
         for row in seg["fund_rows"]:
-            fund = _build_fund(row, col_map, asset_class)
+            fund = _build_fund(row, col_map, effective_asset_class)
             fund.update({
                 "category":     display_cat,
                 "raw_category": raw_cat,
-                "asset_class":  asset_class,
+                "asset_class":  effective_asset_class,
                 "sheet_name":   sheet_name,
                 "data_date":    data_date,
                 "email_date":   email_date,
@@ -502,7 +483,7 @@ def _parse_sheet(ws, asset_class, sheet_name, data_date, email_date,
         # Process benchmarks
         for bm_label, bm_name, row in seg["bm_rows"]:
             bm = _build_benchmark(row, col_map, bm_label, bm_name,
-                                  display_cat, raw_cat, asset_class,
+                                  display_cat, raw_cat, effective_asset_class,
                                   sheet_name, data_date, email_date)
             benchmarks.append(bm)
 
@@ -542,7 +523,6 @@ def _build_fund(row: dict, col_map: dict, asset_class: str) -> dict:
         "nav_52w_high_date": d("nav_52w_high_date"),
         "nav_52w_low":       r("nav_52w_low"),
         "nav_mo_end":        r("nav_mo_end"),
-        # Returns
         "return_1d":   r("return_1d"),   "return_1w":   r("return_1w"),
         "return_1m":   r("return_1m"),   "return_3m":   r("return_3m"),
         "return_6m":   r("return_6m"),   "return_1y":   r("return_1y"),
@@ -552,7 +532,6 @@ def _build_fund(row: dict, col_map: dict, asset_class: str) -> dict:
         "return_cy2025": r("return_cy2025"), "return_cy2024": r("return_cy2024"),
         "return_cy2023": r("return_cy2023"), "return_cy2022": r("return_cy2022"),
         "return_cy2021": r("return_cy2021"),
-        # Risk — 3 timeframes
         "std_dev_1y":          r("std_dev_1y"),
         "std_dev_3y":          r("std_dev_3y"),
         "std_dev_5y":          r("std_dev_5y"),
@@ -580,18 +559,15 @@ def _build_fund(row: dict, col_map: dict, asset_class: str) -> dict:
         "down_capture_1y":     r("down_capture_1y"),
         "down_capture_3y":     r("down_capture_3y"),
         "down_capture_5y":     r("down_capture_5y"),
-        # Portfolio composition
         "large_cap":   r("large_cap"),   "mid_cap":     r("mid_cap"),
         "small_cap":   r("small_cap"),   "equity_pct":  r("equity_pct"),
         "bond_pct":    r("bond_pct"),    "cash_pct":    r("cash_pct"),
         "other_pct":   r("other_pct"),   "equity_style":s("equity_style"),
         "pe_ratio":    r("pe_ratio"),    "pb_ratio":    r("pb_ratio"),
-        # Equity region
         "region_americas": r("region_americas"),
         "region_europe":   r("region_europe"),
         "region_asia":     r("region_asia"),
         "region_emerging": r("region_emerging"),
-        # Factor profile
         "factor_momentum":   r("factor_momentum"),
         "factor_quality":    r("factor_quality"),
         "factor_volatility": r("factor_volatility"),
@@ -599,7 +575,6 @@ def _build_fund(row: dict, col_map: dict, asset_class: str) -> dict:
         "factor_style":      r("factor_style"),
         "factor_yield":      r("factor_yield"),
         "factor_liquidity":  r("factor_liquidity"),
-        # Debt
         "avg_maturity":        r("avg_maturity"),
         "modified_duration":   r("modified_duration"),
         "ytm":                 r("ytm"),
@@ -614,7 +589,6 @@ def _build_fund(row: dict, col_map: dict, asset_class: str) -> dict:
 def _build_benchmark(row, col_map, bm_label, bm_name,
                      display_cat, raw_cat, asset_class,
                      sheet_name, data_date, email_date) -> dict:
-    """Build benchmark as a DailyFundData-compatible dict with is_benchmark=1."""
     def r(f): return safe_float(row.get(f))
     return {
         "data_date":       data_date,

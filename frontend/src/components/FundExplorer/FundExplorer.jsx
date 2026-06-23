@@ -29,7 +29,7 @@ const ASSET_STRUCTURE = [
       ]},
       { id:'passive_etf', label:'Passive - ETF', asset_classes:['ETF - Equity'], groups:[
         { label:'Broad Market', cats:['India ETF Large-Cap','India ETF Multi-Cap','India ETF Mid-Cap','India ETF Small-Cap','India ETF Value','India ETF Dividend Yield','India ETF Index Funds'] },
-        { label:'Sectoral', cats:['India ETF Sector - Financial Services','India ETF Sector - Technology','India ETF Sector - Healthcare','India ETF Sector - Energy','India ETF Sector - Precious Metals','India ETF Equity - Infrastructure','India ETF Equity - Consumption','India ETF Equity - ESG','India ETF Equity - Other'] },
+        { label:'Sectoral', cats:['India ETF Sector - Financial Services','India ETF Sector - Technology','India ETF Sector - Healthcare','India ETF Sector - Energy','India ETF Equity - Infrastructure','India ETF Equity - Consumption','India ETF Equity - ESG','India ETF Equity - Other'] },
       ]},
       { id:'global', label:'Global Funds', asset_classes:['International'], groups:[
         { label:'Global', cats:['India Fund Global - Other','Cat: Global - Other Funds','Cat: Global - Innovation Funds','Cat: Emerging Market Funds','Cat: China & Asia based Funds','Cat: US based Funds','Cat: Europe based Funds'] },
@@ -42,6 +42,14 @@ const ASSET_STRUCTURE = [
       { label:'Equity-oriented', cats:['India Fund Aggressive Allocation','India Fund Dynamic Asset Allocation','India Fund Multi Asset Allocation','India Fund Balanced Allocation','India Fund Equity Savings','India Fund Arbitrage Fund'] },
       { label:'Debt-oriented', cats:['India Fund Conservative Allocation'] },
       { label:'Solution-oriented', cats:['India Fund Retirement','India Fund Children'] },
+    ]}],
+  },
+  {
+    id:'precious_metals', label:'Precious Metals', icon:'🥇',
+    subtypes:[{ id:'pm_all', label:'All', asset_classes:['Precious Metals'], groups:[
+      { label:'Gold', cats:['Cat: India Fund Sector - Precious Metals-Gold','India Fund Sector - Precious Metals'] },
+      { label:'Silver', cats:['Cat: India Fund Sector - Precious Metals-Silver'] },
+      { label:'ETF', cats:['India ETF Sector - Precious Metals'] },
     ]}],
   },
   {
@@ -107,6 +115,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   const [selectedSubtype, setSelectedSubtype] = useState(() => searchParams.get('subtype') || 'active');
   const [selectedCat, setSelectedCat]         = useState(() => searchParams.get('cat') || null);
   const ACTIVE_SUBTYPES = ['active', 'hybrid_all', 'sif_all', 'debt_mf', 'debt_etf'];
+  const NO_RANK_SUBTYPES = ['passive_index','passive_etf','debt_etf','global','pm_all'];
   const [showWhitelisted, setShowWhitelisted] = useState(true);
 
   useEffect(() => {
@@ -242,7 +251,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     }).catch(() => setLoading(false));
   }, [selectedCat, selectedSubtype, dateStr]);
 
-  const isPassiveSubtype = ['passive_index','passive_etf','debt_etf','global'].includes(selectedSubtype);
+  const isPassiveSubtype = ['passive_index','passive_etf','debt_etf','global','pm_all'].includes(selectedSubtype);
 
   const hasRankedFunds = useMemo(() => {
     return allFunds.some(f => f.ranking && f.ranking !== '-' && f.ranking !== '0' && ['R1','R2','R3','R4','R5'].includes(f.ranking));
@@ -347,7 +356,9 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{fund.name}</div>
                     <div style={{ display:'flex', gap:6, marginTop:2 }}>
-                      <span style={{ fontSize:10, color:'var(--brand-mid)', background:'rgba(109,84,121,0.08)', padding:'1px 5px', borderRadius:3 }}>{fund.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/,'')}</span>
+                      <span style={{ fontSize:10, color:'var(--brand-mid)', background:'rgba(109,84,121,0.08)', padding:'1px 5px', borderRadius:3 }}>
+                        {['Cat: India Fund Sector - Precious Metals-Gold','Cat: India Fund Sector - Precious Metals-Silver','India Fund Sector - Precious Metals','India ETF Sector - Precious Metals'].includes(fund.category) ? 'Precious Metals' : fund.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/,'')}
+                      </span>
                     </div>
                   </div>
                   {fund.ranking && fund.ranking !== '-' && fund.ranking !== '0' && (
@@ -433,7 +444,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', margin:'14px 0 0', padding:'9px 14px', background:'var(--bg-secondary)', borderRadius:8, border:'1px solid var(--border)' }}>
         <div style={{ display:'flex', gap:6 }}>
           {(() => {
-            const noRankSubtypes = ['passive_index','passive_etf','debt_etf','global'];
+            const noRankSubtypes = ['passive_index','passive_etf','debt_etf','global','pm_all'];
             const isPassive = noRankSubtypes.includes(subtypeItem?.id) || !hasRankedFunds;
             if (isPassive) {
               return <span style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>All funds shown</span>;
@@ -491,7 +502,13 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
           const retNum = ret != null && ret !== '-' ? parseFloat(ret) : null;
           const above  = retNum != null && peerAvg != null && peerAvg !== '-' ? retNum >= parseFloat(peerAvg) : null;
           const pipColor = PIP_COLORS[fund.ranking] || PIP_COLORS.default;
-          const catDisplay = cleanLabel(selectedCat || '');
+          const PRECIOUS_METALS_CATS = [
+            'Cat: India Fund Sector - Precious Metals-Gold',
+            'Cat: India Fund Sector - Precious Metals-Silver',
+            'India Fund Sector - Precious Metals',
+            'India ETF Sector - Precious Metals',
+          ];
+          const catDisplay = PRECIOUS_METALS_CATS.includes(selectedCat) ? 'Precious Metals' : cleanLabel(selectedCat || '');
 
           return (
             <div key={`${fund.isin || fund.amfi_code || fund.name || 'fund'}-${idx}`}

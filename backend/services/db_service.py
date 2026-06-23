@@ -133,14 +133,23 @@ def save_parsed_data(parsed: dict):
 def get_asset_classes(data_date: date) -> list:
     db = get_session()
     try:
-        rows = db.query(DailyFundData.asset_class, DailyFundData.category).filter(
+        # Get distinct asset classes
+        rows = db.query(DailyFundData.asset_class).filter(
             DailyFundData.data_date == data_date,
             (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
         ).distinct().all()
-        classes = set()
-        for r in rows:
-            if r[0]:
-                classes.add(remap_asset_class(r[0], r[1] or ""))
+        classes = set(r[0] for r in rows if r[0])
+
+        # Check if any precious metals categories exist — add virtual asset class
+        pm_exists = db.query(DailyFundData.isin).filter(
+            DailyFundData.data_date == data_date,
+            DailyFundData.category.in_(list(PRECIOUS_METALS_CATEGORIES)),
+        ).limit(1).first()
+        if pm_exists:
+            classes.add("Precious Metals")
+            # Remove Equity Index and ETF - Equity only if ALL their funds are precious metals
+            # (they have other categories too so keep them)
+
         return sorted(list(classes))
     finally:
         db.close()
