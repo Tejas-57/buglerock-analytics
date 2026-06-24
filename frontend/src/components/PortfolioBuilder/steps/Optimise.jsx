@@ -1,176 +1,355 @@
-import React, { useState } from 'react';
-import { BM_DATA, fp, f2 } from './BuildPortfolio';
+import React, { useState, useEffect } from 'react';
+import { fp, f2, COLORS } from './BuildPortfolio';
 
-const STRATS = [
-  { id: 'sharpe', icon: '◈', name: 'Max Sharpe', sub: 'Best risk-adjusted return', detail: "Weights proportional to each fund's 3-year Sharpe ratio — concentrating on those with the highest return per unit of risk.", c: '#912F63', clt: '#F7EEF3', cbdr: '#EDD5E2', calc: (F) => norm(F.map(f => Math.max(f.sharpe_ratio_3y || 0, 0))) },
-  { id: 'alpha',  icon: '↑', name: 'Max Alpha',  sub: 'Pure manager outperformance', detail: 'Weights proportional to positive 3-year alpha only. Zero exposure to funds that fail to beat their benchmark cost.', c: '#1A7A52', clt: '#E6F4ED', cbdr: '#B8DEC9', calc: (F) => norm(F.map(f => Math.max(f.alpha_3y || 0, 0))) },
-  { id: 'risk',   icon: '↓', name: 'Min Risk',   sub: 'Strongest downside shield', detail: 'Inversely weights by down-capture ratio. Leans hardest on the funds that historically fall the least in market corrections.', c: '#6D5479', clt: '#EDE9F2', cbdr: '#CEC4D7', calc: (F) => norm(F.map(f => f.down_capture_3y != null ? 1 / Math.max(f.down_capture_3y, 0.1) : 0)) },
-];
+const API = process.env.REACT_APP_API_URL || '';
 
-function norm(wts) {
-  const s = wts.reduce((a, b) => a + b, 0) || 1;
-  const out = wts.map(w => Math.round(w / s * 100));
-  const d = 100 - out.reduce((a, b) => a + b, 0);
-  if (out.length) out[0] += d;
-  return out;
+function MetricCard({ label, value, color }) {
+  return (
+    <div style={{ textAlign: 'center', padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 8, border: '1px solid var(--border)' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: color || 'var(--brand-dark)', marginBottom: 3 }}>{value}</div>
+      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{label}</div>
+    </div>
+  );
 }
 
-function blendW(F, wts) {
-  const b = { return_3y: 0, return_1y: 0, sharpe_ratio_3y: 0, sortino_ratio_3y: 0, alpha_3y: 0, beta_3y: 0, down_capture_3y: 0, up_capture_3y: 0, expense_ratio: 0, std_dev_3y: 0 };
-  F.forEach((f, i) => {
-    const w = wts[i] / 100;
-    Object.keys(b).forEach(k => { if (f[k] != null) b[k] += (f[k] || 0) * w; });
-  });
-  return b;
+function FrontierChart({ frontier, strategies }) {
+  if (!frontier || frontier.length === 0) return null;
+
+  const allVols = frontier.map(p => p[0]);
+  const allRets = frontier.map(p => p[1]);
+  const minVol = Math.min(...allVols), maxVol = Math.max(...allVols);
+  const minRet = Math.min(...allRets), maxRet = Math.max(...allRets);
+  const W = 400, H = 200, PAD = 30;
+
+  function toX(v) { return PAD + ((v - minVol) / (maxVol - minVol || 1)) * (W - PAD * 2); }
+  function toY(r) { return H - PAD - ((r - minRet) / (maxRet - minRet || 1)) * (H - PAD * 2); }
+
+  const STRAT_STYLE = {
+    max_sharpe:    { color: '#912F63', label: 'Max Sharpe', symbol: '★' },
+    min_volatility:{ color: '#1A7A52', label: 'Min Volatility', symbol: '◆' },
+    max_return:    { color: '#3E3452', label: 'Max Return', symbol: '▲' },
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8 }}>Efficient Frontier</div>
+      <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: '#fff', padding: 12 }}>
+        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+          {/* Frontier dots */}
+          {frontier.map((p, i) => (
+            <circle key={i} cx={toX(p[0])} cy={toY(p[1])} r={1.5} fill="#C46985" opacity={0.4} />
+          ))}
+          {/* Strategy markers */}
+          {strategies && Object.entries(strategies).map(([key, strat]) => {
+            const style = STRAT_STYLE[key];
+            if (!strat?.metrics) return null;
+            const cx = toX(strat.metrics.volatility);
+            const cy = toY(strat.metrics.return);
+            return (
+              <g key={key}>
+                <circle cx={cx} cy={cy} r={7} fill={style.color} opacity={0.15} />
+                <circle cx={cx} cy={cy} r={4} fill={style.color} />
+                <text x={cx} y={cy - 10} textAnchor="middle" fontSize={9} fontWeight="700" fill={style.color}>{style.label}</text>
+              </g>
+            );
+          })}
+          {/* Axes labels */}
+          <text x={W / 2} y={H - 4} textAnchor="middle" fontSize={9} fill="#999">Volatility (%)</text>
+          <text x={8} y={H / 2} textAnchor="middle" fontSize={9} fill="#999" transform={`rotate(-90, 8, ${H / 2})`}>Return (%)</text>
+        </svg>
+        {/* Legend */}
+        <div style={{ display: 'flex', gap: 16, justifyContent: 'center', marginTop: 6 }}>
+          {Object.entries(STRAT_STYLE).map(([key, s]) => (
+            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--text-muted)' }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: s.color }} />
+              {s.label}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
-export default function Optimise({ funds, weights, setWeights, setOriginalWeights, benchmark, onBack, onCompare }) {
-  const [activeStratId, setActiveStratId] = useState('sharpe');
-  const [optimised, setOptimised] = useState(false);
-  const [activeTab, setActiveTab] = useState('strategy');
-  const bm = BM_DATA[benchmark] || BM_DATA['nifty50'];
+export default function Optimise({ funds, weights, snapshots = {}, setWeights, setOriginalWeights, benchmarks = [], ips = {}, onBack, onCompare, selectedDate }) {
+  const [loading, setLoading]         = useState(false);
+  const [result, setResult]           = useState(null);
+  const [error, setError]             = useState(null);
+  const [selectedStrat, setSelectedStrat] = useState('max_sharpe');
+  const [manualWeights, setManualWeights] = useState({});  // {isin: weight_pct}
+  const [applied, setApplied]         = useState(false);
+
+  const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().slice(0, 10) : (selectedDate || '');
+
+  // Auto-populate manual weights for insufficient data funds when result arrives
+  useEffect(() => {
+    if (result?.insufficient_data?.length > 0) {
+      const newManual = { ...manualWeights };
+      result.insufficient_data.forEach(f => {
+        if (!(f.isin in newManual)) {
+          newManual[f.isin] = weights[f.isin] || 0;
+        }
+      });
+      setManualWeights(newManual);
+    }
+  }, [result]);
+
+  const totalWeight = Object.values(weights).reduce((s, w) => s + w, 0);
+
+  async function runOptimise() {
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setApplied(false);
+
+    const payload = {
+      funds: funds.map(f => ({
+        isin:        f.isin,
+        name:        f.name,
+        weight:      weights[f.isin] || 0,
+        category:    f.category,
+        asset_class: f.asset_class,
+        ranking:     f.ranking || null,
+      })),
+      ips: {
+        riskProfile: ips.riskProfile || 'Moderate',
+        equity:   { min: parseFloat(ips.alloc?.equity?.min || 40),   max: parseFloat(ips.alloc?.equity?.max || 60) },
+        debt:     { min: parseFloat(ips.alloc?.debt?.min || 30),     max: parseFloat(ips.alloc?.debt?.max || 50) },
+        largeCap: { min: parseFloat(ips.alloc?.largeCap?.min || 40), max: parseFloat(ips.alloc?.largeCap?.max || 70) },
+        midCap:   { min: parseFloat(ips.alloc?.midCap?.min || 0),    max: parseFloat(ips.alloc?.midCap?.max || 35) },
+        smallCap: { min: parseFloat(ips.alloc?.smallCap?.min || 0),  max: parseFloat(ips.alloc?.smallCap?.max || 20) },
+      },
+      manual_weights: manualWeights,
+      date: dateStr,
+    };
+
+    try {
+      const res = await fetch(`${API}/api/portfolio/optimise`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setResult(data);
+        setSelectedStrat('max_sharpe');
+      }
+    } catch (e) {
+      setError('Failed to connect to optimiser. Check backend is running.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function updateManualWeight(isin, val) {
+    const v = Math.max(0, Math.min(100, parseInt(val) || 0));
+    setManualWeights(prev => ({ ...prev, [isin]: v }));
+  }
+
+  function applyStrategy() {
+    if (!result?.strategies?.[selectedStrat]) return;
+    const strat = result.strategies[selectedStrat];
+    setOriginalWeights({ ...weights });
+    const newWeights = {};
+    funds.forEach(f => {
+      newWeights[f.isin] = strat.weights[f.isin] ?? weights[f.isin] ?? 0;
+    });
+    setWeights(newWeights);
+    setApplied(true);
+    onCompare();
+  }
 
   if (!funds.length) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 12, padding: '60px 20px', textAlign: 'center' }}>
-        <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, opacity: .5 }}>★</div>
+        <div style={{ fontSize: 32, opacity: .3 }}>◈</div>
         <div style={{ fontFamily: 'var(--font-serif)', fontSize: 19, fontWeight: 600, color: 'var(--brand-dark)' }}>No portfolio to optimise</div>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 260, lineHeight: 1.6 }}>Add at least two funds and set their weights in Step 2.</div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 260 }}>Add at least two funds and set their weights in Step 2.</div>
       </div>
     );
   }
 
-  const AS = STRATS.find(s => s.id === activeStratId) || STRATS[0];
-  const AW = AS.calc(funds);
-  const AB = blendW(funds, AW);
-  const CB = blendW(funds, funds.map(f => weights[f.isin] || 0));
-
-  // EF simulation
-  const sims = Array.from({ length: 80 }, () => {
-    const rr = funds.map(() => Math.random());
-    const rs = rr.reduce((a, b) => a + b, 0) || 1;
-    const ww = norm(rr.map(v => Math.round(v / rs * 100)));
-    return blendW(funds, ww);
-  });
-  const allSP = STRATS.map(s => ({ s, b: blendW(funds, s.calc(funds)) }));
-  const allX = sims.map(p => p.std3y).concat(allSP.map(p => p.b.std_dev_3y)).concat([CB.std_dev_3y]).filter(v => v > 0);
-  const allY = sims.map(p => p.ret3y).concat(allSP.map(p => p.b.return_3y)).concat([CB.return_3y]);
-  const mnX = Math.min(...allX) || 0, mxX = Math.max(...allX) || 20;
-  const mnY = Math.min(...allY) || 0, mxY = Math.max(...allY) || 25;
-  const rX = mxX - mnX || 1, rY = mxY - mnY || 1;
-  const EW = 340, EH = 170, PD = 20;
-  const ex = v => ((PD + (v - mnX) / rX * (EW - PD * 2))).toFixed(1);
-  const ey = v => ((EH - PD - (v - mnY) / rY * (EH - PD * 2))).toFixed(1);
-
-  function applyWeights() {
-    const newW = {};
-    funds.forEach((f, i) => { newW[f.isin] = AW[i] || 0; });
-    setOriginalWeights({ ...weights });
-    setWeights(newW);
-    setOptimised(true);
-    setActiveTab('result');
-  }
-
-  // Rebalancing table
-  const CW = funds.map(f => weights[f.isin] || 0);
-  function actionTag(d) {
-    if (d > 8) return { l: 'Increase', c: '#1A7A52', bg: '#E6F4ED' };
-    if (d > 2) return { l: 'Trim up', c: '#1A7A52', bg: '#EDFBF0' };
-    if (d < -8) return { l: 'Reduce', c: '#912F63', bg: 'rgba(145,47,99,.06)' };
-    if (d < -2) return { l: 'Trim down', c: '#912F63', bg: '#FEF0F0' };
-    return { l: 'Hold', c: 'var(--text-muted)', bg: 'var(--bg-secondary)' };
-  }
+  const strat = result?.strategies?.[selectedStrat];
+  const STRAT_OPTIONS = [
+    { id: 'max_sharpe',    label: 'Max Sharpe',    icon: '◈', color: '#912F63', desc: 'Best risk-adjusted return' },
+    { id: 'min_volatility',label: 'Min Volatility', icon: '↓', color: '#1A7A52', desc: 'Lowest portfolio volatility' },
+    { id: 'max_return',    label: 'Max Return',     icon: '↑', color: '#3E3452', desc: 'Highest expected return' },
+  ];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div className="ptf-tab-bar">
-        <button className={`ptf-tab ${activeTab === 'strategy' ? 'active' : ''}`} onClick={() => setActiveTab('strategy')}>★ Choose strategy</button>
-        <button className={`ptf-tab ${activeTab === 'result' ? 'active' : ''}`} onClick={() => setActiveTab('result')} style={{ opacity: optimised ? 1 : .35, pointerEvents: optimised ? 'auto' : 'none' }}>Optimised analytics</button>
-        <div className="ptf-tab-actions">
-          <button className="btn btn-ghost" onClick={onBack} style={{ fontSize: 11 }}>← Analysis</button>
-          <button className="btn btn-primary" onClick={onCompare} style={{ fontSize: 11, opacity: optimised ? 1 : .3, pointerEvents: optimised ? 'auto' : 'none' }}>Compare →</button>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', background: '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 16, fontWeight: 600, color: 'var(--brand-dark)' }}>Optimise portfolio</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Monte Carlo · 10,000 simulations · {dateStr}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={onBack} style={{ padding: '6px 14px', border: '1px solid var(--border)', borderRadius: 20, background: '#fff', fontSize: 11, cursor: 'pointer', color: 'var(--text-secondary)' }}>← Edit portfolio</button>
+          <button onClick={runOptimise} disabled={loading || totalWeight !== 100}
+            style={{ padding: '7px 18px', border: 'none', borderRadius: 20, background: loading || totalWeight !== 100 ? 'var(--border)' : 'var(--brand-primary)', color: '#fff', fontSize: 11, fontWeight: 600, cursor: loading || totalWeight !== 100 ? 'not-allowed' : 'pointer' }}>
+            {loading ? 'Running...' : result ? '↻ Re-optimise' : '▶ Run optimiser'}
+          </button>
         </div>
       </div>
 
-      <div className="ptf-analytics">
-        {activeTab === 'strategy' && (
-          <div>
-            {/* Strategy cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 20 }}>
-              {STRATS.map(s => {
-                const b = blendW(funds, s.calc(funds));
-                const active = s.id === activeStratId;
-                return (
-                  <div key={s.id} onClick={() => setActiveStratId(s.id)} style={{ border: `1.5px solid ${active ? s.c : 'var(--border)'}`, borderRadius: 'var(--radius-lg)', padding: '14px 16px', cursor: 'pointer', background: active ? s.clt : '#fff', transition: 'all .15s' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                      <div style={{ width: 28, height: 28, borderRadius: '50%', background: s.c, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700 }}>{s.icon}</div>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: active ? s.c : 'var(--brand-dark)' }}>{s.name}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{s.sub}</div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+
+        {/* Pre-flight checks */}
+        {!result && !loading && (
+          <div style={{ marginBottom: 16, padding: 16, background: 'var(--bg-secondary)', borderRadius: 10, border: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 10 }}>Pre-flight checks</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                <span style={{ color: funds.length >= 2 ? 'var(--pos)' : 'var(--brand-primary)' }}>{funds.length >= 2 ? '✓' : '✗'}</span>
+                <span>{funds.length} fund{funds.length !== 1 ? 's' : ''} in portfolio {funds.length < 2 ? '— add at least 2' : ''}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                <span style={{ color: totalWeight === 100 ? 'var(--pos)' : 'var(--brand-primary)' }}>{totalWeight === 100 ? '✓' : '✗'}</span>
+                <span>Weights sum to {totalWeight}% {totalWeight !== 100 ? '— must be 100%' : ''}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                <span style={{ color: 'var(--pos)' }}>✓</span>
+                <span>IPS constraints: Equity {ips.alloc?.equity?.min || 40}–{ips.alloc?.equity?.max || 60}% · Debt {ips.alloc?.debt?.min || 30}–{ips.alloc?.debt?.max || 50}%</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div style={{ padding: 14, background: 'rgba(145,47,99,.06)', border: '1px solid rgba(145,47,99,.2)', borderRadius: 8, marginBottom: 16, fontSize: 12, color: 'var(--brand-primary)' }}>
+            ⚠ {error}
+          </div>
+        )}
+
+        {/* Loading */}
+        {loading && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 20px', gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid var(--border)', borderTopColor: 'var(--brand-primary)', animation: 'spin 0.8s linear infinite' }} />
+            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Running 10,000 Monte Carlo simulations…</div>
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
+
+        {/* Results */}
+        {result && (
+          <>
+            {/* Insufficient data — manual weights */}
+            {result.insufficient_data?.length > 0 && (
+              <div style={{ marginBottom: 16, padding: 14, background: 'rgba(180,107,16,.06)', border: '1px solid rgba(180,107,16,.25)', borderRadius: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#B46B10', marginBottom: 8, letterSpacing: '.04em', textTransform: 'uppercase' }}>⚠ Manual weight required</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>These funds have insufficient NAV history (&lt;1Y) and were excluded from optimisation. Enter weights manually — other funds will adjust automatically.</div>
+                {result.insufficient_data.map(f => (
+                  <div key={f.isin} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                    <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{f.name}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{f.weeks}w data</span>
+                    <input type="number" min="0" max="100" value={manualWeights[f.isin] || 0}
+                      onChange={e => updateManualWeight(f.isin, e.target.value)}
+                      style={{ width: 52, padding: '3px 6px', border: '1px solid #B46B10', borderRadius: 6, fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textAlign: 'center' }} />
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>%</span>
+                  </div>
+                ))}
+                <button onClick={runOptimise}
+                  style={{ marginTop: 8, padding: '6px 14px', border: 'none', borderRadius: 20, background: '#B46B10', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                  Re-run with manual weights
+                </button>
+              </div>
+            )}
+
+            {/* Ranking flags */}
+            {result.ranking_flags?.length > 0 && (
+              <div style={{ marginBottom: 16, padding: 14, background: 'rgba(109,84,121,.05)', border: '1px solid rgba(109,84,121,.2)', borderRadius: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--brand-mid)', marginBottom: 8, letterSpacing: '.04em', textTransform: 'uppercase' }}>Fund quality flags</div>
+                {result.ranking_flags.map(flag => (
+                  <div key={flag.isin} style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 4 }}>
+                      ⚠ <strong>{flag.name}</strong> — {flag.ranking ? `Ranked ${flag.ranking}` : 'Unranked'}
+                    </div>
+                    {flag.suggestions.length > 0 && (
+                      <div style={{ paddingLeft: 16 }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>Suggested R1/R2 alternatives:</div>
+                        {flag.suggestions.map(s => (
+                          <div key={s.isin} style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 2 }}>
+                            {s.ranking} · {s.name} · 1Y {s.return_1y != null ? fp(s.return_1y) : '—'}
+                          </div>
+                        ))}
                       </div>
-                      {active && <div style={{ marginLeft: 'auto', width: 16, height: 16, borderRadius: '50%', background: s.c, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9 }}>✓</div>}
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Efficient frontier */}
+            <FrontierChart frontier={result.frontier} strategies={result.strategies} />
+
+            {/* Strategy selector */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+              {STRAT_OPTIONS.map(opt => {
+                const s = result.strategies?.[opt.id];
+                const sel = selectedStrat === opt.id;
+                return (
+                  <div key={opt.id} onClick={() => setSelectedStrat(opt.id)}
+                    style={{ border: `2px solid ${sel ? opt.color : 'var(--border)'}`, borderRadius: 10, padding: 14, cursor: 'pointer', background: sel ? `${opt.color}08` : '#fff', transition: 'all .15s' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                      <span style={{ fontSize: 16, color: opt.color }}>{opt.icon}</span>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: opt.color }}>{opt.label}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{opt.desc}</div>
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 10 }}>{s.detail}</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-                      {[['3Y CAGR', fp(b.return_3y)], ['Sharpe', f2(b.sharpe_ratio_3y)], ['Alpha', fp(b.alpha_3y)]].map(([l, v]) => (
-                        <div key={l} style={{ textAlign: 'center', background: active ? 'rgba(255,255,255,.6)' : 'var(--bg-secondary)', borderRadius: 6, padding: '6px 4px' }}>
-                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: s.c }}>{v}</div>
-                          <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{l}</div>
-                        </div>
-                      ))}
-                    </div>
+                    {s?.metrics ? (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                        <MetricCard label="Return" value={`${s.metrics.return >= 0 ? '+' : ''}${s.metrics.return}%`} color={s.metrics.return >= 0 ? 'var(--pos)' : 'var(--brand-primary)'} />
+                        <MetricCard label="Volatility" value={`${s.metrics.volatility}%`} />
+                        <MetricCard label="Sharpe" value={f2(s.metrics.sharpe)} color={s.metrics.sharpe >= 0.5 ? 'var(--pos)' : 'var(--text-muted)'} />
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>Not available</div>
+                    )}
                   </div>
                 );
               })}
             </div>
 
-            {/* EF chart + rebalancing table */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-              <div className="ptf-card">
-                <div className="ptf-card-hd">Efficient frontier simulation</div>
-                <div style={{ padding: '14px 16px' }}>
-                  <svg width="100%" viewBox={`0 0 ${EW} ${EH}`} style={{ overflow: 'visible', display: 'block' }}>
-                    <line x1={PD} y1={PD} x2={PD} y2={EH - PD} stroke="var(--border)" strokeWidth="1" />
-                    <line x1={PD} y1={EH - PD} x2={EW - PD} y2={EH - PD} stroke="var(--border)" strokeWidth="1" />
-                    {sims.filter(p => p.std3y > 0).map((p, i) => <circle key={i} cx={ex(p.std3y)} cy={ey(p.ret3y)} r="3.5" fill="#E4E0EA" opacity=".55" />)}
-                    {STRATS.filter(s => s.id !== activeStratId).map(s => {
-                      const b = blendW(funds, s.calc(funds));
-                      return <g key={s.id}>
-                        <circle cx={ex(b.std_dev_3y)} cy={ey(b.return_3y)} r="6" fill={s.c} stroke="white" strokeWidth="1.5" opacity=".6" />
-                        <text x={ex(b.std_dev_3y)} y={+ey(b.return_3y) - 11} textAnchor="middle" fontSize="8" fill={s.c} fontFamily="sans-serif" fontWeight="500" opacity=".7">{s.name}</text>
-                      </g>;
-                    })}
-                    <circle cx={ex(AB.std3y)} cy={ey(AB.return_3y)} r="15" fill={AS.c} opacity=".12" />
-                    <circle cx={ex(AB.std3y)} cy={ey(AB.return_3y)} r="8" fill={AS.c} stroke="white" strokeWidth="2" />
-                    <text x={ex(AB.std3y)} y={+ey(AB.return_3y) - 14} textAnchor="middle" fontSize="9" fontWeight="700" fill={AS.c} fontFamily="sans-serif">{AS.name}</text>
-                    {CB.std_dev_3y > 0 && <>
-                      <circle cx={ex(CB.std_dev_3y)} cy={ey(CB.return_3y)} r="6" fill="#3E3452" stroke="white" strokeWidth="2" />
-                      <text x={ex(CB.std_dev_3y)} y={+ey(CB.return_3y) - 11} textAnchor="middle" fontSize="8" fill="#3E3452" fontFamily="sans-serif" fontWeight="600">Current</text>
-                    </>}
-                    <text x={EW / 2} y={EH + 14} textAnchor="middle" fontSize="8" fill="var(--text-muted)" fontFamily="sans-serif">Std deviation % (risk) →</text>
-                    <text x={-EH / 2} y="8" textAnchor="middle" fontSize="8" fill="var(--text-muted)" fontFamily="sans-serif" transform="rotate(-90)">← 3Y CAGR %</text>
-                  </svg>
-                </div>
-              </div>
-
-              <div className="ptf-card">
-                <div className="ptf-card-hd">Proposed weight rebalancing</div>
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="ptf-analytics-tbl">
-                    <thead><tr><th style={{ textAlign: 'left' }}>Fund</th><th>Current</th><th>Proposed</th><th>Action</th></tr></thead>
+            {/* Weight comparison table */}
+            {strat && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8 }}>Weight rebalancing — {strat.name}</div>
+                <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
+                        <th style={{ padding: '8px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Fund</th>
+                        <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Current</th>
+                        <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)' }}>Optimised</th>
+                        <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Change</th>
+                      </tr>
+                    </thead>
                     <tbody>
-                      {funds.map((f, i) => {
-                        const cw = CW[i], nw = AW[i] || 0, d = nw - cw;
-                        const action = actionTag(d);
+                      {funds.map((f, idx) => {
+                        const cur = weights[f.isin] || 0;
+                        const opt = strat.weights[f.isin] ?? cur;
+                        const diff = opt - cur;
                         return (
-                          <tr key={f.isin}>
-                            <td><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <div style={{ width: 3, height: 28, borderRadius: 2, background: f.color, flexShrink: 0 }} />
-                              <div style={{ fontSize: 11, fontWeight: 500, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: 140 }}>{f.name}</div>
-                            </div></td>
-                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{cw}%</td>
-                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: AS.c }}>{nw}%</td>
-                            <td><span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: action.bg, color: action.c }}>{action.l}</span></td>
+                          <tr key={f.isin} style={{ borderBottom: idx < funds.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                            <td style={{ padding: '10px 14px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{ width: 3, height: 28, borderRadius: 2, background: f.color || COLORS[idx % COLORS.length], flexShrink: 0 }} />
+                                <div>
+                                  <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>{f.name}</div>
+                                  <span style={{ fontSize: 9, background: 'var(--bg-secondary)', padding: '1px 5px', borderRadius: 10, color: 'var(--text-muted)' }}>{f.category}</span>
+                                </div>
+                              </div>
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{cur}%</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--brand-primary)' }}>{opt}%</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: diff > 0 ? 'var(--pos)' : diff < 0 ? 'var(--brand-primary)' : 'var(--text-muted)' }}>
+                              {diff > 0 ? '+' : ''}{diff.toFixed(1)}%
+                            </td>
                           </tr>
                         );
                       })}
@@ -178,36 +357,22 @@ export default function Optimise({ funds, weights, setWeights, setOriginalWeight
                   </table>
                 </div>
               </div>
+            )}
+
+            {/* Disclaimer */}
+            <div style={{ padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 8, border: '1px solid var(--border)', fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16 }}>
+              <strong>Disclaimer:</strong> These optimised weights are generated using Monte Carlo simulation based on historical NAV data. Past performance is not indicative of future returns. This is for illustrative purposes only and does not constitute investment advice. BugleRock Capital does not guarantee the accuracy or completeness of this analysis.
             </div>
 
             {/* Apply button */}
-            <div style={{ textAlign: 'center', padding: '10px 0' }}>
-              <button className="btn btn-primary" onClick={applyWeights} style={{ padding: '11px 32px', fontSize: 13 }}>
-                ⚡ Apply {AS.name} weights
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button onClick={onBack} style={{ padding: '8px 18px', border: '1px solid var(--border)', borderRadius: 20, background: '#fff', fontSize: 12, cursor: 'pointer', color: 'var(--text-secondary)' }}>← Back</button>
+              <button onClick={applyStrategy} disabled={!strat}
+                style={{ padding: '8px 22px', border: 'none', borderRadius: 20, background: strat ? 'var(--brand-primary)' : 'var(--border)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: strat ? 'pointer' : 'not-allowed' }}>
+                Apply {strat?.name} → Compare
               </button>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>Original weights will be saved for comparison in Step 5.</div>
             </div>
-          </div>
-        )}
-
-        {activeTab === 'result' && optimised && (
-          <div>
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 600, color: 'var(--brand-dark)', marginBottom: 4 }}>Optimised portfolio applied ✓</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Strategy: <strong style={{ color: AS.c }}>{AS.name}</strong>. Go to Compare to see side-by-side with original.</div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8 }}>
-              {[['3Y CAGR', fp(AB.return_3y)], ['Sharpe', f2(AB.sharpe_ratio_3y)], ['Alpha', fp(AB.alpha_3y)], ['Down cap', f2(AB.down_capture_3y) + '%'], ['Blended ER', f2(AB.expense_ratio) + '%'], ['Beta', f2(AB.beta_3y)]].map(([l, v]) => (
-                <div key={l} className="ptf-kpi">
-                  <div className="ptf-kpi-val" style={{ color: 'var(--brand-primary)' }}>{v}</div>
-                  <div className="ptf-kpi-lbl">{l}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ marginTop: 14, textAlign: 'center' }}>
-              <button className="btn btn-primary" onClick={onCompare} style={{ fontSize: 12 }}>View full comparison →</button>
-            </div>
-          </div>
+          </>
         )}
       </div>
     </div>

@@ -157,9 +157,12 @@ export default function PortfolioBuilder({ selectedDate }) {
             <Optimise
               funds={activeFunds}
               weights={weights}
+              snapshots={snapshots}
               setWeights={setWeights}
               setOriginalWeights={setOriginalWeights}
               benchmarks={ips.benchmarks || []}
+              ips={ips}
+              selectedDate={selectedDate}
               onBack={() => setActiveStep(3)}
               onCompare={() => { markDone(4); setActiveStep(5); }}
             />

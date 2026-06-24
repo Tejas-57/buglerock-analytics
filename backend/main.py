@@ -8,7 +8,7 @@ from datetime import date
 
 load_dotenv()
 
-from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, benchmarks
+from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, benchmarks, optimise
 from models.database import init_db
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ app.include_router(funds.router,       prefix="/api/funds")
 app.include_router(gmail.router,       prefix="/api/gmail")
 app.include_router(nav.router,         prefix="/api/nav")
 app.include_router(benchmarks.router,  prefix="/api")
+app.include_router(optimise.router,    prefix="/api")
 
 
 async def gmail_poll_loop():
@@ -47,18 +48,15 @@ async def gmail_poll_loop():
             result = await loop.run_in_executor(None, fetch_latest, 3)
             if result:
                 logger.info("Gmail poll: new data loaded successfully")
-                # Append latest NAV for all tracked funds + fetch any new funds
                 try:
                     from services.nav_fetcher import get_tracked_isins, append_daily_nav, fetch_nav_history
                     from services.db_service import get_all_isins_with_amfi_code
 
-                    # Step 1: Append new NAV rows for existing tracked funds
                     tracked_isins = get_tracked_isins()
                     if tracked_isins:
                         await loop.run_in_executor(None, append_daily_nav, tracked_isins)
                         logger.info(f"NAV append: updated {len(tracked_isins)} funds")
 
-                    # Step 2: Auto-fetch NAV history for any NEW funds in today's email
                     all_isins = set(get_all_isins_with_amfi_code())
                     tracked_set = set(tracked_isins)
                     new_funds = all_isins - tracked_set
@@ -101,16 +99,13 @@ async def migrate_benchmark_risk_columns():
                     conn.commit()
                     logger.info(f"Migration: added daily_fund_data.{col_name}")
                 except Exception:
-                    conn.rollback()  # Column already exists
+                    conn.rollback()
     except Exception as e:
         logger.warning(f"Migration skipped: {e}")
 
 
 async def check_parser_version():
-    """
-    On startup, check if parser version has changed.
-    If yes, delete recent data and re-fetch so it gets re-parsed.
-    """
+    """On startup, check if parser version has changed and re-parse if needed."""
     from services.parser import PARSER_VERSION
     from services.db_service import get_setting, set_setting
     from models.database import SessionLocal, DailyFundData, BenchmarkData
@@ -125,7 +120,6 @@ async def check_parser_version():
 
         logger.info(f"Parser version changed: {stored_version} → {PARSER_VERSION}. Re-parsing recent data...")
 
-        # Delete last 7 days of data so poll re-fetches them
         db = SessionLocal()
         try:
             cutoff = date.today() - timedelta(days=7)
@@ -136,7 +130,6 @@ async def check_parser_version():
         finally:
             db.close()
 
-        # Immediately re-fetch
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, fetch_latest, 7)
         if result:
@@ -144,7 +137,6 @@ async def check_parser_version():
         else:
             logger.warning("Re-parse: could not fetch email, will retry on next poll")
 
-        # Save new version
         set_setting("parser_version", PARSER_VERSION)
 
     except Exception as e:
