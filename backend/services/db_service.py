@@ -506,26 +506,8 @@ def get_latest_data_status() -> dict:
             return {"data_as_of": None, "is_fresh": False, "mail_date": None}
         latest_data_date = latest[0]
 
-        # Use EmailFetchLog data_date — it's already computed as most common nav_date
-        log_row = db.query(EmailFetchLog).filter(
-            EmailFetchLog.status == 'success'
-        ).order_by(EmailFetchLog.fetched_at.desc()).first()
-
-        if log_row and log_row.data_date:
-            data_as_of = str(log_row.data_date)
-        else:
-            # Fallback: most common nav_date in latest batch
-            from sqlalchemy import func
-            nav_date_row = db.query(
-                DailyFundData.nav_date,
-                func.count(DailyFundData.id).label('cnt')
-            ).filter(
-                DailyFundData.data_date == latest_data_date,
-                DailyFundData.nav_date != None,
-                (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
-            ).group_by(DailyFundData.nav_date
-            ).order_by(func.count(DailyFundData.id).desc()).first()
-            data_as_of = str(nav_date_row.nav_date) if nav_date_row else str(latest_data_date)
+        # Use max data_date from DailyFundData as primary source — most reliable
+        data_as_of = str(latest_data_date)
 
         # mail_date from AppSettings
         from models.database import AppSettings

@@ -192,10 +192,15 @@ def fetch_latest(check_days: int = 5) -> bool:
     for days_back in range(0, check_days):
         email_date = today - timedelta(days=days_back)
 
-        # Skip if we already successfully processed this email
+        # Skip if we already successfully processed this email AND data exists in DB
         if has_email_for_date(email_date):
-            logger.info(f"Email already processed for {email_date}, skipping")
-            continue
+            # Double-check data actually exists in DB (may have been lost on DB switch)
+            expected_data_date = email_date - timedelta(days=1)
+            if has_data_for_date(expected_data_date):
+                logger.info(f"Email already processed for {email_date}, skipping")
+                continue
+            else:
+                logger.info(f"Email log shows processed but data missing for {expected_data_date}, re-fetching...")
 
         logger.info(f"Checking Gmail for email_date={email_date}")
         messages = search_emails_for_date(service, email_date)
@@ -252,6 +257,13 @@ def fetch_latest(check_days: int = 5) -> bool:
                 logger.warning(f"No nav_dates found, falling back to email_date-1={parsed['data_date']}")
 
             data_date = parsed["data_date"]
+
+            # Update all fund and benchmark rows to use the correct data_date
+            # (parse_excel_file bakes in email_date; we override here)
+            for fund in parsed["funds"]:
+                fund["data_date"] = data_date
+            for bm in parsed["benchmarks"]:
+                bm["data_date"] = data_date
 
             # Skip if we already have this nav_date in DB
             from datetime import date as date_type
