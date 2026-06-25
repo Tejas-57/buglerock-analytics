@@ -39,7 +39,15 @@ function load(key, fallback) {
 function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
 
 export default function PortfolioBuilder({ selectedDate }) {
-  const [activeStep, setActiveStep] = useState(1);
+  const [activeStep, setActiveStep] = useState(() => {
+    const saved = localStorage.getItem('br_ptf_step');
+    return saved ? parseInt(saved) : 1;
+  });
+
+  // Persist active step
+  React.useEffect(() => {
+    localStorage.setItem('br_ptf_step', activeStep);
+  }, [activeStep]);
   const [completedSteps, setCompletedSteps] = useState(new Set());
   const [ips, setIps] = useState(() => load('br_ptf_ips', DEFAULT_IPS));
   const [ipsSaved, setIpsSaved] = useState(false);
