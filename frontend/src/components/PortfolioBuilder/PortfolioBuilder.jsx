@@ -49,6 +49,35 @@ export default function PortfolioBuilder({ selectedDate }) {
   // Benchmarks now come from ips.benchmarks array (set in ClientIPS)
   const [selectedPortfolio, setSelectedPortfolio] = useState('original');
   const [snapshots, setSnapshots] = useState({});
+  const [optimiserResult, setOptimiserResult] = useState(null);
+
+  // Reset originalWeights and optimiserResult when fund composition changes
+  const fundIsins = funds.map(f => f.isin).sort().join(',');
+  // Reset when fund composition changes
+  React.useEffect(() => {
+    if (Object.keys(originalWeights).length > 0) {
+      const origIsins = Object.keys(originalWeights).sort().join(',');
+      if (origIsins !== fundIsins) {
+        setOriginalWeights({});
+        setOptimiserResult(null);
+      }
+    }
+  }, [fundIsins]);
+
+  // Reset originalWeights when RM navigates back to Build Portfolio (step 2)
+  // This means they're changing weights manually
+  const prevStep = React.useRef(activeStep);
+  React.useEffect(() => {
+    if (prevStep.current !== activeStep) {
+      if (activeStep === 2 && Object.keys(originalWeights).length > 0) {
+        setOriginalWeights({});
+        setOptimiserResult(null);
+      }
+      prevStep.current = activeStep;
+    }
+  }, [activeStep]);
+
+
 
   // Sync funds/weights to localStorage
   useEffect(() => { save('br_ptf_funds', funds); }, [funds]);
@@ -159,10 +188,13 @@ export default function PortfolioBuilder({ selectedDate }) {
               weights={weights}
               snapshots={snapshots}
               setWeights={setWeights}
+              originalWeights={originalWeights}
               setOriginalWeights={setOriginalWeights}
               benchmarks={ips.benchmarks || []}
               ips={ips}
               selectedDate={selectedDate}
+              savedResult={optimiserResult}
+              onSaveResult={setOptimiserResult}
               onBack={() => setActiveStep(3)}
               onCompare={() => { markDone(4); setActiveStep(5); }}
             />

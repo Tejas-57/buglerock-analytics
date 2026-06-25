@@ -141,7 +141,7 @@ def sleeve_debt_weight(sleeve: str) -> float:
 
 def fetch_weekly_returns(isins: List[str], as_of_date: date, lookback_years: int = 3) -> Dict[str, np.ndarray]:
     """
-    Fetch weekly NAV returns for each ISIN from nav_history.
+    Fetch weekly NAV returns for all ISINs in ONE query for performance.
     Returns dict of {isin: array of weekly returns}.
     """
     from models.database import SessionLocal, NavHistory
@@ -149,46 +149,49 @@ def fetch_weekly_returns(isins: List[str], as_of_date: date, lookback_years: int
 
     start_date = as_of_date - timedelta(days=lookback_years * 365 + 30)
     db = SessionLocal()
-    result = {}
+    result = {isin: np.array([]) for isin in isins}
 
     try:
-        for isin in isins:
-            rows = db.query(NavHistory.date, NavHistory.nav).filter(
-                and_(
-                    NavHistory.isin == isin,
-                    NavHistory.date >= start_date,
-                    NavHistory.date <= as_of_date,
-                    NavHistory.nav != None,
-                )
-            ).order_by(NavHistory.date.asc()).all()
+        # Single query for all ISINs
+        all_rows = db.query(NavHistory.isin, NavHistory.date, NavHistory.nav).filter(
+            NavHistory.isin.in_(isins),
+            NavHistory.date >= start_date,
+            NavHistory.date <= as_of_date,
+            NavHistory.nav != None,
+        ).order_by(NavHistory.isin, NavHistory.date.asc()).all()
 
-            if not rows or len(rows) < 10:
-                result[isin] = np.array([])
+        # Group by ISIN
+        from itertools import groupby
+        for isin, rows in groupby(all_rows, key=lambda r: r.isin):
+            rows = list(rows)
+            if len(rows) < 10:
                 continue
 
-            # Convert to dict for easy weekly sampling
             nav_by_date = {r.date: r.nav for r in rows}
             dates = sorted(nav_by_date.keys())
 
-            # Resample to weekly — take last available NAV of each week (Friday or before)
+            # Resample to weekly — take every 5th trading day approx (faster than week iteration)
+            # Sample every Friday or nearest available
             weekly_navs = []
-            current = dates[0]
-            end = dates[-1]
-
-            while current <= end:
-                # Find last available date in this week (Mon–Sun)
-                week_end = current + timedelta(days=(4 - current.weekday()) % 7)  # Friday
-                week_dates = [d for d in dates if current <= d <= week_end]
+            i = 0
+            while i < len(dates):
+                d = dates[i]
+                # Find end of this week (Friday = weekday 4)
+                days_to_friday = (4 - d.weekday()) % 7
+                week_end = d + timedelta(days=days_to_friday)
+                # Get last date in this week from our data
+                week_dates = [dates[j] for j in range(i, len(dates)) if dates[j] <= week_end]
                 if week_dates:
-                    weekly_navs.append((week_dates[-1], nav_by_date[week_dates[-1]]))
-                current = week_end + timedelta(days=3)  # Next Monday
+                    last_d = week_dates[-1]
+                    weekly_navs.append(nav_by_date[last_d])
+                    i += len(week_dates)
+                else:
+                    i += 1
 
             if len(weekly_navs) < 10:
-                result[isin] = np.array([])
                 continue
 
-            navs = np.array([n for _, n in weekly_navs])
-            # Weekly returns
+            navs = np.array(weekly_navs, dtype=float)
             returns = (navs[1:] - navs[:-1]) / navs[:-1]
             result[isin] = returns
 
@@ -313,12 +316,10 @@ def run_monte_carlo(
         # Scale to remaining allocation
         w = raw * remaining
 
-        # Apply per-fund bounds
+        # Apply per-fund bounds — check against absolute weight not fraction
         valid = True
         for i, (lo, hi) in enumerate(bounds):
-            actual_lo = lo * remaining / MAX_WEIGHT  # scale bounds
-            actual_hi = hi
-            if w[i] < lo or w[i] > actual_hi:
+            if w[i] < lo or w[i] > hi:
                 valid = False
                 break
 
@@ -335,9 +336,13 @@ def run_monte_carlo(
             for f in funds if f["isin"] in manual_weights
         )
 
-        if not (equity_min <= total_eq <= equity_max):
+        # Only enforce sleeve constraints if relevant funds exist
+        has_equity = any(sleeve_equity_weight(s) > 0 for s in sleeves)
+        has_debt   = any(sleeve_debt_weight(s) > 0 for s in sleeves)
+
+        if has_equity and not (equity_min <= total_eq <= equity_max):
             continue
-        if not (debt_min <= total_dt <= debt_max):
+        if has_debt and not (debt_min <= total_dt <= debt_max):
             continue
 
         # Portfolio metrics
@@ -459,6 +464,7 @@ def optimise_portfolio(payload: dict) -> dict:
     """
     Main entry point called by the API endpoint.
     """
+    logger.info(f"Optimiser started for {len(payload.get('funds', []))} funds")
     funds          = payload["funds"]
     ips            = payload.get("ips", {})
     manual_weights = payload.get("manual_weights", {})  # {isin: weight_pct}
@@ -493,7 +499,9 @@ def optimise_portfolio(payload: dict) -> dict:
     ranking_flags = get_ranking_flags(funds, as_of_date)
 
     # Step 5: Run Monte Carlo
+    logger.info(f"NAV fetch complete. Running Monte Carlo...")
     opt_result = run_monte_carlo(funds, returns_map, manual_weights, ips)
+    logger.info(f"Monte Carlo complete. Valid sims: {opt_result.get('n_valid_simulations', 0)}")
 
     # Step 6: Build sleeve summary for current weights
     total_w = sum(f.get("current_weight", 0) for f in funds)

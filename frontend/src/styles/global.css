@@ -37,6 +37,8 @@
   /* Status — keep green/red for gains/losses */
   --green:            #10B981;
   --green-dim:        rgba(16, 185, 129, 0.1);
+  --pos:              #1A7A52;  /* dark green for positive values */
+  --neg:              #B71C1C;  /* dark red for negative values */
   --red:              #EF4444;
   --red-dim:          rgba(239, 68, 68, 0.1);
 

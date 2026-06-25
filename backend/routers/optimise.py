@@ -16,7 +16,7 @@ class FundInput(BaseModel):
     name: str
     weight: float          # current weight %
     category: str
-    asset_class: str
+    asset_class: Optional[str] = 'Equity'
     ranking: Optional[str] = None
 
 

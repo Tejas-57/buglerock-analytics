@@ -5,9 +5,9 @@ const API = process.env.REACT_APP_API_URL || '';
 
 function MetricCard({ label, value, color }) {
   return (
-    <div style={{ textAlign: 'center', padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 8, border: '1px solid var(--border)' }}>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: color || 'var(--brand-dark)', marginBottom: 3 }}>{value}</div>
-      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{label}</div>
+    <div style={{ textAlign: 'center', padding: '4px 6px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border)' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: color || 'var(--brand-dark)', marginBottom: 1 }}>{value}</div>
+      <div style={{ fontSize: 7, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{label}</div>
     </div>
   );
 }
@@ -19,7 +19,7 @@ function FrontierChart({ frontier, strategies }) {
   const allRets = frontier.map(p => p[1]);
   const minVol = Math.min(...allVols), maxVol = Math.max(...allVols);
   const minRet = Math.min(...allRets), maxRet = Math.max(...allRets);
-  const W = 400, H = 200, PAD = 30;
+  const W = 340, H = 150, PAD = 24;
 
   function toX(v) { return PAD + ((v - minVol) / (maxVol - minVol || 1)) * (W - PAD * 2); }
   function toY(r) { return H - PAD - ((r - minRet) / (maxRet - minRet || 1)) * (H - PAD * 2); }
@@ -34,7 +34,7 @@ function FrontierChart({ frontier, strategies }) {
     <div style={{ marginBottom: 16 }}>
       <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8 }}>Efficient Frontier</div>
       <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: '#fff', padding: 12 }}>
-        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+        <svg width="100%" style={{ display: 'block', flex: 1 }} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
           {/* Frontier dots */}
           {frontier.map((p, i) => (
             <circle key={i} cx={toX(p[0])} cy={toY(p[1])} r={1.5} fill="#C46985" opacity={0.4} />
@@ -49,13 +49,13 @@ function FrontierChart({ frontier, strategies }) {
               <g key={key}>
                 <circle cx={cx} cy={cy} r={7} fill={style.color} opacity={0.15} />
                 <circle cx={cx} cy={cy} r={4} fill={style.color} />
-                <text x={cx} y={cy - 10} textAnchor="middle" fontSize={9} fontWeight="700" fill={style.color}>{style.label}</text>
+                <text x={cx} y={cy - 7} textAnchor="middle" fontSize={5} fontWeight="600" fill={style.color}>{style.label}</text>
               </g>
             );
           })}
           {/* Axes labels */}
-          <text x={W / 2} y={H - 4} textAnchor="middle" fontSize={9} fill="#999">Volatility (%)</text>
-          <text x={8} y={H / 2} textAnchor="middle" fontSize={9} fill="#999" transform={`rotate(-90, 8, ${H / 2})`}>Return (%)</text>
+          <text x={W / 2} y={H - 4} textAnchor="middle" fontSize={6} fill="#999">Volatility (%)</text>
+          <text x={8} y={H / 2} textAnchor="middle" fontSize={6} fill="#999" transform={`rotate(-90, 8, ${H / 2})`}>Return (%)</text>
         </svg>
         {/* Legend */}
         <div style={{ display: 'flex', gap: 16, justifyContent: 'center', marginTop: 6 }}>
@@ -71,11 +71,13 @@ function FrontierChart({ frontier, strategies }) {
   );
 }
 
-export default function Optimise({ funds, weights, snapshots = {}, setWeights, setOriginalWeights, benchmarks = [], ips = {}, onBack, onCompare, selectedDate }) {
+export default function Optimise({ funds, weights, snapshots = {}, setWeights, originalWeights = {}, setOriginalWeights, benchmarks = [], ips = {}, onBack, onCompare, selectedDate, savedResult = null, onSaveResult }) {
   const [loading, setLoading]         = useState(false);
-  const [result, setResult]           = useState(null);
+  const [result, setResult]           = useState(savedResult);
   const [error, setError]             = useState(null);
   const [selectedStrat, setSelectedStrat] = useState('max_sharpe');
+  // Restore result from parent if returning to this step
+  React.useEffect(() => { if (savedResult && !result) { setResult(savedResult); } }, [savedResult]);
   const [manualWeights, setManualWeights] = useState({});  // {isin: weight_pct}
   const [applied, setApplied]         = useState(false);
 
@@ -107,8 +109,8 @@ export default function Optimise({ funds, weights, snapshots = {}, setWeights, s
         isin:        f.isin,
         name:        f.name,
         weight:      weights[f.isin] || 0,
-        category:    f.category,
-        asset_class: f.asset_class,
+        category:    f.category || '',
+        asset_class: f.asset_class || 'Equity',  // fallback to Equity if missing
         ranking:     f.ranking || null,
       })),
       ips: {
@@ -134,6 +136,7 @@ export default function Optimise({ funds, weights, snapshots = {}, setWeights, s
         setError(data.error);
       } else {
         setResult(data);
+        if (onSaveResult) onSaveResult(data);
         setSelectedStrat('max_sharpe');
       }
     } catch (e) {
@@ -151,7 +154,8 @@ export default function Optimise({ funds, weights, snapshots = {}, setWeights, s
   function applyStrategy() {
     if (!result?.strategies?.[selectedStrat]) return;
     const strat = result.strategies[selectedStrat];
-    setOriginalWeights({ ...weights });
+    // Lock original weights from build portfolio on first apply only
+    setOriginalWeights(prev => Object.keys(prev).length > 0 ? prev : { ...weights });
     const newWeights = {};
     funds.forEach(f => {
       newWeights[f.isin] = strat.weights[f.isin] ?? weights[f.isin] ?? 0;
@@ -190,7 +194,7 @@ export default function Optimise({ funds, weights, snapshots = {}, setWeights, s
           <button onClick={onBack} style={{ padding: '6px 14px', border: '1px solid var(--border)', borderRadius: 20, background: '#fff', fontSize: 11, cursor: 'pointer', color: 'var(--text-secondary)' }}>← Edit portfolio</button>
           <button onClick={runOptimise} disabled={loading || totalWeight !== 100}
             style={{ padding: '7px 18px', border: 'none', borderRadius: 20, background: loading || totalWeight !== 100 ? 'var(--border)' : 'var(--brand-primary)', color: '#fff', fontSize: 11, fontWeight: 600, cursor: loading || totalWeight !== 100 ? 'not-allowed' : 'pointer' }}>
-            {loading ? 'Running...' : result ? '↻ Re-optimise' : '▶ Run optimiser'}
+            {loading ? 'Running...' : '▶ Run optimiser'}
           </button>
         </div>
       </div>
@@ -283,37 +287,78 @@ export default function Optimise({ funds, weights, snapshots = {}, setWeights, s
               </div>
             )}
 
-            {/* Efficient frontier */}
-            <FrontierChart frontier={result.frontier} strategies={result.strategies} />
-
-            {/* Strategy selector */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
-              {STRAT_OPTIONS.map(opt => {
-                const s = result.strategies?.[opt.id];
-                const sel = selectedStrat === opt.id;
-                return (
-                  <div key={opt.id} onClick={() => setSelectedStrat(opt.id)}
-                    style={{ border: `2px solid ${sel ? opt.color : 'var(--border)'}`, borderRadius: 10, padding: 14, cursor: 'pointer', background: sel ? `${opt.color}08` : '#fff', transition: 'all .15s' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                      <span style={{ fontSize: 16, color: opt.color }}>{opt.icon}</span>
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: opt.color }}>{opt.label}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{opt.desc}</div>
+            {/* Efficient frontier + strategy selector side by side */}
+            {(() => {
+              const frontier = result.frontier || [];
+              const allVols = frontier.map(p => p[0]);
+              const allRets = frontier.map(p => p[1]);
+              const minVol = Math.min(...allVols), maxVol = Math.max(...allVols);
+              const minRet = Math.min(...allRets), maxRet = Math.max(...allRets);
+              const W = 400, H = 200, PAD = 28;
+              const toX = v => PAD + ((v - minVol) / (maxVol - minVol || 1)) * (W - PAD * 2);
+              const toY = r => H - PAD - ((r - minRet) / (maxRet - minRet || 1)) * (H - PAD * 2);
+              const SCOL = { max_sharpe: '#912F63', min_volatility: '#1A7A52', max_return: '#3E3452' };
+              const SLBL = { max_sharpe: 'Max Sharpe', min_volatility: 'Min Volatility', max_return: 'Max Return' };
+              return (
+                <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'stretch' }}>
+                  {/* Left — frontier chart 70% */}
+                  <div style={{ flex: 7, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>Efficient Frontier</div>
+                    <div style={{ border: '1px solid var(--border)', borderRadius: 10, background: '#fff', padding: 10, flex: 1, display: 'flex', flexDirection: 'column' }}>
+                      <svg width="100%" style={{ display: 'block', flex: 1 }} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+                        {frontier.map((p, i) => <circle key={i} cx={toX(p[0])} cy={toY(p[1])} r={1.5} fill="#C46985" opacity={0.4} />)}
+                        {Object.entries(result.strategies || {}).map(([key, strat]) => {
+                          if (!strat?.metrics) return null;
+                          const cx = toX(strat.metrics.volatility), cy = toY(strat.metrics.return);
+                          return <g key={key}>
+                            <circle cx={cx} cy={cy} r={8} fill={SCOL[key]} opacity={0.15} />
+                            <circle cx={cx} cy={cy} r={4} fill={SCOL[key]} />
+                            <text x={cx} y={cy - 9} textAnchor="middle" fontSize={6} fontWeight="700" fill={SCOL[key]}>{SLBL[key]}</text>
+                          </g>;
+                        })}
+                        <text x={W/2} y={H-6} textAnchor="middle" fontSize={6} fill="#aaa">Volatility (%)</text>
+                        <text x={10} y={H/2} textAnchor="middle" fontSize={6} fill="#aaa" transform={`rotate(-90,10,${H/2})`}>Return (%)</text>
+                      </svg>
+                      <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 4 }}>
+                        {Object.entries(SCOL).map(([k, c]) => (
+                          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--text-muted)' }}>
+                            <div style={{ width: 7, height: 7, borderRadius: '50%', background: c }} />{SLBL[k]}
+                          </div>
+                        ))}
                       </div>
                     </div>
-                    {s?.metrics ? (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                        <MetricCard label="Return" value={`${s.metrics.return >= 0 ? '+' : ''}${s.metrics.return}%`} color={s.metrics.return >= 0 ? 'var(--pos)' : 'var(--brand-primary)'} />
-                        <MetricCard label="Volatility" value={`${s.metrics.volatility}%`} />
-                        <MetricCard label="Sharpe" value={f2(s.metrics.sharpe)} color={s.metrics.sharpe >= 0.5 ? 'var(--pos)' : 'var(--text-muted)'} />
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>Not available</div>
-                    )}
                   </div>
-                );
-              })}
-            </div>
+                  {/* Right — strategy cards 30% */}
+                  <div style={{ flex: 3, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+                {STRAT_OPTIONS.map(opt => {
+                  const s = result.strategies?.[opt.id];
+                  const sel = selectedStrat === opt.id;
+                  return (
+                    <div key={opt.id} onClick={() => setSelectedStrat(opt.id)}
+                      style={{ border: `2px solid ${sel ? opt.color : 'var(--border)'}`, borderRadius: 10, padding: '10px 14px', cursor: 'pointer', background: sel ? `${opt.color}08` : '#fff', transition: 'all .15s', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                        <span style={{ fontSize: 13, color: opt.color }}>{opt.icon}</span>
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: opt.color }}>{opt.label}</div>
+                          <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{opt.desc}</div>
+                        </div>
+                      </div>
+                      {s?.metrics ? (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 5 }}>
+                          <MetricCard label="Return" value={`${s.metrics.return >= 0 ? '+' : ''}${s.metrics.return}%`} color={s.metrics.return >= 0 ? 'var(--pos)' : 'var(--neg)'} />
+                          <MetricCard label="Volatility" value={`${s.metrics.volatility}%`} />
+                          <MetricCard label="Sharpe" value={f2(s.metrics.sharpe)} color={s.metrics.sharpe >= 0.5 ? 'var(--pos)' : 'var(--text-muted)'} />
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Not available</div>
+                      )}
+                    </div>
+                  );
+                })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Weight comparison table */}
             {strat && (
@@ -331,8 +376,10 @@ export default function Optimise({ funds, weights, snapshots = {}, setWeights, s
                     </thead>
                     <tbody>
                       {funds.map((f, idx) => {
-                        const cur = weights[f.isin] || 0;
-                        const opt = strat.weights[f.isin] ?? cur;
+                        // Current = original build portfolio weights (never the optimised ones)
+                        const baseWeights = Object.keys(originalWeights).length > 0 ? originalWeights : weights;
+                        const cur = baseWeights[f.isin] || 0;
+                        const opt = parseFloat((strat.weights[f.isin] ?? cur).toFixed(1));
                         const diff = opt - cur;
                         return (
                           <tr key={f.isin} style={{ borderBottom: idx < funds.length - 1 ? '1px solid var(--border)' : 'none' }}>

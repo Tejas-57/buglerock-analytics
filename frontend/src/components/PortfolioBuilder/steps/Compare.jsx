@@ -1,5 +1,7 @@
 import React from 'react';
 import { fp, f2 } from './BuildPortfolio';
+const fp2 = v => { if (v == null || v === '-') return '—'; const n = parseFloat(v); return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'; };
+const f22 = v => v == null || v === '-' ? '—' : parseFloat(v).toFixed(2);
 
 // Blend metrics from snapshots using given weight map
 function blendFromSnaps(funds, wtMap, snapshots) {
@@ -43,7 +45,7 @@ function delta(nv, ov, lowerBetter) {
   if (nv == null || ov == null) return <span style={{ color: 'var(--text-muted)' }}>—</span>;
   const d = nv - ov;
   const good = lowerBetter ? d < 0 : d > 0;
-  const clr = Math.abs(d) < 0.005 ? 'var(--text-muted)' : good ? 'var(--pos)' : 'var(--brand-primary)';
+  const clr = Math.abs(d) < 0.005 ? 'var(--text-muted)' : good ? 'var(--pos)' : 'var(--neg)';
   const arrow = d > 0.005 ? '↑' : d < -0.005 ? '↓' : '→';
   return <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: clr }}>{arrow}{d >= 0 ? '+' : ''}{d.toFixed(2)}</span>;
 }
@@ -51,7 +53,7 @@ function deltaPct(nv, ov, lowerBetter) {
   if (nv == null || ov == null) return <span style={{ color: 'var(--text-muted)' }}>—</span>;
   const d = nv - ov;
   const good = lowerBetter ? d < 0 : d > 0;
-  const clr = Math.abs(d) < 0.01 ? 'var(--text-muted)' : good ? 'var(--pos)' : 'var(--brand-primary)';
+  const clr = Math.abs(d) < 0.01 ? 'var(--text-muted)' : good ? 'var(--pos)' : 'var(--neg)';
   const arrow = d > 0.01 ? '↑' : d < -0.01 ? '↓' : '→';
   return <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: clr }}>{arrow}{d >= 0 ? '+' : ''}{d.toFixed(2)}%</span>;
 }
@@ -64,12 +66,12 @@ export default function Compare({ funds, weights, originalWeights, snapshots={},
   const NB = hasOpt ? blendFromSnaps(funds, weights, snapshots) : OB;
 
   const kpiCards = [
-    { l: '1Y Return',   o: fp(OB.ret1y),  n: fp(NB.ret1y),  dv: deltaPct(NB.ret1y, OB.ret1y, false) },
-    { l: '3Y CAGR',    o: fp(OB.ret3y),  n: fp(NB.ret3y),  dv: deltaPct(NB.ret3y, OB.ret3y, false) },
-    { l: 'Sharpe',     o: f2(OB.sharpe), n: f2(NB.sharpe), dv: delta(NB.sharpe, OB.sharpe, false) },
-    { l: 'Alpha',      o: fp(OB.alpha),  n: fp(NB.alpha),  dv: deltaPct(NB.alpha, OB.alpha, false) },
-    { l: 'Down cap',   o: OB.dncap != null ? f2(OB.dncap)+'%' : '—', n: NB.dncap != null ? f2(NB.dncap)+'%' : '—', dv: delta(NB.dncap, OB.dncap, true) },
-    { l: 'Blended ER', o: OB.er != null ? f2(OB.er)+'%' : '—', n: NB.er != null ? f2(NB.er)+'%' : '—', dv: delta(NB.er, OB.er, true) },
+    { l: '1Y Return',   o: fp2(OB.ret1y),  n: fp2(NB.ret1y),  dv: deltaPct(NB.ret1y, OB.ret1y, false) },
+    { l: '3Y CAGR',    o: fp2(OB.ret3y),  n: fp2(NB.ret3y),  dv: deltaPct(NB.ret3y, OB.ret3y, false) },
+    { l: 'Sharpe',     o: f22(OB.sharpe), n: f22(NB.sharpe), dv: delta(NB.sharpe, OB.sharpe, false) },
+    { l: 'Alpha',      o: fp2(OB.alpha),  n: fp2(NB.alpha),  dv: deltaPct(NB.alpha, OB.alpha, false) },
+    { l: 'Down cap',   o: OB.dncap != null ? f22(OB.dncap)+'%' : '—', n: NB.dncap != null ? f22(NB.dncap)+'%' : '—', dv: delta(NB.dncap, OB.dncap, true) },
+    { l: 'Blended ER', o: OB.er != null ? f22(OB.er)+'%' : '—', n: NB.er != null ? f22(NB.er)+'%' : '—', dv: delta(NB.er, OB.er, true) },
   ];
 
   const METRIC_ROWS = [
@@ -77,7 +79,7 @@ export default function Compare({ funds, weights, originalWeights, snapshots={},
     { l: '1M return',  o: fp(OB.ret1m),  n: fp(NB.ret1m),  dv: deltaPct(NB.ret1m, OB.ret1m, false) },
     { l: '3M return',  o: fp(OB.ret3m),  n: fp(NB.ret3m),  dv: deltaPct(NB.ret3m, OB.ret3m, false) },
     { l: '1Y return',  o: fp(OB.ret1y),  n: fp(NB.ret1y),  dv: deltaPct(NB.ret1y, OB.ret1y, false) },
-    { l: '3Y CAGR',    o: fp(OB.ret3y),  n: fp(NB.ret3y),  dv: deltaPct(NB.ret3y, OB.ret3y, false) },
+    { l: '3Y CAGR',    o: fp2(OB.ret3y),  n: fp2(NB.ret3y),  dv: deltaPct(NB.ret3y, OB.ret3y, false) },
     { l: '5Y CAGR',    o: fp(OB.ret5y),  n: fp(NB.ret5y),  dv: deltaPct(NB.ret5y, OB.ret5y, false) },
     { l: 'YTD',        o: fp(OB.ytd),    n: fp(NB.ytd),    dv: deltaPct(NB.ytd, OB.ytd, false) },
     { section: 'Risk metrics' },
@@ -192,13 +194,13 @@ export default function Compare({ funds, weights, originalWeights, snapshots={},
                                 <div style={{ flex: 1, height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden', maxWidth: 80 }}>
                                   <div style={{ width: w + '%', height: '100%', background: clr, borderRadius: 3 }} />
                                 </div>
-                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: clr, minWidth: 28 }}>{w}%</div>
+                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: clr, minWidth: 28 }}>{parseFloat(w).toFixed(1)}%</div>
                               </div>
                             ))}
                           </div>
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: d > 0 ? 'var(--pos)' : d < 0 ? 'var(--brand-primary)' : 'var(--text-muted)' }}>{d > 0 ? '+' : ''}{d}%</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: d > 0 ? 'var(--pos)' : d < 0 ? 'var(--neg)' : 'var(--text-muted)' }}>{d > 0 ? '+' : ''}{parseFloat(d).toFixed(1)}%</span>
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: action.bg, color: action.c }}>{action.l}</span>

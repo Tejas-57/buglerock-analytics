@@ -35,7 +35,7 @@ function equaliseWeights(fundList) {
   return nw;
 }
 
-export default function BuildPortfolio({ funds, weights, setFunds, setWeights, snapshots={}, setSnapshots, benchmark, setBenchmark, onAnalyse, ips, selectedDate }) {
+export default function BuildPortfolio({ funds, weights, setFunds, setWeights, snapshots={}, setSnapshots, benchmarks=[], onAnalyse, ips, selectedDate }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [ddOpen, setDdOpen] = useState(false);
@@ -276,13 +276,14 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
             )}
           </div>
 
-          {/* Benchmark */}
-          <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
-            <label style={{ fontSize:10, fontWeight:500, color:'var(--text-muted)' }}>Benchmark</label>
-            <select value={benchmark} onChange={e=>setBenchmark(e.target.value)}
-              style={{ padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius-md)', font:'11px var(--font-body)', background:'#fff', outline:'none' }}>
-              {Object.entries(BM_DATA).map(([k,v]) => <option key={k} value={k}>{v.name}</option>)}
-            </select>
+          {/* Benchmark display */}
+          <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0, maxWidth:280 }}>
+            <label style={{ fontSize:10, fontWeight:500, color:'var(--text-muted)', flexShrink:0 }}>Benchmark</label>
+            <div style={{ fontSize:11, color:'var(--brand-dark)', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+              {benchmarks.length > 0
+                ? benchmarks.map(b => `${b.display_name} (${b.weight}%)`).join(' + ')
+                : <span style={{ color:'var(--text-muted)', fontStyle:'italic' }}>Set in Client & IPS</span>}
+            </div>
           </div>
         </div>
       </div>
@@ -379,6 +380,6 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
   );
 }
 
-export { BM_DATA, COLORS };
-export function fp(v) { if (v==null||v==='-') return '—'; const n=parseFloat(v); return (n>=0?'+':'')+n.toFixed(2)+'%'; }
-export function f2(v) { if (v==null||v==='-') return '—'; return parseFloat(v).toFixed(2); }
+export { COLORS };
+export function fp(v) { if (v==null||v==='-') return '—'; const n=parseFloat(v); return (n>=0?'+':'')+n.toFixed(1)+'%'; }
+export function f2(v) { if (v==null||v==='-') return '—'; return parseFloat(v).toFixed(1); }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BM_DATA, fp, f2 } from './BuildPortfolio';
+import { fp, f2 } from './BuildPortfolio';
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
@@ -90,9 +90,43 @@ function corrColor(v) {
 
 function fmtL(v) { return v >= 100000 ? '₹' + (v / 100000).toFixed(2) + 'L' : '₹' + (v / 1000).toFixed(1) + 'K'; }
 
-export default function Analyse({ funds, weights, snapshots={}, benchmark, ips, onEdit, onOptimise }) {
+export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], ips, onEdit, onOptimise }) {
   const [activeTab, setActiveTab] = useState('overview');
-  const bm = BM_DATA[benchmark] || BM_DATA['nifty50'];
+
+  // Compute blended benchmark from benchmarks array (manual weights)
+  const totalBmW = benchmarks.reduce((s, b) => s + (b.weight || 0), 0) || 1;
+  function blendBm(getter) {
+    let val = 0, cov = 0;
+    benchmarks.forEach(b => {
+      const v = getter(b);
+      if (v == null || isNaN(parseFloat(v))) return;
+      val += parseFloat(v) * (b.weight || 0);
+      cov += (b.weight || 0);
+    });
+    return cov > 0 ? val / cov : null;
+  }
+
+  const bm = benchmarks.length > 0 ? {
+    name: benchmarks.length === 1
+      ? benchmarks[0].display_name
+      : benchmarks.map(b => `${b.display_name} (${b.weight}%)`).join(' + '),
+    rets: {
+      r1y:  blendBm(b => b.return_1y),
+      r3y:  blendBm(b => b.return_3y),
+      r5y:  blendBm(b => b.return_5y),
+      cy25: blendBm(b => b.return_cy2025),
+      cy24: blendBm(b => b.return_cy2024),
+      cy23: blendBm(b => b.return_cy2023),
+      cy22: blendBm(b => b.return_cy2022),
+      cy21: blendBm(b => b.return_cy2021),
+      r1m:  blendBm(b => b.return_1m),
+      r3m:  blendBm(b => b.return_3m),
+      ytd:  blendBm(b => b.return_ytd),
+    }
+  } : {
+    name: 'No benchmark selected',
+    rets: { r1y: null, r3y: null, r5y: null, cy25: null, cy24: null, cy23: null, cy22: null, cy21: null, r1m: null, r3m: null, ytd: null }
+  };
   const B = blendFromSnaps(funds, weights, snapshots);
   const total = funds.reduce((s, f) => s + (weights[f.isin] || 0), 0);
 
@@ -230,7 +264,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmark, ips, 
                 <svg width="100%" height="110" viewBox="0 0 500 110" preserveAspectRatio="xMidYMid meet">
                   {(() => {
                     const cyV = CY_KEYS.map(k => B['return_'+k]); // e.g. return_cy2021
-                    const bmV = CY_KEYS.map(k => bm.rets[k.replace('cy','cy').replace('cy2021','cy21').replace('cy2022','cy22').replace('cy2023','cy23').replace('cy2024','cy24').replace('cy2025','cy25')]);
+                    const bmV = ['cy21','cy22','cy23','cy24','cy25'].map(k => bm.rets[k]);
                     const mx = Math.max(...cyV.concat(bmV).filter(v => v != null).map(Math.abs).concat([5]));
                     const PH = 92, ZH = 18;
                     return CY_KEYS.map((k, i) => {
@@ -381,7 +415,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmark, ips, 
                       <td>—</td>
                     </tr>
                     <tr style={{ background: 'var(--brand-dark)' }}>
-                      <td style={{ fontWeight: 600, color: '#fff' }}>{bm.name}</td>
+                      <td style={{ fontWeight: 600, color: '#fff' }}>{bm.name || 'Benchmark'}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>BM</td>
                       <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>—</td>
                       <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>—</td>
