@@ -1,5 +1,15 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { fp, f2 } from './BuildPortfolio';
+
+const API = import.meta.env.VITE_API_URL || '';
+
+async function fetchSnapshot(isin, dateStr) {
+  try {
+    const r = await fetch(`${API}/api/home/snapshot?isin=${isin}&date=${dateStr}`);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
 const fp2 = v => { if (v == null || v === '-') return '—'; const n = parseFloat(v); return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'; };
 const f22 = v => v == null || v === '-' ? '—' : parseFloat(v).toFixed(2);
 
@@ -58,8 +68,28 @@ function deltaPct(nv, ov, lowerBetter) {
   return <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: clr }}>{arrow}{d >= 0 ? '+' : ''}{d.toFixed(2)}%</span>;
 }
 
-export default function Compare({ funds, weights, originalWeights, snapshots={}, benchmarks=[], onBack, onGeneratePDF, selectedPortfolio, setSelectedPortfolio }) {
+export default function Compare({ funds, weights, originalWeights, snapshots={}, setSnapshots, benchmarks=[], onBack, onGeneratePDF, selectedPortfolio, setSelectedPortfolio, selectedDate }) {
   const hasOpt = Object.keys(originalWeights || {}).length > 0;
+
+  // Fetch snapshots for any funds not already loaded — Compare must be self-sufficient
+  // since BuildPortfolio (where snapshots are normally fetched) may not be mounted
+  useEffect(() => {
+    if (!funds.length || !selectedDate) return;
+    // Normalise to YYYY-MM-DD regardless of whether selectedDate is a Date object or string
+    const dateStr = selectedDate instanceof Date
+      ? selectedDate.toISOString().slice(0, 10)
+      : String(selectedDate).slice(0, 10);
+    const missing = funds.filter(f => !snapshots[f.isin]);
+    if (!missing.length) return;
+    Promise.allSettled(missing.map(f => fetchSnapshot(f.isin, dateStr)))
+      .then(results => {
+        const map = { ...snapshots };
+        missing.forEach((f, i) => {
+          if (results[i].status === 'fulfilled' && results[i].value) map[f.isin] = results[i].value;
+        });
+        if (setSnapshots) setSnapshots(map);
+      });
+  }, [funds, selectedDate]);
 
   // Always compute original portfolio metrics
   const OB = blendFromSnaps(funds, hasOpt ? originalWeights : weights, snapshots);
@@ -70,7 +100,7 @@ export default function Compare({ funds, weights, originalWeights, snapshots={},
     { l: '3Y CAGR',    o: fp2(OB.ret3y),  n: fp2(NB.ret3y),  dv: deltaPct(NB.ret3y, OB.ret3y, false) },
     { l: 'Sharpe',     o: f22(OB.sharpe), n: f22(NB.sharpe), dv: delta(NB.sharpe, OB.sharpe, false) },
     { l: 'Alpha',      o: fp2(OB.alpha),  n: fp2(NB.alpha),  dv: deltaPct(NB.alpha, OB.alpha, false) },
-    { l: 'Down cap',   o: OB.dncap != null ? f22(OB.dncap)+'%' : '—', n: NB.dncap != null ? f22(NB.dncap)+'%' : '—', dv: delta(NB.dncap, OB.dncap, true) },
+    { l: 'Std Dev (3Y)', o: OB.std3y != null ? f22(OB.std3y)+'%' : '—', n: NB.std3y != null ? f22(NB.std3y)+'%' : '—', dv: delta(NB.std3y, OB.std3y, true) },
     { l: 'Blended ER', o: OB.er != null ? f22(OB.er)+'%' : '—', n: NB.er != null ? f22(NB.er)+'%' : '—', dv: delta(NB.er, OB.er, true) },
   ];
 
@@ -169,47 +199,55 @@ export default function Compare({ funds, weights, originalWeights, snapshots={},
           <div className="ptf-card" style={{ marginBottom: 14 }}>
             <div className="ptf-card-hd">Weight rebalancing — fund by fund</div>
             <div style={{ overflowX: 'auto' }}>
-              <table className="ptf-analytics-tbl">
-                <thead><tr><th style={{ textAlign: 'left' }}>Fund</th><th>Original → Optimised</th><th>Change</th><th style={{ textAlign: 'right' }}>Action</th></tr></thead>
-                <tbody>
-                  {funds.map(f => {
-                    const ow = originalWeights[f.isin] || 0;
-                    const nw = weights[f.isin] || 0;
-                    const d = nw - ow;
-                    const action = d > 8 ? { l: 'Increase', c: '#1A7A52', bg: '#E6F4ED' } : d > 2 ? { l: 'Trim up', c: '#1A7A52', bg: '#EDFBF0' } : d < -8 ? { l: 'Reduce', c: 'var(--brand-primary)', bg: 'rgba(145,47,99,.06)' } : d < -2 ? { l: 'Trim down', c: 'var(--brand-primary)', bg: '#FEF0F0' } : { l: 'Hold', c: 'var(--text-muted)', bg: 'var(--bg-secondary)' };
-                    return (
-                      <tr key={f.isin}>
-                        <td><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div style={{ width: 3, height: 34, borderRadius: 2, background: f.color, flexShrink: 0 }} />
-                          <div>
-                            <div style={{ fontSize: 12, fontWeight: 500 }}>{f.name}</div>
-                            <span style={{ fontSize: 9, background: 'var(--bg-secondary)', padding: '1px 6px', borderRadius: 10 }}>{f.category}</span>
+              {/* CSS grid — headers and rows share identical column template for perfect alignment */}
+              <div style={{ minWidth: 640 }}>
+                {/* Header row */}
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1fr', gap: 0, padding: '6px 12px', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Fund</div>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Original → Optimised</div>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', textAlign: 'center' }}>Change</div>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', textAlign: 'right' }}>Action</div>
+                </div>
+                {/* Data rows */}
+                {funds.map(f => {
+                  const ow = originalWeights[f.isin] || 0;
+                  const nw = weights[f.isin] || 0;
+                  const d = nw - ow;
+                  const action = d > 8 ? { l: 'Increase', c: '#1A7A52', bg: '#E6F4ED' } : d > 0.5 ? { l: 'Trim up', c: '#1A7A52', bg: '#EDFBF0' } : d < -8 ? { l: 'Reduce', c: 'var(--brand-primary)', bg: 'rgba(145,47,99,.06)' } : d < -0.5 ? { l: 'Trim down', c: 'var(--brand-primary)', bg: '#FEF0F0' } : { l: 'Hold', c: 'var(--text-muted)', bg: 'var(--bg-secondary)' };
+                  return (
+                    <div key={f.isin} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1fr', gap: 0, padding: '8px 12px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+                      {/* Fund name */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 3, height: 34, borderRadius: 2, background: f.color, flexShrink: 0 }} />
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 500 }}>{f.name}</div>
+                          <span style={{ fontSize: 9, background: 'var(--bg-secondary)', padding: '1px 6px', borderRadius: 10 }}>{f.category}</span>
+                        </div>
+                      </div>
+                      {/* Bars */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        {[['Original', ow, 'var(--lav-grey,#A795AE)'], ['Optimised', nw, f.color]].map(([label, w, clr]) => (
+                          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <div style={{ fontSize: 9, color: 'var(--text-muted)', width: 52, textAlign: 'right' }}>{label}</div>
+                            <div style={{ flex: 1, height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden', maxWidth: 100 }}>
+                              <div style={{ width: `${Math.min(w, 100)}%`, height: '100%', background: clr, borderRadius: 3 }} />
+                            </div>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: clr, minWidth: 36, textAlign: 'right' }}>{parseFloat(w).toFixed(1)}%</div>
                           </div>
-                        </div></td>
-                        <td style={{ minWidth: 140 }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                            {[['Original', ow, 'var(--lav-grey,#A795AE)'], ['Optimised', nw, f.color]].map(([label, w, clr]) => (
-                              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <div style={{ fontSize: 9, color: 'var(--text-muted)', width: 52, textAlign: 'right' }}>{label}</div>
-                                <div style={{ flex: 1, height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden', maxWidth: 80 }}>
-                                  <div style={{ width: w + '%', height: '100%', background: clr, borderRadius: 3 }} />
-                                </div>
-                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: clr, minWidth: 28 }}>{parseFloat(w).toFixed(1)}%</div>
-                              </div>
-                            ))}
-                          </div>
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: d > 0 ? 'var(--pos)' : d < 0 ? 'var(--neg)' : 'var(--text-muted)' }}>{d > 0 ? '+' : ''}{parseFloat(d).toFixed(1)}%</span>
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: action.bg, color: action.c }}>{action.l}</span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        ))}
+                      </div>
+                      {/* Change */}
+                      <div style={{ textAlign: 'center' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: d > 0 ? 'var(--pos)' : d < 0 ? 'var(--neg)' : 'var(--text-muted)' }}>{d > 0 ? '+' : ''}{parseFloat(d).toFixed(1)}%</span>
+                      </div>
+                      {/* Action */}
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: action.bg, color: action.c }}>{action.l}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}

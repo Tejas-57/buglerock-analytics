@@ -20,7 +20,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 RISK_FREE_RATE = 0.065  # 6.5% p.a.
-MIN_WEIGHT = 0.03       # 3% minimum per fund
+MIN_WEIGHT = 0.05       # 3% minimum per fund
 MAX_WEIGHT = 0.20       # 20% maximum per fund
 N_SIMULATIONS = 10000
 MIN_WEEKS_REQUIRED = 52  # 1 year minimum
@@ -207,8 +207,79 @@ def build_weight_bounds(funds: List[dict], manual_weights: Dict[str, float], ips
     """
     Build (min, max) weight bounds for each fund.
     Manual funds are fixed at their weight.
-    Sleeve caps applied on top of per-fund limits.
+    Sleeve caps are PORTFOLIO-LEVEL — the total weight of all funds in a sleeve
+    cannot exceed the cap, regardless of how many funds are in that sleeve.
     """
+    # Count optimisable funds per sleeve group (excluding manual)
+    sleeve_groups: Dict[str, List[str]] = {}
+    for fund in funds:
+        isin = fund["isin"]
+        if isin in manual_weights:
+            continue
+        sleeve = classify_fund(fund)
+        category = fund.get("category", "")
+
+        # Determine which portfolio-level cap applies
+        if sleeve == "alternatives":
+            group = "alternatives"
+        elif sleeve == "equity_passive":
+            group = "equity_passive"
+        elif sleeve == "international":
+            group = "international"
+        elif category in THEMATIC_CATS:
+            group = "thematic"
+        else:
+            group = None  # no group cap, only per-fund cap
+
+        if group:
+            sleeve_groups.setdefault(group, []).append(isin)
+
+    # Portfolio-level caps
+    GROUP_CAPS = {
+        "alternatives":   PRECIOUS_METALS_CAP,
+        "equity_passive": EQUITY_PASSIVE_CAP,
+        "international":  INTERNATIONAL_CAP,
+        "thematic":       THEMATIC_CAP,
+    }
+
+    # Per-fund max for each group = cap / number of funds in that group
+    # This ensures total sleeve exposure cannot exceed the cap even if all funds
+    # hit their individual maximum simultaneously
+    group_per_fund_max: Dict[str, float] = {}
+    for group, isins in sleeve_groups.items():
+        cap = GROUP_CAPS[group]
+        n = len(isins)
+        # Each fund gets an equal share of the sleeve cap as its maximum
+        # e.g. 2 precious metals funds → each capped at 5% (10% / 2)
+        group_per_fund_max[group] = cap / n
+
+    # Build isin → group lookup
+    isin_group: Dict[str, str] = {}
+    for group, isins in sleeve_groups.items():
+        for isin in isins:
+            isin_group[isin] = group
+
+    # Detect sleeve overcrowding — warn when cap/n < MIN_WEIGHT
+    sleeve_warnings = []
+    for group, isins in sleeve_groups.items():
+        cap = GROUP_CAPS[group]
+        n = len(isins)
+        per_fund = cap / n
+        if per_fund < MIN_WEIGHT:
+            sleeve_warnings.append({
+                "group": group,
+                "n_funds": n,
+                "cap_pct": round(cap * 100, 1),
+                "per_fund_pct": round(per_fund * 100, 2),
+                "min_weight_pct": round(MIN_WEIGHT * 100, 1),
+                "message": (
+                    f"{n} funds in '{group}' sleeve exceed the {round(cap*100,0):.0f}% portfolio cap. "
+                    f"Each fund is capped at {round(per_fund*100,2):.2f}%, "
+                    f"below the normal {round(MIN_WEIGHT*100,1):.1f}% minimum. "
+                    f"Consider removing some {group} funds."
+                )
+            })
+
     bounds = []
     for fund in funds:
         isin = fund["isin"]
@@ -217,26 +288,20 @@ def build_weight_bounds(funds: List[dict], manual_weights: Dict[str, float], ips
             bounds.append((w, w))
             continue
 
-        sleeve = classify_fund(fund)
-        category = fund.get("category", "")
-
         max_w = MAX_WEIGHT
 
-        # Apply sleeve caps
-        if sleeve == "equity_passive":
-            max_w = min(max_w, EQUITY_PASSIVE_CAP)
-        elif sleeve == "alternatives":
-            max_w = min(max_w, PRECIOUS_METALS_CAP)
-        elif sleeve == "international":
-            max_w = min(max_w, INTERNATIONAL_CAP)
+        # Apply portfolio-level sleeve cap (divided equally across funds in sleeve)
+        group = isin_group.get(isin)
+        if group:
+            max_w = min(max_w, group_per_fund_max[group])
 
-        # Thematic cap
-        if category in THEMATIC_CATS:
-            max_w = min(max_w, THEMATIC_CAP)
+        # Soft override: lower min to match max when overcrowded
+        # so bounds stay feasible — warning is surfaced to the user separately
+        min_w = min(MIN_WEIGHT, max_w)
 
-        bounds.append((MIN_WEIGHT, max_w))
+        bounds.append((min_w, max_w))
 
-    return bounds
+    return bounds, sleeve_warnings
 
 
 # ── Monte Carlo engine ───────────────────────────────────────────────────────
@@ -285,7 +350,9 @@ def run_monte_carlo(
 
     # Build bounds for optimisable funds
     opt_fund_objs = [f for f in opt_funds if f["isin"] in valid_isins]
-    bounds = build_weight_bounds(opt_fund_objs, {}, ips)
+    bounds, sleeve_warnings = build_weight_bounds(opt_fund_objs, {}, ips)
+    if sleeve_warnings:
+        logger.warning(f"Sleeve overcrowding: {[w['message'] for w in sleeve_warnings]}")
 
     # IPS sleeve constraints
     equity_min = ips.get("equity", {}).get("min", 0) / 100.0
@@ -307,23 +374,30 @@ def run_monte_carlo(
     attempts = 0
     max_attempts = n_sims * 20
 
+    # Pre-validate: check bounds are feasible (sum of mins <= remaining <= sum of maxs)
+    sum_min = sum(lo for lo, hi in bounds)
+    sum_max = sum(hi for lo, hi in bounds)
+    if sum_min > remaining * 1.001:
+        return {"error": f"Minimum weight constraints ({sum_min*100:.0f}%) exceed available allocation ({remaining*100:.0f}%). Reduce the minimum weight per fund or add fewer funds."}
+    if sum_max < remaining * 0.999:
+        return {"error": f"Maximum weight constraints ({sum_max*100:.0f}%) are too tight to allocate the full portfolio ({remaining*100:.0f}%). Increase the maximum weight per fund."}
+
+    lows  = np.array([lo for lo, hi in bounds])
+    highs = np.array([hi for lo, hi in bounds])
+
     while len(all_weights) < n_sims and attempts < max_attempts:
         attempts += 1
 
-        # Random weights from Dirichlet (naturally sums to 1)
-        raw = np.random.dirichlet(np.ones(n_funds))
+        # Sample each fund uniformly within its own [min, max] range,
+        # then scale to sum to remaining. This guarantees every draw
+        # starts inside the bounds — no rejection needed for per-fund limits.
+        raw = np.random.uniform(lows, highs)
+        w = raw / raw.sum() * remaining
 
-        # Scale to remaining allocation
-        w = raw * remaining
-
-        # Apply per-fund bounds — check against absolute weight not fraction
-        valid = True
-        for i, (lo, hi) in enumerate(bounds):
-            if w[i] < lo or w[i] > hi:
-                valid = False
-                break
-
-        if not valid:
+        # After normalisation a few weights may have drifted just outside
+        # bounds — do one hard clip and accept only if still valid
+        w = np.clip(w, lows, highs)
+        if abs(w.sum() - remaining) > 0.005:
             continue
 
         # Check sleeve constraints
@@ -369,44 +443,84 @@ def run_monte_carlo(
         weight_map = {}
         for i, isin in enumerate(valid_isins):
             weight_map[isin] = round(float(w[i]) * 100, 2)
-        # Add manual weights
         for isin, mw in manual_weights.items():
             weight_map[isin] = mw
-        # Round to sum exactly to 100
         total = sum(weight_map.values())
-        if total != 100:
-            largest = max(weight_map, key=weight_map.get)
-            weight_map[largest] += round(100 - total, 2)
-
+        diff = round(100 - total, 2)
+        if diff != 0:
+            # Spread rounding correction across non-manual funds in small increments
+            # so no single fund gets pushed outside its bounds
+            adjustable = [isin for isin in weight_map if isin not in manual_weights]
+            if adjustable:
+                per_fund = round(diff / len(adjustable), 2)
+                remainder = diff
+                for isin in adjustable:
+                    if remainder == 0:
+                        break
+                    adj = per_fund if abs(per_fund) <= abs(remainder) else remainder
+                    weight_map[isin] = round(weight_map[isin] + adj, 2)
+                    remainder = round(remainder - adj, 2)
         return {
             "name": name,
             "weights": weight_map,
             "metrics": {
-                "return":   round(float(all_returns[idx]) * 100, 2),
+                "return":     round(float(all_returns[idx]) * 100, 2),
                 "volatility": round(float(all_vols[idx]) * 100, 2),
-                "sharpe":   round(float(all_sharpes[idx]), 3),
+                "sharpe":     round(float(all_sharpes[idx]), 3),
             }
         }
 
     strategies = {
-        "max_sharpe":    build_strategy(int(np.argmax(all_sharpes)), "Max Sharpe"),
-        "min_volatility": build_strategy(int(np.argmin(all_vols)), "Min Volatility"),
-        "max_return":    build_strategy(int(np.argmax(all_returns)), "Max Return"),
+        "max_sharpe":     build_strategy(int(np.argmax(all_sharpes)),  "Max Sharpe"),
+        "min_volatility": build_strategy(int(np.argmin(all_vols)),     "Min Volatility"),
+        "max_return":     build_strategy(int(np.argmax(all_returns)),  "Max Return"),
     }
 
-    # Efficient frontier — sample 200 points
-    frontier_idx = np.argsort(all_vols)
-    step = max(1, len(frontier_idx) // 200)
+    # Scatter dots — 300 random samples for background cloud
+    # Each point is [vol, return, sharpe] so frontend can colour by Sharpe
+    scatter_idx = np.random.choice(len(all_vols), size=min(300, len(all_vols)), replace=False)
     frontier = [
-        [round(float(all_vols[i]) * 100, 2), round(float(all_returns[i]) * 100, 2)]
-        for i in frontier_idx[::step]
+        [round(float(all_vols[i]) * 100, 2), round(float(all_returns[i]) * 100, 2), round(float(all_sharpes[i]), 3)]
+        for i in scatter_idx
     ]
+
+    # Efficient frontier curve — smooth upper envelope
+    # Use wider buckets (20) then enforce monotone increasing return
+    # so the line never dips back down (matches classic efficient frontier shape)
+    vol_min, vol_max = all_vols.min(), all_vols.max()
+    n_buckets = 20
+    bucket_edges = np.linspace(vol_min, vol_max, n_buckets + 1)
+    curve_points = []
+    for j in range(n_buckets):
+        lo, hi = bucket_edges[j], bucket_edges[j + 1]
+        # Use a slightly wider window (overlap 20%) to smooth gaps
+        lo_exp = lo - (hi - lo) * 0.2
+        hi_exp = hi + (hi - lo) * 0.2
+        mask = (all_vols >= lo_exp) & (all_vols < hi_exp)
+        if not mask.any():
+            continue
+        best_ret = all_returns[mask].max()
+        mid_vol  = (lo + hi) / 2
+        curve_points.append([round(float(mid_vol) * 100, 2), round(float(best_ret) * 100, 2)])
+    curve_points.sort(key=lambda p: p[0])
+    # Enforce monotone non-decreasing returns (efficient frontier never dips)
+    running_max = -np.inf
+    monotone = []
+    for p in curve_points:
+        if p[1] >= running_max:
+            running_max = p[1]
+            monotone.append(p)
+        else:
+            monotone.append([p[0], round(running_max, 2)])
+    curve_points = monotone
 
     return {
         "strategies": strategies,
         "frontier": frontier,
+        "curve": curve_points,
         "n_valid_simulations": len(all_weights),
         "optimised_isins": valid_isins,
+        "sleeve_warnings": sleeve_warnings,
     }
 
 

@@ -12,11 +12,12 @@ function MetricCard({ label, value, color }) {
   );
 }
 
-function FrontierChart({ frontier, strategies }) {
+function FrontierChart({ frontier, curve, strategies }) {
   if (!frontier || frontier.length === 0) return null;
 
-  const allVols = frontier.map(p => p[0]);
-  const allRets = frontier.map(p => p[1]);
+  const allPts = [...(frontier || []), ...(curve || [])];
+  const allVols = allPts.map(p => p[0]);
+  const allRets = allPts.map(p => p[1]);
   const minVol = Math.min(...allVols), maxVol = Math.max(...allVols);
   const minRet = Math.min(...allRets), maxRet = Math.max(...allRets);
   const W = 340, H = 150, PAD = 24;
@@ -35,10 +36,19 @@ function FrontierChart({ frontier, strategies }) {
       <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8 }}>Efficient Frontier</div>
       <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: '#fff', padding: 12 }}>
         <svg width="100%" style={{ display: 'block', flex: 1 }} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
-          {/* Frontier dots */}
-          {frontier.map((p, i) => (
-            <circle key={i} cx={toX(p[0])} cy={toY(p[1])} r={1.5} fill="#C46985" opacity={0.4} />
-          ))}
+
+          {/* Frontier dots — coloured by Sharpe */}
+          {(() => {
+            const sharpes = frontier.map(x => x[2] ?? 0);
+            const sMin = Math.min(...sharpes), sMax = Math.max(...sharpes);
+            return frontier.map((p, i) => {
+              const t = sMax > sMin ? ((p[2] ?? 0) - sMin) / (sMax - sMin) : 0.5;
+              const r = Math.round(t * 255);
+              const g = Math.round(180 + t * 75);
+              const b = Math.round((1 - t) * 180);
+              return <circle key={i} cx={toX(p[0])} cy={toY(p[1])} r={2} fill={`rgb(${r},${g},${b})`} opacity={0.75} />;
+            });
+          })()}
           {/* Strategy markers */}
           {strategies && Object.entries(strategies).map(([key, strat]) => {
             const style = STRAT_STYLE[key];
@@ -287,11 +297,23 @@ export default function Optimise({ funds, weights, snapshots = {}, setWeights, o
               </div>
             )}
 
+            {result.sleeve_warnings?.length > 0 && (
+              <div style={{ marginBottom: 16, padding: 14, background: 'rgba(234,179,8,.06)', border: '1px solid rgba(234,179,8,.3)', borderRadius: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#92700A', marginBottom: 8, letterSpacing: '.04em', textTransform: 'uppercase' }}>Sleeve cap warnings</div>
+                {result.sleeve_warnings.map((w, i) => (
+                  <div key={i} style={{ fontSize: 12, color: '#92700A', marginBottom: 4 }}>
+                    ⚠ {w.message}
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Efficient frontier + strategy selector side by side */}
             {(() => {
               const frontier = result.frontier || [];
-              const allVols = frontier.map(p => p[0]);
-              const allRets = frontier.map(p => p[1]);
+              const allPts = [...frontier, ...(result.curve || [])];
+              const allVols = allPts.map(p => p[0]);
+              const allRets = allPts.map(p => p[1]);
               const minVol = Math.min(...allVols), maxVol = Math.max(...allVols);
               const minRet = Math.min(...allRets), maxRet = Math.max(...allRets);
               const W = 400, H = 200, PAD = 28;
@@ -306,7 +328,19 @@ export default function Optimise({ funds, weights, snapshots = {}, setWeights, o
                     <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>Efficient Frontier</div>
                     <div style={{ border: '1px solid var(--border)', borderRadius: 10, background: '#fff', padding: 10, flex: 1, display: 'flex', flexDirection: 'column' }}>
                       <svg width="100%" style={{ display: 'block', flex: 1 }} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
-                        {frontier.map((p, i) => <circle key={i} cx={toX(p[0])} cy={toY(p[1])} r={1.5} fill="#C46985" opacity={0.4} />)}
+                        {/* Frontier dots — coloured by Sharpe (teal=low, yellow=high) */}
+                        {(() => {
+                          const sharpes = frontier.map(x => x[2] ?? 0);
+                          const sMin = Math.min(...sharpes), sMax = Math.max(...sharpes);
+                          return frontier.map((p, i) => {
+                            const t = sMax > sMin ? ((p[2] ?? 0) - sMin) / (sMax - sMin) : 0.5;
+                            const r = Math.round(t * 255);
+                            const g = Math.round(180 + t * 75);
+                            const b = Math.round((1 - t) * 180);
+                            return <circle key={i} cx={toX(p[0])} cy={toY(p[1])} r={2} fill={`rgb(${r},${g},${b})`} opacity={0.75} />;
+                          });
+                        })()}
+
                         {Object.entries(result.strategies || {}).map(([key, strat]) => {
                           if (!strat?.metrics) return null;
                           const cx = toX(strat.metrics.volatility), cy = toY(strat.metrics.return);

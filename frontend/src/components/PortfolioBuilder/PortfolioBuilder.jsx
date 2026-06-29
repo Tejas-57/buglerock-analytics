@@ -213,11 +213,13 @@ export default function PortfolioBuilder({ selectedDate }) {
               weights={weights}
               originalWeights={originalWeights}
               snapshots={snapshots}
+              setSnapshots={setSnapshots}
               benchmarks={ips.benchmarks || []}
               onBack={() => setActiveStep(4)}
               onGeneratePDF={() => { markDone(5); setActiveStep(6); }}
               selectedPortfolio={selectedPortfolio}
               setSelectedPortfolio={setSelectedPortfolio}
+              selectedDate={selectedDate}
             />
           )}
           {activeStep === 6 && (
