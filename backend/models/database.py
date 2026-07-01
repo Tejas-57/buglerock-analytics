@@ -277,3 +277,181 @@ class NavFetchLog(Base):
     rows_added = Column(Integer, default=0)
     message    = Column(Text)
     fetched_at = Column(DateTime, server_default=func.now())
+
+# ── Morningstar Holdings Integration ─────────────────────────────────────────
+
+class FundHolding(Base):
+    """
+    Individual holding (stock/bond/cash/derivative) within a fund's portfolio,
+    sourced from Morningstar's NewPortfolioApi (Full Holdings V2 / Top 25 Holdings).
+    One row per holding per fund per portfolio_date.
+    """
+    __tablename__ = "fund_holdings"
+
+    id            = Column(Integer, primary_key=True)
+    isin          = Column(String(20), nullable=False, index=True)   # parent fund ISIN
+    mstar_id      = Column(String(20), index=True)                    # parent fund MstarID
+    portfolio_date = Column(Date, nullable=False, index=True)         # as-of date of this portfolio snapshot
+
+    # Holding identity
+    morningstar_id  = Column(String(20))     # holding's own Morningstar ID (may be null)
+    holding_type    = Column(String(5))      # E, BT, CP, CD, CR, CQ, CA, FE, DD, DM etc.
+    name            = Column(String(255))
+    holding_isin    = Column(String(20))
+    ticker          = Column(String(30))
+
+    # Geography / currency
+    country_id   = Column(String(10))
+    country      = Column(String(100))
+    currency_id  = Column(String(15))
+    currency     = Column(String(50))
+
+    # Position
+    weighting        = Column(Float)   # % of portfolio
+    number_of_shares = Column(Float)
+    market_value     = Column(Float)
+    share_change     = Column(Float)
+    cost_basis       = Column(Float)
+
+    # Classification (equity holdings)
+    sector_id          = Column(String(10))
+    sector              = Column(String(100))
+    global_sector_id    = Column(String(10))
+    global_sector       = Column(String(100))
+    global_industry_id  = Column(String(15))
+    global_industry     = Column(String(150))
+    stylebox            = Column(String(5))
+
+    # Performance / lifecycle
+    holding_ytd_return = Column(Float)
+    first_bought_date  = Column(Date)
+    performance_id     = Column(String(20))
+
+    # Bond-specific
+    maturity_date = Column(Date)
+    coupon        = Column(Float)
+    indian_credit_quality = Column(String(20))
+
+    # Exchange
+    exchange_id    = Column(String(20))
+    exchange_name  = Column(String(150))
+    region_id      = Column(String(10))
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    # No unique constraint here — save_fund_holdings() deletes all existing
+    # rows for (isin, portfolio_date) before inserting fresh ones, so true
+    # duplicates can't accumulate. A constraint on (name, holding_type) was
+    # tried but real data breaks it: a fund can hold multiple T-bills/bonds
+    # all named identically (e.g. "India (Republic of)", type GS) that are
+    # only distinguished by holding_isin or morningstar_id.
+
+
+class FundPortfolioStats(Base):
+    """
+    Fund-level portfolio statistics from Morningstar NewPortfolioApi —
+    one row per fund per portfolio_date. Separate from FundHolding (which is
+    per individual holding) since this is aggregate/summary data.
+    """
+    __tablename__ = "fund_portfolio_stats"
+
+    id             = Column(Integer, primary_key=True)
+    isin           = Column(String(20), nullable=False, index=True)
+    mstar_id       = Column(String(20), index=True)
+    portfolio_date = Column(Date, nullable=False, index=True)
+
+    # Portfolio Statistics (Most Recent Port)
+    number_of_holdings        = Column(Integer)
+    number_of_bond_holdings   = Column(Integer)
+    number_of_stock_holdings  = Column(Integer)
+    equity_stylebox_name      = Column(String(50))
+    fixed_inc_stylebox_name   = Column(String(50))
+    roa_ttm                   = Column(Float)
+    roe_ttm                   = Column(Float)
+    net_margin_trailing       = Column(Float)
+    prospective_dividend_yield = Column(Float)
+    pb_ratio_ttm              = Column(Float)
+    pc_ratio_ttm              = Column(Float)
+    pe_ratio_ttm              = Column(Float)
+    ps_ratio_ttm              = Column(Float)
+    modified_duration         = Column(Float)
+    average_credit_quality    = Column(String(20))
+    yield_to_maturity         = Column(Float)
+    average_eff_maturity      = Column(Float)
+
+    # Asset Allocation (net %)
+    asset_alloc_equity_net = Column(Float)
+    asset_alloc_bond_net   = Column(Float)
+    asset_alloc_cash_net   = Column(Float)
+    convertible_net        = Column(Float)
+    preferred_stock_net    = Column(Float)
+
+    # Indian Asset Allocation
+    stock_long                    = Column(Float)
+    bond_and_debentures_long      = Column(Float)
+    cash_and_net_current_assets_long = Column(Float)
+    government_securities_long    = Column(Float)
+    money_market_instruments_long = Column(Float)
+    banks_or_fi_including_nbfc_long = Column(Float)
+    cblos_or_repo_long             = Column(Float)
+    private_corporate_bodies_long  = Column(Float)
+    public_sector_units_long       = Column(Float)
+    central_govt_securities_long   = Column(Float)
+    state_govs_securities_long     = Column(Float)
+
+    # Market Cap Breakdown (rescaled %)
+    market_cap_giant = Column(Float)
+    market_cap_large = Column(Float)
+    market_cap_mid   = Column(Float)
+    market_cap_small = Column(Float)
+    market_cap_micro = Column(Float)
+
+    # Global Stock Sector Breakdown (rescaled %)
+    sector_basic_materials       = Column(Float)
+    sector_communication_services = Column(Float)
+    sector_consumer_cyclical     = Column(Float)
+    sector_consumer_defensive    = Column(Float)
+    sector_energy                = Column(Float)
+    sector_financial_services    = Column(Float)
+    sector_healthcare            = Column(Float)
+    sector_industrials           = Column(Float)
+    sector_real_estate           = Column(Float)
+    sector_technology            = Column(Float)
+    sector_utilities             = Column(Float)
+
+    # Fund Net Assets
+    fund_net_assets      = Column(Float)
+    fund_net_assets_date = Column(Date)
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        __import__('sqlalchemy').UniqueConstraint(
+            'isin', 'portfolio_date', name='uq_fund_portfolio_stats_isin_date'
+        ),
+    )
+
+
+class HoldingsFetchLog(Base):
+    """Tracks each Morningstar holdings fetch run — for monitoring and debugging."""
+    __tablename__ = "holdings_fetch_log"
+
+    id         = Column(Integer, primary_key=True)
+    isin       = Column(String(20), nullable=False, index=True)
+    status     = Column(String(20))     # success | failed | no_data
+    message    = Column(Text)
+    fetched_at = Column(DateTime, server_default=func.now())
+
+
+class MorningstarAccessCode(Base):
+    """
+    Stores the current Morningstar accesscode and its expiry,
+    so the fetcher can self-check and rotate before it expires.
+    """
+    __tablename__ = "morningstar_accesscode"
+
+    id           = Column(Integer, primary_key=True)
+    accesscode   = Column(String(64), nullable=False)
+    created_at   = Column(DateTime, server_default=func.now())
+    expires_at   = Column(Date, nullable=False)
+    is_active    = Column(Integer, default=1)  # 1 = active, 0 = superseded/deleted

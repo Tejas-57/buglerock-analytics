@@ -183,7 +183,13 @@ function FundCard({ fund, data, onRemove, onSelect, selected, onToggleSelect, da
 export default function Watchlist({ selectedDate, setSelectedFund }) {
   const navigate = useNavigate();
   const [watchlist, setWatchlist] = useState(() => loadWatchlist());
-  const [view, setView] = useState('cards'); // 'cards' | 'table'
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem('br_watchlist_view') || 'cards'; } catch { return 'cards'; }
+  }); // 'cards' | 'table'
+  function setViewPersist(v) {
+    try { localStorage.setItem('br_watchlist_view', v); } catch {}
+    setView(v);
+  }
   const [fundData, setFundData] = useState({}); // isin → snapshot
   const [sortKey, setSortKey] = useState('1y');
   const [sortDir, setSortDir] = useState('desc');

@@ -8,7 +8,7 @@ from datetime import date
 
 load_dotenv()
 
-from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, benchmarks, optimise
+from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, benchmarks, optimise, holdings
 from models.database import init_db
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,7 @@ app.include_router(gmail.router,       prefix="/api/gmail")
 app.include_router(nav.router,         prefix="/api/nav")
 app.include_router(benchmarks.router,  prefix="/api")
 app.include_router(optimise.router,    prefix="/api")
+app.include_router(holdings.router,    prefix="/api/holdings")
 
 
 async def gmail_poll_loop():
@@ -148,8 +149,11 @@ async def startup():
     init_db()
     await migrate_benchmark_risk_columns()
     await check_parser_version()
+    from services.morningstar_service import seed_accesscode_from_env
+    seed_accesscode_from_env()
     asyncio.create_task(gmail_poll_loop())
     asyncio.create_task(nav_daily_cron())
+    asyncio.create_task(holdings_monthly_cron())
 
 
 @app.get("/api/health")
@@ -187,6 +191,46 @@ async def nav_daily_cron():
         except Exception as e:
             logger.error(f"NAV daily cron error: {e}", exc_info=True)
             await asyncio.sleep(3600)
+
+
+
+async def holdings_monthly_cron():
+    """
+    Monthly cron — fetches full holdings for all funds on the 1st of each month.
+    Also triggers accesscode auto-rotation when expiry is within 7 days.
+    Runs at 02:00 AM on the 1st of each month.
+    """
+    import asyncio
+    from datetime import datetime
+    from services.morningstar_service import fetch_universe_holdings, get_valid_accesscode
+    from models.database import SessionLocal, DailyFundData
+
+    while True:
+        now = datetime.now()
+        if now.day == 1 and now.hour == 2:
+            logger.info("Monthly holdings cron: starting universe fetch")
+            db = SessionLocal()
+            try:
+                latest_date = db.query(DailyFundData.data_date).order_by(
+                    DailyFundData.data_date.desc()
+                ).first()
+                if latest_date:
+                    isins = [
+                        r[0] for r in db.query(DailyFundData.isin).filter(
+                            DailyFundData.data_date == latest_date[0]
+                        ).distinct().all()
+                    ]
+                    accesscode = get_valid_accesscode()  # auto-rotates if expiring soon
+                    if accesscode and isins:
+                        summary = fetch_universe_holdings(isins, accesscode)
+                        logger.info(f"Monthly holdings fetch complete: {summary}")
+            except Exception as e:
+                logger.error(f"Monthly holdings cron error: {e}", exc_info=True)
+            finally:
+                db.close()
+            await asyncio.sleep(25 * 3600)  # sleep 25h to avoid double-run
+        else:
+            await asyncio.sleep(3600)  # check again in 1 hour
 
 
 if __name__ == "__main__":

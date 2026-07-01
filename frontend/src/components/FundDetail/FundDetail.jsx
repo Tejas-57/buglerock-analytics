@@ -293,7 +293,13 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
   const [benchmark, setBenchmark] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [period, setPeriod] = useState('3y');
+  const [period, setPeriod] = useState(() => {
+    try { return localStorage.getItem('br_funddetail_period') || '3y'; } catch { return '3y'; }
+  });
+  function setPeriodPersist(p) {
+    try { localStorage.setItem('br_funddetail_period', p); } catch {}
+    setPeriod(p);
+  }
   const [inWatchlist, setInWatchlist] = useState(() => selectedFund ? isInWatchlist(selectedFund?.isin) : false);
   const [showCompareWarning, setShowCompareWarning] = useState(false);
 

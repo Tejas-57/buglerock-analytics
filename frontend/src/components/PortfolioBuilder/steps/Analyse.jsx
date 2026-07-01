@@ -91,7 +91,13 @@ function corrColor(v) {
 function fmtL(v) { return v >= 100000 ? '₹' + (v / 100000).toFixed(2) + 'L' : '₹' + (v / 1000).toFixed(1) + 'K'; }
 
 export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], ips, onEdit, onOptimise }) {
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => {
+    try { return localStorage.getItem('br_analyse_tab') || 'overview'; } catch { return 'overview'; }
+  });
+  function setActiveTabPersist(tab) {
+    try { localStorage.setItem('br_analyse_tab', tab); } catch {}
+    setActiveTab(tab);
+  }
 
   // Compute blended benchmark from benchmarks array (manual weights)
   const totalBmW = benchmarks.reduce((s, b) => s + (b.weight || 0), 0) || 1;
@@ -169,7 +175,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
       {/* Tab bar */}
       <div className="ptf-tab-bar">
         {TABS.map(t => (
-          <button key={t.id} className={`ptf-tab ${activeTab === t.id ? 'active' : ''}`} onClick={() => setActiveTab(t.id)}>{t.label}</button>
+          <button key={t.id} className={`ptf-tab ${activeTab === t.id ? 'active' : ''}`} onClick={() => setActiveTabPersist(t.id)}>{t.label}</button>
         ))}
         <div className="ptf-tab-actions">
           <button className="btn btn-ghost" onClick={onEdit} style={{ fontSize: 11 }}>← Edit</button>

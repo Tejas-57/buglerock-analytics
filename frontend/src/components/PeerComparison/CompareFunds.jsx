@@ -58,7 +58,13 @@ export default function CompareFunds({ selectedDate }) {
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
-  const [activeTab, setActiveTab] = useState('returns');
+  const [activeTab, setActiveTab] = useState(() => {
+    try { return localStorage.getItem('br_compare_tab') || 'returns'; } catch { return 'returns'; }
+  });
+  function setActiveTabPersist(tab) {
+    try { localStorage.setItem('br_compare_tab', tab); } catch {}
+    setActiveTab(tab);
+  }
   const [slotSearchQ, setSlotSearchQ] = useState(['', '', '', '']);
   const [slotResults, setSlotResults] = useState([[], [], [], []]);
   const [slotOpen, setSlotOpen] = useState([false, false, false, false]);
@@ -67,6 +73,9 @@ export default function CompareFunds({ selectedDate }) {
   const [wlDropdownOpen, setWlDropdownOpen] = useState(false);
   const [watchlistFunds, setWatchlistFunds] = useState([]);
   const wlRef = useRef(null);
+  const [overlapData, setOverlapData] = useState(null);
+  const [overlapLoading, setOverlapLoading] = useState(false);
+  const [overlapError, setOverlapError] = useState(null);
   const slotRefs = [useRef(null), useRef(null), useRef(null), useRef(null)];
 
   const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
@@ -174,114 +183,376 @@ export default function CompareFunds({ selectedDate }) {
     return () => document.removeEventListener('mousedown', handle);
   }, []);
 
-  // ── Table helpers ──────────────────────────────────────────────────────────
+  // ── Overlap helpers ────────────────────────────────────────────────────────
 
-  function Row({ label, vals, fmtFn, lowerBetter, showBar }) {
-    const hl = highlight(vals, lowerBetter);
-    const nums = vals.map(v => (v !== null && v !== undefined && v !== '-') ? parseFloat(v) : null);
-    const maxAbs = Math.max(...nums.filter(v => v !== null && !isNaN(v)).map(Math.abs), 1);
+  // Shorten fund name by removing trailing noise words, not by cutting word count
+  function shortFundName(name) {
+    if (!name) return '';
+    // Remove common noise suffixes — order matters (longer phrases first)
+    const noiseTerms = ['Reg Gr', 'Dir Gr', 'Direct Gr', 'Regular Gr', 'Growth Plan', 'Direct Plan',
+      'Regular Plan', 'Direct Growth', 'Regular Growth', 'Growth', 'Regular', 'Direct',
+      'Reg', 'Dir', 'Gr', 'Fund', 'Scheme', 'Plan', 'Option', 'IDCW'];
+    let result = name;
+    for (const term of noiseTerms) {
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp('(^|\\s)' + escaped + '(\\s|$)', 'gi'), ' ');
+    }
+    return result.replace(/\s+/g, ' ').trim();
+  }
+
+  // Shared table styles for consistent column widths across all overlap tables
+  const TBL = { width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' };
+  const COL_STOCK  = { width: '38%' };
+  const COL_SECTOR = { width: '22%' };
+  const COL_WEIGHT = { width: '20%' }; // per fund weight column
+  const TH = (extra) => ({ padding: '8px 12px', fontWeight: 600, fontSize: 11, borderBottom: '1px solid var(--border)', ...extra });
+  const TD = (extra) => ({ padding: '7px 12px', borderBottom: '1px solid var(--border)', ...extra });
+
+  // Only active equity mutual funds qualify for overlap
+  function isActiveEquityFund(f) {
+    const ac = (f.data?.asset_class || f.asset_class || '').toLowerCase();
+    const cat = (f.data?.category || f.category || '').toLowerCase();
+    // Must be equity asset class, not ETF or index (ETFs have very low expense ratio and specific categories)
+    const isEquity = ac === 'equity';
+    const isIndex = cat.includes('index') || cat.includes('etf') || (f.data?.expense_ratio && f.data.expense_ratio < 0.5);
+    return isEquity && !isIndex;
+  }
+
+  const equityFunds = funds.filter(isActiveEquityFund);
+
+  async function fetchOverlap() {
+    if (equityFunds.length < 2) return;
+    const API = process.env.REACT_APP_API_URL || '';
+    setOverlapLoading(true);
+    setOverlapError(null);
+    setOverlapData(null);
+
+    try {
+      const isins = equityFunds.map(f => f.isin).join(',');
+
+      // First pass — check which funds are missing holdings
+      const firstR = await fetch(`${API}/api/holdings/overlap?isins=${isins}`);
+      if (!firstR.ok) throw new Error('Could not calculate overlap');
+      const firstD = await firstR.json();
+
+      // Auto-fetch any funds with 0 holdings
+      const missing = equityFunds.filter(f => (firstD.fund_holdings_counts?.[f.isin] ?? -1) === 0);
+      if (missing.length > 0) {
+        setOverlapError(`Fetching holdings for ${missing.map(f => shortFundName(f.name)).join(', ')}...`);
+        await Promise.all(missing.map(f =>
+          fetch(`${API}/api/holdings/fetch/${f.isin}`, { method: 'POST' })
+        ));
+        // Wait for background fetches to complete (poll up to 60s)
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await new Promise(res => setTimeout(res, 2000));
+          const checkR = await fetch(`${API}/api/holdings/overlap?isins=${isins}`);
+          if (checkR.ok) {
+            const checkD = await checkR.json();
+            const stillMissing = equityFunds.filter(f => (checkD.fund_holdings_counts?.[f.isin] ?? -1) === 0);
+            if (stillMissing.length === 0) {
+              setOverlapError(null);
+              setOverlapData(checkD);
+              return;
+            }
+          }
+        }
+        throw new Error('Holdings fetch timed out — please try again');
+      }
+
+      setOverlapData(firstD);
+    } catch (e) {
+      setOverlapError(e.message);
+    } finally {
+      setOverlapLoading(false);
+    }
+  }
+
+  // Auto-fetch overlap whenever tab is overlap OR funds change while on overlap tab
+  useEffect(() => {
+    if (activeTab === 'overlap' && equityFunds.length >= 2) {
+      fetchOverlap();
+    } else if (activeTab === 'overlap' && equityFunds.length < 2) {
+      setOverlapData(null);
+      setOverlapError(null);
+    }
+  }, [activeTab, funds.map(f => f.isin).join(',')]);
+
+  function renderOverlap() {
+    const nonEquity = funds.filter(f => !isActiveEquityFund(f));
 
     return (
-      <tr style={{ borderBottom: '1px solid var(--border)' }}
-        onMouseEnter={e => [...e.currentTarget.cells].forEach(c => c.dataset.bg && (c.style.background = 'var(--bg-secondary)'))}
-        onMouseLeave={e => [...e.currentTarget.cells].forEach(c => c.dataset.bg && (c.style.background = c.dataset.bg))}
-      >
-        <td data-bg='#fff' style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500, whiteSpace: 'nowrap', width: 160, minWidth: 160, background: '#fff' }}>{label}</td>
-        {[0,1,2,3].map((idx) => {
-          const v = vals[idx];
-          const i = idx;
-          const cls = hl[i];
-          const bg = cls === 'best' ? 'rgba(16,185,129,0.08)' : cls === 'worst' ? 'rgba(239,68,68,0.08)' : '#fff';
-          const color = cls === 'best' ? '#059669' : cls === 'worst' ? '#DC2626' : 'var(--text-primary)';
-          const txt = fmtFn(v);
-          const barW = (showBar && v !== null && v !== '-') ? (Math.abs(parseFloat(v)) / maxAbs * 100).toFixed(0) : 0;
-          const barClr = cls === 'best' ? '#059669' : cls === 'worst' ? '#DC2626' : '#A795AE';
-          return (
-            <td key={i} data-bg={bg} style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, background: bg, color, borderLeft: '1px solid var(--border)', transition: 'background .1s' }}>
-              {showBar && v !== null && v !== '-' ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                  <div style={{ width: 40, height: 4, background: 'var(--bg-secondary)', borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
-                    <div style={{ width: `${barW}%`, height: '100%', background: barClr, borderRadius: 2 }} />
-                  </div>
-                  {txt}
-                </div>
-              ) : txt}
-            </td>
+      <div style={{ padding: '0 2px' }}>
+
+        {/* Non-equity warning */}
+        {nonEquity.length > 0 && (
+          <div style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(234,179,8,.06)', border: '1px solid rgba(234,179,8,.3)', borderRadius: 8, fontSize: 12, color: '#92700A' }}>
+            ⚠ Overlap is only for active equity funds.{' '}
+            <strong>{nonEquity.map(f => shortFundName(f.name)).join(', ')}</strong> excluded.
+          </div>
+        )}
+
+        {equityFunds.length < 2 && (
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+            Add at least 2 active equity mutual funds to see overlap.
+          </div>
+        )}
+
+        {equityFunds.length >= 2 && overlapLoading && (
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+            {overlapError || 'Calculating overlap...'}
+            {overlapError && <div style={{ fontSize: 11, marginTop: 6 }}>Fetching from Morningstar, please wait...</div>}
+          </div>
+        )}
+
+        {equityFunds.length >= 2 && overlapError && !overlapLoading && (
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--neg)', fontSize: 13 }}>{overlapError}</div>
+        )}
+
+        {equityFunds.length >= 2 && overlapData && !overlapLoading && (() => {
+          const { pairwise_matrix, common_all, pair_details, fund_holdings_counts } = overlapData;
+          const pairs = Object.values(pairwise_matrix);
+          const fundMap = Object.fromEntries(equityFunds.map(f => [f.isin, f]));
+
+          // No data check
+          const fundsWithNoData = equityFunds.filter(f => (fund_holdings_counts?.[f.isin] ?? -1) === 0);
+          if (fundsWithNoData.length > 0) {
+            return (
+              <div style={{ padding: 24, background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>
+                <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--text-body)' }}>Holdings data not available for:</div>
+                <div style={{ marginBottom: 12 }}>{fundsWithNoData.map(f => f.name).join(', ')}</div>
+                <div style={{ fontSize: 11 }}>Holdings are fetched on demand. Contact admin to run fetch for these funds.</div>
+              </div>
+            );
+          }
+
+          // ── Summary stats ──────────────────────────────────────────────────
+          // Avg overlap across all pairs
+          const avgOverlap = pairs.length
+            ? (pairs.reduce((s, p) => s + p.overlap_pct, 0) / pairs.length).toFixed(1)
+            : 0;
+
+          // Highest overlap pair
+          const highestPair = pairs.reduce((best, p) => p.overlap_pct > (best?.overlap_pct || 0) ? p : best, null);
+
+          // Unique stocks: sum of all equity holdings across all funds minus overlaps
+          // Best approximation from available data: total unique ISINs across all holdings
+          // Backend returns fund_holdings_counts = {isin: count} — use union estimate
+          // More accurate: collect all unique holding ISINs from common_all + pair details
+          const allStockISINs = new Set();
+          common_all.forEach(h => allStockISINs.add(h.holding_isin));
+          pairs.forEach(p => {
+            const pd = pair_details[`${p.fund_a}|${p.fund_b}`];
+            if (pd?.shared) pd.shared.forEach(h => { if (h.holding_isin) allStockISINs.add(h.holding_isin); });
+            if (pd?.only_a) pd.only_a.forEach(h => { if (h.name) allStockISINs.add(h.name); });
+            if (pd?.only_b) pd.only_b.forEach(h => { if (h.name) allStockISINs.add(h.name); });
+          });
+          // True unique stock count from backend (union of all holding ISINs)
+          const totalUniqueStocks = overlapData.unique_stock_count || '—';
+
+          // Held by every fund — count and top name
+          const heldByAllCount = common_all.length;
+          const heldByAllName = common_all.length > 0 ? common_all[0].name : '—';
+
+          const statCard = (value, label, sub, color) => (
+            <div style={{ flex: 1, background: 'var(--bg-secondary)', borderRadius: 10, padding: '16px 20px', textAlign: 'center', minWidth: 0 }}>
+              <div style={{ fontSize: 26, fontWeight: 700, color: color || 'var(--brand-primary)', fontFamily: 'var(--font-mono)' }}>{value}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 4 }}>{label}</div>
+              {sub && <div style={{ fontSize: 11, color: 'var(--text-body)', marginTop: 3 }}>{sub}</div>}
+            </div>
           );
-        })}
-      </tr>
-    );
-  }
 
-  function SectionHead({ label }) {
-    return (
-      <tr>
-        <td style={{ padding: '7px 14px', fontSize: 9, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--brand-primary)', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>{label}</td>
-        {[0,1,2,3].map((i) => (
-          <td key={i} style={{ padding: '7px 14px', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', borderLeft: '1px solid var(--border)' }} />
-        ))}
-      </tr>
-    );
-  }
+          const overlapColor = (pct) =>
+            pct >= 35 ? '#C0392B' : pct >= 25 ? '#E67E22' : pct >= 15 ? '#F39C12' : pct >= 5 ? '#27AE60' : '#A0A0A0';
+          const overlapLabel = (pct) =>
+            pct >= 35 ? 'Very High Overlap' : pct >= 25 ? 'High Overlap' : pct >= 15 ? 'Moderate Overlap' : pct >= 5 ? 'Low Overlap' : 'Negligible Overlap';
 
-  function FundHeader() {
-    return (
-      <tr style={{ position: 'sticky', top: 0, zIndex: 10, background: '#fff', boxShadow: '0 1px 0 var(--border)' }}>
-        <th style={{ padding: 0, width: 160, minWidth: 160, background: '#fff' }} />
-        {[0,1,2,3].map(idx => {
-          const f = funds[idx];
-          return f ? (
-            <th key={f.isin} style={{ padding: '12px 14px 10px', borderLeft: '1px solid var(--border)', borderTop: `3px solid ${f.color}`, verticalAlign: 'top', width: '25%', fontWeight: 'normal', background: '#fff' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--brand-dark)', lineHeight: 1.3, marginBottom: 4 }}>{f.name}</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <div>
-                  <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(145,47,99,0.08)', color: 'var(--brand-primary)', fontWeight: 500 }}>
-                    {f.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}
-                  </span>
-                  {f.data?.fund_size && f.data.fund_size !== '-' && (
-                    <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(109,84,121,0.08)', color: 'var(--brand-mid)', fontWeight: 500, marginLeft: 4 }}>{fmtAum(f.data.fund_size)}</span>
-                  )}
-                </div>
-                <div style={{ marginTop: 2 }}>
-                  <span style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, color: f.color }}>
-                    {f.data?.nav && f.data.nav !== '-' ? `₹${parseFloat(f.data.nav).toFixed(2)}` : '—'}
-                  </span>
-                  {f.data?.returns?.['1d'] && f.data.returns['1d'] !== '-' && (
-                    <span style={{ fontSize: 11, fontWeight: 500, marginLeft: 6, color: parseFloat(f.data.returns['1d']) >= 0 ? '#059669' : '#DC2626' }}>
-                      {pct(f.data.returns['1d'])} today
-                    </span>
-                  )}
-                </div>
-                {f.data?.morningstar_rating && f.data.morningstar_rating !== '-' && (
-                  <div style={{ fontSize: 12, color: '#B46B10', letterSpacing: -1 }}>{stars(f.data.morningstar_rating)}</div>
+          return (
+            <div>
+              {/* ── 4 summary stat cards ── */}
+              <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow-card)', padding: '16px 20px', marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 12 }}>
+                {statCard(`${avgOverlap}%`, 'Avg Holdings Overlap', `${equityFunds.length} funds · ${pairs.length} pairs`)}
+                {statCard(
+                  highestPair ? `${highestPair.overlap_pct.toFixed(1)}%` : '—',
+                  'Highest Overlap Pair',
+                  highestPair ? `${shortFundName(fundMap[highestPair.fund_a]?.name)} ↔ ${shortFundName(fundMap[highestPair.fund_b]?.name)}` : '',
+                  overlapColor(highestPair?.overlap_pct || 0)
+                )}
+                {statCard(totalUniqueStocks || '—', 'Unique Stocks Across Set', `${equityFunds.length} funds combined`)}
+                {statCard(
+                  heldByAllCount > 0 ? heldByAllCount : '0',
+                  'Held By Every Fund',
+                  heldByAllCount > 0 ? `Top stock by weight: ${heldByAllName}` : 'None in common',
+                  heldByAllCount > 0 ? 'var(--brand-primary)' : 'var(--text-muted)'
                 )}
               </div>
-            </th>
-          ) : (
-            <th key={`empty-${idx}`} style={{ padding: '12px 14px', borderLeft: '1px solid var(--border)', borderTop: '3px solid var(--border)', width: '25%', background: 'var(--bg-secondary)' }} />
+              </div>{/* end stat cards box */}
+
+              {/* ── Overlap matrix (centred) ── */}
+              <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow-card)', padding: '20px', marginBottom: 16 }}>
+              <div style={{ marginBottom: 28, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-body)', marginBottom: 16, alignSelf: 'flex-start' }}>Overlap matrix</div>
+                <table style={{ borderCollapse: 'separate', borderSpacing: 6, margin: '0 auto' }}>
+                  <thead>
+                    <tr>
+                      <td style={{ width: 140 }} />
+                      {equityFunds.map(f => (
+                        <th key={f.isin} style={{ textAlign: 'center', padding: '0 4px 8px', fontSize: 11, fontWeight: 500, color: 'var(--text-body)', width: 100 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                            <div style={{ width: 10, height: 10, borderRadius: 2, background: f.color }} />
+                            <div style={{ maxWidth: 90, textAlign: 'center', lineHeight: 1.3 }}>{shortFundName(f.name)}</div>
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {equityFunds.map((fa, i) => (
+                      <tr key={fa.isin}>
+                        <td style={{ textAlign: 'right', padding: '4px 10px 4px 0', fontSize: 11, fontWeight: 500, color: 'var(--text-body)', whiteSpace: 'nowrap' }}>
+                          <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: fa.color, marginRight: 6, verticalAlign: 'middle' }} />
+                          {shortFundName(fa.name)}
+                        </td>
+                        {equityFunds.map((fb, j) => {
+                          if (i === j) return (
+                            <td key={fb.isin} style={{ width: 100, height: 60, background: '#f4f4f4', borderRadius: 8, textAlign: 'center', fontSize: 18, color: '#ccc' }}>—</td>
+                          );
+                          const key = i < j ? `${fa.isin}|${fb.isin}` : `${fb.isin}|${fa.isin}`;
+                          const p = pairwise_matrix[key];
+                          const pct = p?.overlap_pct || 0;
+                          const bg = pct >= 35 ? 'rgba(192,57,43,.10)' : pct >= 25 ? 'rgba(230,126,34,.10)' : pct >= 15 ? 'rgba(243,156,18,.10)' : pct >= 5 ? 'rgba(39,174,96,.10)' : '#f4f4f4';
+                          const clr = overlapColor(pct);
+                          return (
+                            <td key={fb.isin} style={{ width: 100, height: 60, background: bg, borderRadius: 8, textAlign: 'center', verticalAlign: 'middle' }}>
+                              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 18, color: clr }}>{pct.toFixed(0)}%</div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 11, color: 'var(--text-muted)', justifyContent: 'center' }}>
+                  <span><span style={{ color: '#A0A0A0' }}>●</span> &lt;5% Negligible</span>
+                  <span><span style={{ color: '#27AE60' }}>●</span> 5–15% Low</span>
+                  <span><span style={{ color: '#F39C12' }}>●</span> 15–25% Moderate</span>
+                  <span><span style={{ color: '#E67E22' }}>●</span> 25–35% High</span>
+                  <span><span style={{ color: '#C0392B' }}>●</span> &gt;35% Very high</span>
+                </div>
+              </div>
+
+
+
+              </div>{/* end matrix box */}
+
+              {/* ── Pairwise cards ── */}
+              {pairs.map((p, pi) => {
+                const fa = fundMap[p.fund_a];
+                const fb = fundMap[p.fund_b];
+                const pd = pair_details[`${p.fund_a}|${p.fund_b}`] || {};
+                const shared = pd.shared || [];
+                const onlyA = pd.only_a || [];
+                const onlyB = pd.only_b || [];
+                const pct = p.overlap_pct;
+                const clr = overlapColor(pct);
+                const lbl = overlapLabel(pct);
+                const rows = Math.max(onlyA.length, onlyB.length, 1);
+                const nameA = shortFundName(fa?.name);
+                const nameB = shortFundName(fb?.name);
+
+                return (
+                  <div key={`${p.fund_a}|${p.fund_b}`} style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+                    {/* Card header */}
+                    <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)', gap: 12 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--brand-dark)', color: '#fff', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{pi + 1}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                        <div style={{ width: 10, height: 10, borderRadius: 2, background: fa?.color, flexShrink: 0 }} />
+                        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-body)' }}>{shortFundName(fa?.name)}</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, flexShrink: 0 }}>vs</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, justifyContent: 'flex-end' }}>
+                        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-body)' }}>{shortFundName(fb?.name)}</span>
+                        <div style={{ width: 10, height: 10, borderRadius: 2, background: fb?.color, flexShrink: 0 }} />
+                      </div>
+                      <div style={{ marginLeft: 16, background: `${clr}18`, border: `1px solid ${clr}44`, borderRadius: 8, padding: '6px 14px', textAlign: 'center', minWidth: 90, flexShrink: 0 }}>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 18, color: clr }}>{pct.toFixed(1)}%</div>
+                        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: clr }}>{lbl}</div>
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '16px 20px' }}>
+                      {/* Shared holdings */}
+                      {shared.length > 0 && (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#E67E22', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 10 }}>
+                            Shared Holdings ({shared.length})
+                          </div>
+                          {/* Column headers */}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px', gap: '0 8px', marginBottom: 4 }}>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em' }}>Stock</div>
+                            <div style={{ fontSize: 10, color: fa?.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', textAlign: 'right' }}>{shortFundName(fa?.name).split(' ')[0]}</div>
+                            <div style={{ fontSize: 10, color: fb?.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', textAlign: 'right' }}>{shortFundName(fb?.name).split(' ')[0]}</div>
+                          </div>
+                          {shared.map(h => (
+                            <div key={h.holding_isin} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px', gap: '0 8px', padding: '7px 10px', alignItems: 'center', background: 'var(--bg-secondary)', borderRadius: 6, marginBottom: 4 }}>
+                              <div style={{ fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                {h.name}
+                                <span style={{ fontSize: 9, fontWeight: 700, color: '#E67E22', letterSpacing: '.04em' }}>● SHARED</span>
+                              </div>
+                              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, textAlign: 'right', color: fa?.color }}>{h.weight_a.toFixed(1)}%</div>
+                              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, textAlign: 'right', color: fb?.color }}>{h.weight_b.toFixed(1)}%</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Only-in columns */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32 }}>
+                        {/* Only in Fund A */}
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 10 }}>
+                            Only in {shortFundName(fa?.name)}
+                          </div>
+                          {Array.from({ length: 10 }).map((_, idx) => {
+                            const h = onlyA[idx];
+                            return (
+                              <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0 16px', padding: '5px 0', opacity: h ? 1 : 0 }}>
+                                <div style={{ fontSize: 12, color: 'var(--text-body)' }}>{h ? h.name : '·'}</div>
+                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: fa?.color, textAlign: 'right' }}>{h ? `${h.weight.toFixed(1)}%` : ''}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {/* Only in Fund B */}
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 10 }}>
+                            Only in {shortFundName(fb?.name)}
+                          </div>
+                          {Array.from({ length: 10 }).map((_, idx) => {
+                            const h = onlyB[idx];
+                            return (
+                              <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0 16px', padding: '5px 0', opacity: h ? 1 : 0 }}>
+                                <div style={{ fontSize: 12, color: 'var(--text-body)' }}>{h ? h.name : '·'}</div>
+                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: fb?.color, textAlign: 'right' }}>{h ? `${h.weight.toFixed(1)}%` : ''}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           );
-        })}
-      </tr>
+        })()}
+      </div>
     );
   }
 
-  // ── Tally row for returns tab ──────────────────────────────────────────────
-  function tallyWins() {
-    const wins = funds.map(() => 0);
-    const retKeys = ['1m', '3m', '6m', '1y', '2y', '3y', '5y', '10y', 'ytd', 'cy2025', 'cy2024', 'cy2023', 'cy2022', 'cy2021'];
-    retKeys.forEach(k => {
-      const vals = funds.map(f => f.data?.returns?.[k]);
-      const nums = vals.map(v => (v !== null && v !== undefined && v !== '-') ? parseFloat(v) : null);
-      const valid = nums.filter(v => v !== null && !isNaN(v));
-      if (!valid.length) return;
-      const best = Math.max(...valid);
-      nums.forEach((v, i) => { if (v === best) wins[i]++; });
-    });
-    return wins;
-  }
 
-  // ── Render tabs ────────────────────────────────────────────────────────────
   function renderTable() {
+    if (activeTab === 'overlap') return renderOverlap();
     if (funds.length < 1) return null;
     const F = funds;
 
@@ -414,8 +685,8 @@ export default function CompareFunds({ selectedDate }) {
     }
   }
 
-  const tabs = ['returns', 'risk', 'composition', 'info'];
-  const tabLabels = { returns: 'Returns', risk: 'Risk metrics', composition: 'Composition', info: 'Fund info' };
+  const tabs = ['returns', 'risk', 'composition', 'info', 'overlap'];
+  const tabLabels = { returns: 'Returns', risk: 'Risk metrics', composition: 'Composition', info: 'Fund info', overlap: 'Overlap' };
 
   return (
     <div style={{ paddingBottom: 40 }}>
@@ -564,11 +835,11 @@ export default function CompareFunds({ selectedDate }) {
 
       {/* Comparison table */}
       {funds.length >= 1 && (
-        <div style={{ background: '#fff', borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
+        <div style={activeTab === 'overlap' ? {} : { background: '#fff', borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
           {/* Tabs */}
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 16px', background: '#fff' }}>
+          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 16px', background: '#fff', borderRadius: activeTab === 'overlap' ? '12px 12px 0 0' : 0 }}>
             {tabs.map(t => (
-              <button key={t} onClick={() => setActiveTab(t)} style={{
+              <button key={t} onClick={() => setActiveTabPersist(t)} style={{
                 padding: '10px 14px', fontSize: 12, fontWeight: activeTab === t ? 500 : 400,
                 color: activeTab === t ? 'var(--brand-primary)' : 'var(--text-muted)',
                 border: 'none', background: 'none', borderBottom: `2px solid ${activeTab === t ? 'var(--brand-primary)' : 'transparent'}`,
@@ -578,7 +849,7 @@ export default function CompareFunds({ selectedDate }) {
           </div>
 
           {/* Table */}
-          <div style={{ overflowX: 'auto' }}>
+          <div style={activeTab === 'overlap' ? { padding: '16px 0' } : { overflowX: 'auto' }}>
             {renderTable()}
           </div>
         </div>
