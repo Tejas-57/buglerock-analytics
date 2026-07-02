@@ -187,25 +187,40 @@ export default function CompareFunds({ selectedDate }) {
 
   function Row({ label, vals, fmtFn, lowerBetter, showBar }) {
     const hl = highlight(vals, lowerBetter);
-    const maxAbs = showBar ? Math.max(...vals.map(v => Math.abs(parseFloat(v) || 0))) : 0;
+    const nums = vals.map(v => (v !== null && v !== undefined && v !== '-') ? parseFloat(v) : null);
+    const maxAbs = Math.max(...nums.filter(v => v !== null && !isNaN(v)).map(Math.abs), 1);
+
     return (
-      <tr>
-        <td style={{ padding: '7px 14px', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{label}</td>
-        {vals.map((v, i) => {
-          const num = parseFloat(v);
-          const barW = showBar && maxAbs > 0 ? Math.abs(num) / maxAbs * 100 : 0;
-          const isPos = num >= 0;
+      <tr style={{ borderBottom: '1px solid var(--border)' }}
+        onMouseEnter={e => [...e.currentTarget.cells].forEach((c, i) => { if (i > 0) c.style.background = 'var(--bg-secondary)'; })}
+        onMouseLeave={e => [...e.currentTarget.cells].forEach((c, i) => {
+          if (i === 0) return;
+          const idx = i - 1;
+          const cls = hl[idx];
+          c.style.background = cls === 'best' ? 'rgba(16,185,129,0.08)' : cls === 'worst' ? 'rgba(239,68,68,0.08)' : vals[idx] === undefined ? 'var(--bg-secondary)' : '#fff';
+        })}
+      >
+        <td style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500, whiteSpace: 'nowrap', width: 160, minWidth: 160, background: '#fff' }}>{label}</td>
+        {[0,1,2,3].map((idx) => {
+          const v = vals[idx];
+          const i = idx;
+          const cls = hl[i];
+          const bg = cls === 'best' ? 'rgba(16,185,129,0.08)' : cls === 'worst' ? 'rgba(239,68,68,0.08)' : '#fff';
+          const color = cls === 'best' ? '#059669' : cls === 'worst' ? '#DC2626' : 'var(--text-primary)';
+          const txt = fmtFn(v);
+          const barW = (showBar && v !== null && v !== undefined && v !== '-') ? (Math.abs(parseFloat(v)) / maxAbs * 100).toFixed(0) : 0;
+          const barClr = cls === 'best' ? '#059669' : cls === 'worst' ? '#DC2626' : '#A795AE';
+          const isEmpty = v === undefined || v === null || v === '-';
           return (
-            <td key={i} style={{ padding: '7px 14px', textAlign: 'right', borderBottom: '1px solid var(--border)', borderLeft: '1px solid var(--border)', background: hl[i] === 'best' ? 'rgba(145,47,99,0.04)' : hl[i] === 'worst' ? 'rgba(0,0,0,0.02)' : 'transparent' }}>
-              {showBar && !isNaN(num) && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                  <div style={{ width: 60, height: 3, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
-                    <div style={{ width: `${barW}%`, height: '100%', background: isPos ? 'var(--brand-primary)' : 'var(--neg)', borderRadius: 2 }} />
+            <td key={i} style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, background: isEmpty ? 'var(--bg-secondary)' : bg, color, borderLeft: '1px solid var(--border)', transition: 'background .1s' }}>
+              {showBar && !isEmpty ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                  <div style={{ width: 40, height: 4, background: 'var(--bg-secondary)', borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
+                    <div style={{ width: `${barW}%`, height: '100%', background: barClr, borderRadius: 2 }} />
                   </div>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: hl[i] === 'best' ? 'var(--brand-primary)' : hl[i] === 'worst' ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: hl[i] === 'best' ? 600 : 400 }}>{fmtFn ? fmtFn(v) : v ?? '—'}</span>
+                  {txt}
                 </div>
-              )}
-              {!showBar && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: hl[i] === 'best' ? 'var(--brand-primary)' : hl[i] === 'worst' ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: hl[i] === 'best' ? 600 : 400 }}>{fmtFn ? fmtFn(v) : v ?? '—'}</span>}
+              ) : isEmpty ? null : txt}
             </td>
           );
         })}
@@ -216,24 +231,51 @@ export default function CompareFunds({ selectedDate }) {
   function SectionHead({ label }) {
     return (
       <tr>
-        <td colSpan={funds.length + 1} style={{ padding: '8px 14px 4px', fontSize: 9, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--brand-primary)', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>{label}</td>
+        <td style={{ padding: '7px 14px', fontSize: 9, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--brand-primary)', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>{label}</td>
+        {[0,1,2,3].map((i) => (
+          <td key={i} style={{ padding: '7px 14px', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', borderLeft: '1px solid var(--border)' }} />
+        ))}
       </tr>
     );
   }
 
   function FundHeader() {
     return (
-      <tr style={{ background: 'var(--bg-secondary)' }}>
-        <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', minWidth: 140 }}>Metric</th>
-        {funds.map((f, i) => (
-          <th key={i} style={{ padding: '10px 14px', textAlign: 'right', borderBottom: '2px solid var(--border)', borderLeft: '1px solid var(--border)', minWidth: 110 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: f.color }} />
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-body)', lineHeight: 1.3, textAlign: 'right' }}>{f.name?.split(' ').slice(0, 4).join(' ')}</div>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{f.category?.replace(/^(India Fund |India OE |Cat: )/, '')?.slice(0, 22)}</div>
-            </div>
-          </th>
-        ))}
+      <tr style={{ position: 'sticky', top: 0, zIndex: 10, background: '#fff', boxShadow: '0 1px 0 var(--border)' }}>
+        <th style={{ padding: 0, width: 160, minWidth: 160, background: '#fff' }} />
+        {[0,1,2,3].map(idx => {
+          const f = funds[idx];
+          return f ? (
+            <th key={f.isin} style={{ padding: '12px 14px 10px', borderLeft: '1px solid var(--border)', borderTop: `3px solid ${f.color}`, verticalAlign: 'top', width: '25%', fontWeight: 'normal', background: '#fff' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--brand-dark)', lineHeight: 1.3, marginBottom: 4 }}>{f.name}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div>
+                  <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(145,47,99,0.08)', color: 'var(--brand-primary)', fontWeight: 500 }}>
+                    {f.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}
+                  </span>
+                  {f.data?.fund_size && f.data.fund_size !== '-' && (
+                    <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(109,84,121,0.08)', color: 'var(--brand-mid)', fontWeight: 500, marginLeft: 4 }}>{fmtAum(f.data.fund_size)}</span>
+                  )}
+                </div>
+                <div style={{ marginTop: 2 }}>
+                  <span style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, color: f.color }}>
+                    {f.data?.nav && f.data.nav !== '-' ? `₹${parseFloat(f.data.nav).toFixed(2)}` : '—'}
+                  </span>
+                  {f.data?.returns?.['1d'] && f.data.returns['1d'] !== '-' && (
+                    <span style={{ fontSize: 11, fontWeight: 500, marginLeft: 6, color: parseFloat(f.data.returns['1d']) >= 0 ? '#059669' : '#DC2626' }}>
+                      {pct(f.data.returns['1d'])} today
+                    </span>
+                  )}
+                </div>
+                {f.data?.morningstar_rating && f.data.morningstar_rating !== '-' && (
+                  <div style={{ fontSize: 12, color: '#B46B10', letterSpacing: -1 }}>{stars(f.data.morningstar_rating)}</div>
+                )}
+              </div>
+            </th>
+          ) : (
+            <th key={`empty-${idx}`} style={{ padding: '12px 14px', borderLeft: '1px solid var(--border)', borderTop: '3px solid var(--border)', width: '25%', background: 'var(--bg-secondary)' }} />
+          );
+        })}
       </tr>
     );
   }
@@ -606,28 +648,27 @@ export default function CompareFunds({ selectedDate }) {
   }
 
 
+  // ── Tally row for returns tab ──────────────────────────────────────────────
+  function tallyWins() {
+    const wins = funds.map(() => 0);
+    const retKeys = ['1m', '3m', '6m', '1y', '2y', '3y', '5y', '10y', 'ytd', 'cy2025', 'cy2024', 'cy2023', 'cy2022', 'cy2021'];
+    retKeys.forEach(k => {
+      const vals = funds.map(f => f.data?.returns?.[k]);
+      const nums = vals.map(v => (v !== null && v !== undefined && v !== '-') ? parseFloat(v) : null);
+      const valid = nums.filter(v => v !== null && !isNaN(v));
+      if (!valid.length) return;
+      const best = Math.max(...valid);
+      nums.forEach((v, i) => { if (v === best) wins[i]++; });
+    });
+    return wins;
+  }
+
   function renderTable() {
     if (activeTab === 'overlap') return renderOverlap();
     if (funds.length < 1) return null;
     const F = funds;
 
     if (activeTab === 'returns') {
-      // Count how many return periods each fund has the best value
-      function tallyWins() {
-        const returnKeys = ['1m','3m','6m','1y','2y','3y','5y','10y','ytd','cy2025','cy2024','cy2023','cy2022','cy2021'];
-        const counts = F.map(() => 0);
-        returnKeys.forEach(k => {
-          const vals = F.map(f => {
-            const v = f.data?.returns?.[k];
-            return (v !== null && v !== undefined && v !== '-') ? parseFloat(v) : null;
-          });
-          const valid = vals.filter(v => v !== null && !isNaN(v));
-          if (valid.length < 2) return;
-          const best = Math.max(...valid);
-          vals.forEach((v, i) => { if (v === best) counts[i]++; });
-        });
-        return counts;
-      }
       const wins = tallyWins();
       const maxWins = Math.max(...wins);
       return (
