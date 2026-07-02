@@ -557,6 +557,22 @@ export default function CompareFunds({ selectedDate }) {
     const F = funds;
 
     if (activeTab === 'returns') {
+      // Count how many return periods each fund has the best value
+      function tallyWins() {
+        const returnKeys = ['1m','3m','6m','1y','2y','3y','5y','10y','ytd','cy2025','cy2024','cy2023','cy2022','cy2021'];
+        const counts = F.map(() => 0);
+        returnKeys.forEach(k => {
+          const vals = F.map(f => {
+            const v = f.data?.returns?.[k];
+            return (v !== null && v !== undefined && v !== '-') ? parseFloat(v) : null;
+          });
+          const valid = vals.filter(v => v !== null && !isNaN(v));
+          if (valid.length < 2) return;
+          const best = Math.max(...valid);
+          vals.forEach((v, i) => { if (v === best) counts[i]++; });
+        });
+        return counts;
+      }
       const wins = tallyWins();
       const maxWins = Math.max(...wins);
       return (
