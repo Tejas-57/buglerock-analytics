@@ -183,6 +183,61 @@ export default function CompareFunds({ selectedDate }) {
     return () => document.removeEventListener('mousedown', handle);
   }, []);
 
+  // ── Table helpers ──────────────────────────────────────────────────────────
+
+  function Row({ label, vals, fmtFn, lowerBetter, showBar }) {
+    const hl = highlight(vals, lowerBetter);
+    const maxAbs = showBar ? Math.max(...vals.map(v => Math.abs(parseFloat(v) || 0))) : 0;
+    return (
+      <tr>
+        <td style={{ padding: '7px 14px', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{label}</td>
+        {vals.map((v, i) => {
+          const num = parseFloat(v);
+          const barW = showBar && maxAbs > 0 ? Math.abs(num) / maxAbs * 100 : 0;
+          const isPos = num >= 0;
+          return (
+            <td key={i} style={{ padding: '7px 14px', textAlign: 'right', borderBottom: '1px solid var(--border)', borderLeft: '1px solid var(--border)', background: hl[i] === 'best' ? 'rgba(145,47,99,0.04)' : hl[i] === 'worst' ? 'rgba(0,0,0,0.02)' : 'transparent' }}>
+              {showBar && !isNaN(num) && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                  <div style={{ width: 60, height: 3, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ width: `${barW}%`, height: '100%', background: isPos ? 'var(--brand-primary)' : 'var(--neg)', borderRadius: 2 }} />
+                  </div>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: hl[i] === 'best' ? 'var(--brand-primary)' : hl[i] === 'worst' ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: hl[i] === 'best' ? 600 : 400 }}>{fmtFn ? fmtFn(v) : v ?? '—'}</span>
+                </div>
+              )}
+              {!showBar && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: hl[i] === 'best' ? 'var(--brand-primary)' : hl[i] === 'worst' ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: hl[i] === 'best' ? 600 : 400 }}>{fmtFn ? fmtFn(v) : v ?? '—'}</span>}
+            </td>
+          );
+        })}
+      </tr>
+    );
+  }
+
+  function SectionHead({ label }) {
+    return (
+      <tr>
+        <td colSpan={funds.length + 1} style={{ padding: '8px 14px 4px', fontSize: 9, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--brand-primary)', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>{label}</td>
+      </tr>
+    );
+  }
+
+  function FundHeader() {
+    return (
+      <tr style={{ background: 'var(--bg-secondary)' }}>
+        <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', minWidth: 140 }}>Metric</th>
+        {funds.map((f, i) => (
+          <th key={i} style={{ padding: '10px 14px', textAlign: 'right', borderBottom: '2px solid var(--border)', borderLeft: '1px solid var(--border)', minWidth: 110 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: f.color }} />
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-body)', lineHeight: 1.3, textAlign: 'right' }}>{f.name?.split(' ').slice(0, 4).join(' ')}</div>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{f.category?.replace(/^(India Fund |India OE |Cat: )/, '')?.slice(0, 22)}</div>
+            </div>
+          </th>
+        ))}
+      </tr>
+    );
+  }
+
   // ── Overlap helpers ────────────────────────────────────────────────────────
 
   // Shorten fund name by removing trailing noise words, not by cutting word count
