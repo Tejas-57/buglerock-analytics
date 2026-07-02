@@ -462,8 +462,8 @@ export default function CompareFunds({ selectedDate }) {
 
                 return (
                   <div key={`${p.fund_a}|${p.fund_b}`} style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
-                    {/* Card header */}
-                    <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)', gap: 12 }}>
+                    {/* Card header — colour-coded by overlap level */}
+                    <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', background: `${clr}12`, borderBottom: `1px solid ${clr}30`, gap: 12 }}>
                       <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--brand-dark)', color: '#fff', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{pi + 1}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
                         <div style={{ width: 10, height: 10, borderRadius: 2, background: fa?.color, flexShrink: 0 }} />
