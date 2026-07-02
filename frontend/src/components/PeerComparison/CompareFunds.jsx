@@ -185,8 +185,8 @@ export default function CompareFunds({ selectedDate }) {
 
   // ── Table helpers ──────────────────────────────────────────────────────────
 
-  function Row({ label, vals, fmtFn, lowerBetter, showBar }) {
-    const hl = highlight(vals, lowerBetter);
+  function Row({ label, vals, fmtFn, lowerBetter, showBar, noHighlight }) {
+    const hl = noHighlight ? vals.map(() => '') : highlight(vals, lowerBetter);
     const nums = vals.map(v => (v !== null && v !== undefined && v !== '-') ? parseFloat(v) : null);
     const maxAbs = Math.max(...nums.filter(v => v !== null && !isNaN(v)).map(Math.abs), 1);
 
@@ -733,9 +733,7 @@ export default function CompareFunds({ selectedDate }) {
               <Row label="Up capture"     vals={F.map(f => f.data?.risk?.up_capture_3y)}      fmtFn={pctc} />
               <Row label="Down capture"   vals={F.map(f => f.data?.risk?.down_capture_3y)}    fmtFn={pctc} lowerBetter />
               <Row label="Std deviation"  vals={F.map(f => f.data?.risk?.std_dev_3y)}         fmtFn={pctc} lowerBetter />
-              <SectionHead label="Cost & rating" />
-              <Row label="Expense ratio"  vals={F.map(f => f.data?.expense_ratio)}             fmtFn={pctc} lowerBetter showBar />
-              <Row label="Morningstar ★"  vals={F.map(f => f.data?.morningstar_rating)}        fmtFn={v => (v && v !== '-') ? `${Math.round(parseFloat(v))} ★` : '—'} />
+
             </tbody>
           </table>
         </div>
@@ -757,8 +755,8 @@ export default function CompareFunds({ selectedDate }) {
               <Row label="Bonds"       vals={F.map(f => f.data?.bond_pct)}    fmtFn={pctc} showBar />
               <Row label="Cash"        vals={F.map(f => f.data?.cash_pct)}    fmtFn={pctc} showBar />
               <SectionHead label="Valuation metrics" />
-              <Row label="P/E ratio"   vals={F.map(f => f.data?.pe_ratio)}    fmtFn={v => fmt(v)} />
-              <Row label="P/B ratio"   vals={F.map(f => f.data?.pb_ratio)}    fmtFn={v => fmt(v)} />
+              <Row label="P/E ratio"   vals={F.map(f => f.data?.pe_ratio)}    fmtFn={v => fmt(v)} lowerBetter />
+              <Row label="P/B ratio"   vals={F.map(f => f.data?.pb_ratio)}    fmtFn={v => fmt(v)} lowerBetter />
             </tbody>
           </table>
         </div>
@@ -775,12 +773,14 @@ export default function CompareFunds({ selectedDate }) {
               <Row label="Fund house"    vals={F.map(f => f.data?.name?.split(' ')[0] || '—')}   fmtFn={v => v} />
               <Row label="Category"      vals={F.map(f => f.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '') || '—')} fmtFn={v => v} />
               <Row label="AUM"           vals={F.map(f => f.data?.fund_size)}                    fmtFn={fmtAum} />
-              <Row label="Expense ratio" vals={F.map(f => f.data?.expense_ratio)}                fmtFn={pctc} lowerBetter />
-              <Row label="Inception"     vals={F.map(f => f.data?.inception_date || '—')}        fmtFn={v => v} />
+              <Row label="Inception"     vals={F.map(f => f.data?.inception_date || '—')}        fmtFn={v => v} noHighlight />
               <Row label="Fund manager"  vals={F.map(f => f.data?.manager_name || '—')}          fmtFn={v => v} />
-              <Row label="52W high"      vals={F.map(f => f.data?.nav_52w_high)}                 fmtFn={v => (v && v !== '-') ? `₹${fmt(v)}` : '—'} />
-              <Row label="52W low"       vals={F.map(f => f.data?.nav_52w_low)}                  fmtFn={v => (v && v !== '-') ? `₹${fmt(v)}` : '—'} />
+              <Row label="52W high"      vals={F.map(f => f.data?.nav_52w_high)}                 fmtFn={v => (v && v !== '-') ? `₹${fmt(v)}` : '—'} noHighlight />
+              <Row label="52W low"       vals={F.map(f => f.data?.nav_52w_low)}                  fmtFn={v => (v && v !== '-') ? `₹${fmt(v)}` : '—'} noHighlight />
               <Row label="ISIN"          vals={F.map(f => f.isin || '—')}                        fmtFn={v => v} />
+              <SectionHead label="Cost & rating" />
+              <Row label="Expense ratio"  vals={F.map(f => f.data?.expense_ratio)}             fmtFn={pctc} lowerBetter showBar />
+              <Row label="Morningstar ★"  vals={F.map(f => f.data?.morningstar_rating)}        fmtFn={v => (v && v !== '-') ? `${Math.round(parseFloat(v))} ★` : '—'} />
               <SectionHead label="Exit load" />
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500, verticalAlign: 'top', width: 160 }}>Details</td>
