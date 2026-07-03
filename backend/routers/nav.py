@@ -356,3 +356,133 @@ async def fetch_missing(background_tasks: BackgroundTasks, force: bool = False):
         "missing_funds": len(missing),
         "message": f"Fetching NAV for {len(missing)} missing funds only — skipping {len(tracked)} already loaded"
     }
+
+@router.get("/correlation")
+def get_correlation(isins: str, as_of_date: str = None):
+    """
+    Compute pairwise Pearson correlation using daily NAV returns over the last 3 years.
+    Funds with less than 3 years of data are excluded and listed in the response.
+    Returns: correlation matrix, included ISINs, excluded ISINs with reasons.
+    """
+    from models.database import SessionLocal, NavHistory
+    from datetime import date as date_type, timedelta
+    import numpy as np
+
+    isin_list = [i.strip() for i in isins.split(",") if i.strip()]
+    if len(isin_list) < 2:
+        from fastapi import HTTPException
+        raise HTTPException(400, "At least 2 ISINs required")
+
+    db = SessionLocal()
+    try:
+        # Determine as-of date
+        if as_of_date:
+            end_date = date_type.fromisoformat(as_of_date)
+        else:
+            latest = db.query(NavHistory.date).order_by(NavHistory.date.desc()).first()
+            end_date = latest[0] if latest else date_type.today()
+
+        start_date = end_date - timedelta(days=3 * 365 + 60)  # 3Y + buffer
+        min_days = 700  # ~3Y of trading days (~250/year), with tolerance
+
+        # Fetch NAV history for all ISINs in one query
+        rows = (
+            db.query(NavHistory.isin, NavHistory.date, NavHistory.nav)
+            .filter(
+                NavHistory.isin.in_(isin_list),
+                NavHistory.date >= start_date,
+                NavHistory.date <= end_date,
+                NavHistory.nav != None,
+            )
+            .order_by(NavHistory.isin, NavHistory.date.asc())
+            .all()
+        )
+
+        # Group by ISIN and compute daily returns
+        from itertools import groupby
+        nav_data = {}
+        for isin, group in groupby(rows, key=lambda r: r.isin):
+            grp = list(group)
+            dates = [r.date for r in grp]
+            navs = np.array([r.nav for r in grp], dtype=float)
+            returns = (navs[1:] - navs[:-1]) / navs[:-1]
+            nav_data[isin] = {"dates": dates[1:], "returns": returns}
+
+        # Separate included vs excluded funds
+        included = []
+        excluded = []
+        for isin in isin_list:
+            d = nav_data.get(isin)
+            if d is None or len(d['returns']) < min_days:
+                days_available = len(d["returns"]) if d else 0
+                excluded.append({
+                    "isin": isin,
+                    "days_available": days_available,
+                    "years_available": round(days_available / 365, 1),
+                    "reason": f"Only {round(days_available/365, 1)}Y of data available (minimum 3Y required)"
+                })
+            else:
+                included.append(isin)
+
+        if len(included) < 2:
+            return {
+                "included": [],
+                "excluded": excluded,
+                "matrix": [],
+                "note": "Not enough funds with 3Y+ data to compute correlation."
+            }
+
+        # Build date→return lookup per fund
+        lookup = {}
+        for isin in included:
+            d = nav_data[isin]
+            lookup[isin] = dict(zip(d["dates"], d["returns"]))
+
+        # Compute Pearson pairwise — each pair uses only their common dates
+        # (much better than global intersection which eliminates data when
+        #  funds have different NAV frequencies or inception dates)
+        def pearson_pair(isin_i, isin_j):
+            common = sorted(set(lookup[isin_i].keys()) & set(lookup[isin_j].keys()))
+            if len(common) < 60:
+                return None, len(common)
+            a = np.array([lookup[isin_i][d] for d in common], dtype=float)
+            b = np.array([lookup[isin_j][d] for d in common], dtype=float)
+            mask = np.isfinite(a) & np.isfinite(b)
+            if mask.sum() < 60:
+                return None, int(mask.sum())
+            a, b = a[mask], b[mask]
+            if a.std() == 0 or b.std() == 0:
+                return None, len(a)
+            return float(np.corrcoef(a, b)[0, 1]), len(a)
+
+        matrix = []
+        min_common_days = None
+        max_common_days = None
+        for isin_i in included:
+            row = []
+            for isin_j in included:
+                if isin_i == isin_j:
+                    row.append(1.0)
+                else:
+                    v, n = pearson_pair(isin_i, isin_j)
+                    row.append(v)
+                    if v is not None:
+                        min_common_days = n if min_common_days is None else min(min_common_days, n)
+                        max_common_days = n if max_common_days is None else max(max_common_days, n)
+            matrix.append(row)
+
+        # Use end_date as date range reference
+        return {
+            "included": included,
+            "excluded": excluded,
+            "matrix": [[round(v, 3) if v is not None else None for v in row] for row in matrix],
+            "common_days": max_common_days,
+            "date_range": {
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat()
+            },
+            "note": None
+        }
+
+    finally:
+        db.close()

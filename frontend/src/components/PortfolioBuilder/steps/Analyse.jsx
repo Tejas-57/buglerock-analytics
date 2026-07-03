@@ -91,13 +91,7 @@ function corrColor(v) {
 function fmtL(v) { return v >= 100000 ? '₹' + (v / 100000).toFixed(2) + 'L' : '₹' + (v / 1000).toFixed(1) + 'K'; }
 
 export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], ips, onEdit, onOptimise }) {
-  const [activeTab, setActiveTab] = useState(() => {
-    try { return localStorage.getItem('br_analyse_tab') || 'overview'; } catch { return 'overview'; }
-  });
-  function setActiveTabPersist(tab) {
-    try { localStorage.setItem('br_analyse_tab', tab); } catch {}
-    setActiveTab(tab);
-  }
+  const [activeTab, setActiveTab] = useState('overview');
 
   // Compute blended benchmark from benchmarks array (manual weights)
   const totalBmW = benchmarks.reduce((s, b) => s + (b.weight || 0), 0) || 1;
@@ -153,21 +147,29 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
   const SIG_COL = { pos: 'var(--pos)', warn: '#D97706', neg: 'var(--brand-primary)' };
   const SIG_BG  = { pos: '#E6F4ED',    warn: '#FEF9EC', neg: 'rgba(145,47,99,.06)' };
 
-  // Correlation matrix — use snapshot CY returns
+  // Correlation matrix — fetched from backend using 3Y daily NAV returns
+  const [corrData, setCorrData] = React.useState(null);
+  const [corrLoading, setCorrLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (activeTab !== 'correlation' || funds.length < 2) return;
+    const API = import.meta.env.VITE_API_URL || '';
+    const isins = funds.map(f => f.isin).join(',');
+    setCorrLoading(true);
+    fetch(`${API}/api/nav/correlation?isins=${isins}`)
+      .then(r => r.json())
+      .then(d => { setCorrData(d); setCorrLoading(false); })
+      .catch(() => setCorrLoading(false));
+  }, [activeTab, funds.map(f => f.isin).join(',')]);
+
+  // Build corrMatrix from API response — align to current funds order
   const corrMatrix = funds.map(fi => funds.map(fj => {
+    if (!corrData?.matrix || !corrData.included) return null;
     if (fi.isin === fj.isin) return 1.0;
-    const snapI = snapshots[fi.isin];
-    const snapJ = snapshots[fj.isin];
-    if (!snapI || !snapJ) return null;
-    const vI = CY_KEYS.map(k => {
-      const v = snapI.returns?.[k];
-      return (v==null||v==='-') ? null : parseFloat(v);
-    });
-    const vJ = CY_KEYS.map(k => {
-      const v = snapJ.returns?.[k];
-      return (v==null||v==='-') ? null : parseFloat(v);
-    });
-    return pearson(vI, vJ);
+    const ri = corrData.included.indexOf(fi.isin);
+    const rj = corrData.included.indexOf(fj.isin);
+    if (ri === -1 || rj === -1) return null;
+    return corrData.matrix[ri][rj];
   }));
 
   return (
@@ -175,7 +177,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
       {/* Tab bar */}
       <div className="ptf-tab-bar">
         {TABS.map(t => (
-          <button key={t.id} className={`ptf-tab ${activeTab === t.id ? 'active' : ''}`} onClick={() => setActiveTabPersist(t.id)}>{t.label}</button>
+          <button key={t.id} className={`ptf-tab ${activeTab === t.id ? 'active' : ''}`} onClick={() => setActiveTab(t.id)}>{t.label}</button>
         ))}
         <div className="ptf-tab-actions">
           <button className="btn btn-ghost" onClick={onEdit} style={{ fontSize: 11 }}>← Edit</button>
@@ -531,79 +533,98 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
         )}
 
         {/* ── EXPOSURE ── */}
-        {activeTab === 'exposure' && (
-          <div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-              {[
-                {
-                  title: 'Blended market cap vs IPS targets', items: [
-                    [B.large_cap, 'Large cap', 'var(--brand-primary)', [+(ips?.alloc?.lcMin || 0), +(ips?.alloc?.lcMax || 100)]],
-                    [B.mid_cap, 'Mid cap', 'var(--muted-pur,#6D5479)', [+(ips?.alloc?.mcMin || 0), +(ips?.alloc?.mcMax || 100)]],
-                    [B.small_cap, 'Small cap', '#C46985', [+(ips?.alloc?.scMin || 0), +(ips?.alloc?.scMax || 100)]],
-                  ]
-                },
-                {
-                  title: 'Asset allocation vs IPS targets', items: [
-                    [B.equity_pct, 'Equity', 'var(--brand-dark)', [+(ips?.alloc?.eqMin || 0), +(ips?.alloc?.eqMax || 100)]],
-                    [B.bond_pct || 0, 'Bonds/Debt', 'var(--lav-grey,#A795AE)', [+(ips?.alloc?.debtMin || 0), +(ips?.alloc?.debtMax || 100)]],
-                    [B.cash_pct || 0, 'Cash/Liquid', 'var(--text-muted)', null],
-                  ]
-                }
-              ].map((card, ci) => (
-                <div key={ci} className="ptf-exp-card">
-                  <div className="ptf-exp-hd">{card.title}</div>
-                  {card.items.map(([v, lbl, clr, tgt], ii) => {
-                    const p = v || 0;
-                    const inRange = !tgt || (p >= tgt[0] && p <= tgt[1]);
-                    return (
-                      <div key={ii} className="ptf-bar-row2">
-                        <div className="ptf-bar-lbl2">{lbl}</div>
-                        <div style={{ flex: 1, position: 'relative' }}>
-                          <div className="ptf-bar-track2">
-                            <div className="ptf-bar-fill2" style={{ width: Math.min(p, 100).toFixed(1) + '%', background: clr }} />
-                          </div>
-                          {tgt && <div style={{ position: 'absolute', top: -2, bottom: -2, left: tgt[0] + '%', width: (tgt[1] - tgt[0]) + '%', border: '1.5px dashed ' + (inRange ? 'var(--pos)' : 'var(--brand-primary)'), borderRadius: 2, opacity: .5, pointerEvents: 'none' }} />}
-                        </div>
-                        <div className="ptf-bar-val2" style={{ color: tgt && !inRange ? 'var(--brand-primary)' : clr }}>
-                          {p.toFixed(1)}%
-                          {tgt && <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 400 }}> / {tgt[0]}-{tgt[1]}%</span>}
-                        </div>
-                      </div>
-                    );
-                  })}
+        {activeTab === 'exposure' && (() => {
+          const AllocRow = ({ label, value, color, target }) => {
+            const p = parseFloat(value) || 0;
+            const inRange = !target || (p >= target[0] && p <= target[1]);
+            const statusColor = target ? (inRange ? '#059669' : '#C0392B') : color;
+            return (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-body)' }}>{label}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 600, color: statusColor }}>{p.toFixed(1)}%</span>
                 </div>
-              ))}
-            </div>
-
-            <div className="ptf-exp-card" style={{ marginBottom: 14 }}>
-              <div className="ptf-exp-hd">Market cap per fund</div>
-              {funds.map(f => {
-                const w = weights[f.isin] || 0;
-                if (!snapshots[f.isin]?.large_cap && !snapshots[f.isin]?.mid_cap && !snapshots[f.isin]?.small_cap) return null;
-                const lc = snapshots[f.isin]?.large_cap || 0, mc = snapshots[f.isin]?.mid_cap || 0, sc = snapshots[f.isin]?.small_cap || 0;
-                return (
-                  <div key={f.isin} style={{ marginBottom: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <div style={{ width: 3, height: 20, borderRadius: 2, background: f.color, flexShrink: 0 }} />
-                      <div style={{ fontSize: 11, fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
-                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)' }}>{w}%</div>
-                    </div>
-                    <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', gap: 1 }}>
-                      {lc > 0 && <div style={{ flex: lc, background: 'var(--brand-primary)', borderRadius: '2px 0 0 2px' }} title={`Large cap ${lc.toFixed(1)}%`} />}
-                      {mc > 0 && <div style={{ flex: mc, background: 'var(--muted-pur,#6D5479)' }} title={`Mid cap ${mc.toFixed(1)}%`} />}
-                      {sc > 0 && <div style={{ flex: sc, background: '#C46985', borderRadius: '0 2px 2px 0' }} title={`Small cap ${sc.toFixed(1)}%`} />}
-                    </div>
-                    <div style={{ display: 'flex', gap: 10, marginTop: 3 }}>
-                      {lc > 0 && <span style={{ fontSize: 9, color: 'var(--brand-primary)' }}>LC {lc.toFixed(0)}%</span>}
-                      {mc > 0 && <span style={{ fontSize: 9, color: 'var(--muted-pur,#6D5479)' }}>MC {mc.toFixed(0)}%</span>}
-                      {sc > 0 && <span style={{ fontSize: 9, color: '#C46985' }}>SC {sc.toFixed(0)}%</span>}
-                    </div>
+                <div style={{ position: 'relative', height: 9, background: 'var(--border)', borderRadius: 5, maxWidth: '70%' }}>
+                  <div style={{ width: Math.min(p, 100) + '%', height: '100%', background: color, borderRadius: 3, transition: 'width .4s' }} />
+                  {target && (
+                    <div style={{ position: 'absolute', top: -3, bottom: -3, left: target[0] + '%', width: Math.max(target[1] - target[0], 0) + '%', border: '2.5px dashed #222', borderRadius: 3, opacity: .35, pointerEvents: 'none' }} />
+                  )}
+                </div>
+                {target && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Target {target[0]}–{target[1]}%</span>
+                    <span style={{ fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 20, background: inRange ? 'rgba(5,150,105,.1)' : 'rgba(192,57,43,.1)', color: statusColor }}>
+                      {inRange ? '✓ in range' : '✗ out of range'}
+                    </span>
                   </div>
-                );
-              })}
+                )}
+              </div>
+            );
+          };
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div className="ptf-card" style={{ padding: '14px 16px' }}>
+                  <div className="ptf-card-hd">Asset allocation vs IPS targets</div>
+                  <AllocRow label="Equity" value={B.equity_pct} color="#912F63" target={[+(ips?.alloc?.eqMin||0), +(ips?.alloc?.eqMax||100)]} />
+                  <AllocRow label="Bonds / Debt" value={B.bond_pct||0} color="#3E3452" target={[+(ips?.alloc?.debtMin||0), +(ips?.alloc?.debtMax||100)]} />
+                  <AllocRow label="Cash / Liquid" value={B.cash_pct||0} color="#A795AE" />
+                </div>
+                <div className="ptf-card" style={{ padding: '14px 16px' }}>
+                  <div className="ptf-card-hd">Market cap split vs IPS targets</div>
+                  <AllocRow label="Large cap" value={B.large_cap} color="#185FA5" target={[+(ips?.alloc?.lcMin||0), +(ips?.alloc?.lcMax||100)]} />
+                  <AllocRow label="Mid cap" value={B.mid_cap} color="#1D9E75" target={[+(ips?.alloc?.mcMin||0), +(ips?.alloc?.mcMax||100)]} />
+                  <AllocRow label="Small cap" value={B.small_cap} color="#D85A30" target={[+(ips?.alloc?.scMin||0), +(ips?.alloc?.scMax||100)]} />
+                </div>
+              </div>
+
+              <div className="ptf-card" style={{ padding: '14px 16px' }}>
+                <div className="ptf-card-hd">Market cap breakdown per fund</div>
+                <div style={{ display: 'flex', gap: 16, marginBottom: 14, marginTop: 8 }}>
+                  {[['Large cap','#185FA5'],['Mid cap','#1D9E75'],['Small cap','#D85A30']].map(([lbl,clr]) => (
+                    <div key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--text-muted)' }}>
+                      <div style={{ width: 8, height: 8, borderRadius: 2, background: clr }} />{lbl}
+                    </div>
+                  ))}
+                </div>
+                {funds.filter(f => {
+                  const snap = snapshots[f.isin];
+                  const lc = snap?.large_cap || 0, mc = snap?.mid_cap || 0, sc = snap?.small_cap || 0;
+                  if (!lc && !mc && !sc) return false;
+                  const ac = (snap?.asset_class || f.asset_class || '').toLowerCase();
+                  if (ac.includes('debt') || ac.includes('precious') || ac.includes('etf - debt') || ac.includes('commodity')) return false;
+                  return true;
+                }).map(f => {
+                  const snap = snapshots[f.isin];
+                  const w = weights[f.isin] || 0;
+                  const lc = snap?.large_cap || 0, mc = snap?.mid_cap || 0, sc = snap?.small_cap || 0;
+                  return (
+                    <div key={f.isin} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                        <div style={{ width: 3, height: 28, borderRadius: 2, background: f.color, flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</div>
+                          <div style={{ fontSize: 10, marginTop: 2, display: 'flex', gap: 8 }}>
+                            {lc > 0 && <span style={{ color: '#185FA5' }}>Large {lc.toFixed(0)}%</span>}
+                            {mc > 0 && <span style={{ color: '#1D9E75' }}>Mid {mc.toFixed(0)}%</span>}
+                            {sc > 0 && <span style={{ color: '#D85A30' }}>Small {sc.toFixed(0)}%</span>}
+                          </div>
+                        </div>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{w}%</span>
+                      </div>
+                      <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', background: 'var(--border)', gap: 1, maxWidth: '80%' }}>
+                        {lc > 0 && <div style={{ width: lc + '%', background: '#185FA5' }} />}
+                        {mc > 0 && <div style={{ width: mc + '%', background: '#1D9E75' }} />}
+                        {sc > 0 && <div style={{ width: sc + '%', background: '#D85A30' }} />}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ── CORRELATION ── */}
         {activeTab === 'correlation' && (
@@ -617,7 +638,17 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
             ) : (
               <>
                 <div className="ptf-card" style={{ marginBottom: 14 }}>
-                  <div className="ptf-card-hd">Correlation matrix (calendar year returns CY21–CY25)</div>
+                  <div className="ptf-card-hd">
+                    Correlation matrix (3Y daily NAV returns)
+                    {corrData?.date_range && (
+                      <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 8 }}>
+                        {corrData.date_range.start} → {corrData.date_range.end} · {corrData.common_days} trading days
+                      </span>
+                    )}
+                  </div>
+                  {corrLoading && (
+                    <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Computing correlation...</div>
+                  )}
                   <div style={{ padding: '14px 16px', overflowX: 'auto' }}>
                     <table style={{ borderCollapse: 'collapse', fontSize: 11 }}>
                       <thead>
@@ -648,6 +679,13 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                   </div>
                 </div>
 
+                {/* Excluded funds note */}
+                {corrData?.excluded?.length > 0 && (
+                  <div style={{ margin: '10px 0 14px', padding: '10px 14px', background: 'rgba(234,179,8,.06)', border: '1px solid rgba(234,179,8,.3)', borderRadius: 8, fontSize: 11, color: '#92700A' }}>
+                    <strong>Excluded from correlation</strong> (insufficient 3Y NAV data):
+                    {' '}{corrData.excluded.map(e => `${e.isin} (${e.years_available}Y available)`).join(', ')}
+                  </div>
+                )}
                 {/* Correlation legend */}
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>
                   {[['≥0.90', '#fde8ee', '#912F63', 'Very high — diversification benefit minimal'],
