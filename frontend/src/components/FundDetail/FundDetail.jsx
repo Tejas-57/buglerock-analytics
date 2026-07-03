@@ -423,8 +423,13 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
   const isEquityHybrid = assetClass === 'Hybrid' && equityPct != null && equityPct >= 60;
   const layoutMode = isDebt ? 'debt' : (isDebtHybrid || (assetClass === 'Hybrid' && !isEquityHybrid)) ? 'hybrid' : 'equity';
 
-  // Debt metrics
+  // Debt metrics — show section if fund is debt/hybrid or has any bond allocation
+  const bondPctVal = f?.bond_pct != null && f.bond_pct !== '-' ? parseFloat(f.bond_pct) : 0;
   const hasDebtMetrics = f && (
+    isDebt ||
+    isDebtHybrid ||
+    layoutMode === 'hybrid' ||
+    bondPctVal > 0 ||
     (f.avg_maturity != null && f.avg_maturity !== '-') ||
     (f.modified_duration != null && f.modified_duration !== '-') ||
     (f.ytm != null && f.ytm !== '-')
@@ -613,22 +618,23 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
           </>
         )}
 
-        {/* Debt parameters — only if debt metrics exist */}
+        {/* Debt parameters — show for all debt/hybrid funds */}
         {hasDebtMetrics && (
           <>
-            <SecLabel>Debt Parameters</SecLabel>
+            <SecLabel>{layoutMode === 'hybrid' ? 'Debt Parameters (Debt Portion)' : 'Debt Parameters'}</SecLabel>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, marginBottom: 14 }}>
               {[
-                { label: 'Avg Maturity',      value: f?.avg_maturity,       unit: 'yrs', desc: 'Weighted avg time to maturity of bonds' },
-                { label: 'Modified Duration', value: f?.modified_duration,  unit: 'yrs', desc: 'Interest rate sensitivity — lower = less risk' },
-                { label: 'YTM',               value: f?.ytm,                unit: '%',   desc: 'Expected annual return if held to maturity' },
-              ].filter(({ value }) => value != null && value !== '-').map(({ label, value, unit, desc }) => {
-                const v = parseFloat(value);
+                { label: 'Avg Maturity',      value: f?.avg_maturity,       unit: ' yrs', desc: 'Weighted avg time to maturity of bonds' },
+                { label: 'Modified Duration', value: f?.modified_duration,  unit: ' yrs', desc: 'Interest rate sensitivity — lower = less risk' },
+                { label: 'YTM',               value: f?.ytm,                unit: '%',    desc: 'Expected annual return if held to maturity' },
+              ].map(({ label, value, unit, desc }) => {
+                const hasVal = value != null && value !== '-' && !isNaN(parseFloat(value));
+                const v = hasVal ? parseFloat(value) : null;
                 return (
-                  <div key={label} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
+                  <div key={label} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', textAlign: 'center', background: !hasVal ? 'var(--bg-secondary)' : '#fff' }}>
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>{label}</div>
-                    <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, color: 'var(--brand-dark)', letterSpacing: '-.02em', lineHeight: 1, marginBottom: 4 }}>
-                      {`${fmt(v)}${unit}`}
+                    <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, color: hasVal ? 'var(--brand-dark)' : 'var(--text-muted)', letterSpacing: '-.02em', lineHeight: 1, marginBottom: 4 }}>
+                      {hasVal ? `${fmt(v)}${unit}` : '—'}
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>{desc}</div>
                   </div>

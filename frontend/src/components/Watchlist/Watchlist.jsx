@@ -329,7 +329,45 @@ export default function Watchlist({ selectedDate, setSelectedFund }) {
               sessionStorage.setItem('compareFunds', JSON.stringify(selectedFunds));
               navigate('/peer-comparison');
             }} style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>Compare ↗</button>
-          <button onClick={() => navigate('/simulator')} style={{ padding: '6px 14px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 8, background: 'var(--brand-primary)', cursor: 'pointer', color: '#fff' }}>✦ Build portfolio ↗</button>
+          <button onClick={() => {
+              if (selected.size === 0) {
+                alert('Please select at least 1 fund to build a portfolio.');
+                return;
+              }
+              const selectedFunds = watchlist.filter(f => selected.has(f.isin));
+
+              // Check if Portfolio Builder already has funds
+              try {
+                const existing = JSON.parse(localStorage.getItem('br_ptf_funds') || '[]');
+                const existingWeights = JSON.parse(localStorage.getItem('br_ptf_weights') || '{}');
+                const hasExisting = existing.length > 0 && Object.keys(existingWeights).length > 0;
+
+                if (hasExisting) {
+                  const confirmed = window.confirm(
+                    `Portfolio Builder already has ${existing.length} fund(s).\n\nClicking OK will clear the existing portfolio and add your ${selectedFunds.length} selected fund(s) with equal weights.\n\nClick Cancel to keep the existing portfolio.`
+                  );
+                  if (!confirmed) return;
+                }
+
+                // Build equal weights
+                const n = selectedFunds.length;
+                const eq = Math.floor(100 / n);
+                const weights = {};
+                selectedFunds.forEach((f, i) => {
+                  weights[f.isin] = i === n - 1 ? 100 - eq * (n - 1) : eq;
+                });
+
+                // Write to localStorage — PortfolioBuilder reads these on mount
+                localStorage.setItem('br_ptf_funds', JSON.stringify(selectedFunds));
+                localStorage.setItem('br_ptf_weights', JSON.stringify(weights));
+                localStorage.setItem('br_ptf_step', '2'); // jump to Build Portfolio step
+
+                localStorage.setItem('br_ptf_goto_step', '2');
+                navigate('/portfolio');
+              } catch (e) {
+                console.error('Build portfolio error:', e);
+              }
+            }} style={{ padding: '6px 14px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 8, background: 'var(--brand-primary)', cursor: 'pointer', color: '#fff' }}>✦ Build portfolio ↗</button>
         </div>
       </div>
 

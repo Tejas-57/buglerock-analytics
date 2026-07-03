@@ -725,6 +725,7 @@ export default function CompareFunds({ selectedDate }) {
               <Row label="Beta (1Y)"      vals={F.map(f => f.data?.risk?.beta_1y)}             fmtFn={v => fmt(v)} lowerBetter />
               <Row label="Up cap (1Y)"    vals={F.map(f => f.data?.risk?.up_capture_1y)}       fmtFn={pctc} />
               <Row label="Down cap (1Y)"  vals={F.map(f => f.data?.risk?.down_capture_1y)}     fmtFn={pctc} lowerBetter />
+              <Row label="Std dev (1Y)"    vals={F.map(f => f.data?.risk?.std_dev_1y)}             fmtFn={pctc} lowerBetter />
               <SectionHead label="3-year risk metrics" />
               <Row label="Sharpe ratio"   vals={F.map(f => f.data?.risk?.sharpe_ratio_3y)}   fmtFn={v => fmt(v)} showBar />
               <Row label="Sortino ratio"  vals={F.map(f => f.data?.risk?.sortino_ratio_3y)}  fmtFn={v => fmt(v)} showBar />

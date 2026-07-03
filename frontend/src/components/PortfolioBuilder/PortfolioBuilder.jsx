@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+
 import './PortfolioBuilder.css';
 import ClientIPS from './steps/ClientIPS';
 import BuildPortfolio from './steps/BuildPortfolio';
@@ -40,6 +41,9 @@ function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); 
 
 export default function PortfolioBuilder({ selectedDate }) {
   const [activeStep, setActiveStep] = useState(() => {
+    // Check for a one-time goto instruction (e.g. from Watchlist Build Portfolio)
+    const goto = localStorage.getItem('br_ptf_goto_step');
+    if (goto) { localStorage.removeItem('br_ptf_goto_step'); return parseInt(goto); }
     const saved = localStorage.getItem('br_ptf_step');
     return saved ? parseInt(saved) : 1;
   });
@@ -48,6 +52,7 @@ export default function PortfolioBuilder({ selectedDate }) {
   React.useEffect(() => {
     localStorage.setItem('br_ptf_step', activeStep);
   }, [activeStep]);
+
   const [completedSteps, setCompletedSteps] = useState(new Set());
   const [ips, setIps] = useState(() => load('br_ptf_ips', DEFAULT_IPS));
   const [ipsSaved, setIpsSaved] = useState(false);
