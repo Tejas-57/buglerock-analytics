@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { fp, f2 } from './BuildPortfolio';
 
 const TABS = [
@@ -7,6 +7,7 @@ const TABS = [
   { id: 'risk', label: 'Risk metrics' },
   { id: 'exposure', label: 'Exposure' },
   { id: 'correlation', label: 'Correlation' },
+  { id: 'overlap', label: 'Overlap' },
   { id: 'funds', label: 'Fund details' },
 ];
 
@@ -92,6 +93,76 @@ function fmtL(v) { return v >= 100000 ? '₹' + (v / 100000).toFixed(2) + 'L' : 
 
 export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], ips, onEdit, onOptimise }) {
   const [activeTab, setActiveTab] = useState('overview');
+
+  // ── Overlap state & helpers ─────────────────────────────────────────────
+  const [overlapData, setOverlapData] = useState(null);
+  const [overlapLoading, setOverlapLoading] = useState(false);
+  const [overlapError, setOverlapError] = useState(null);
+
+  function shortFundName(name) {
+    if (!name) return '';
+    const noiseTerms = ['Reg Gr', 'Dir Gr', 'Direct Gr', 'Regular Gr', 'Growth Plan', 'Direct Plan',
+      'Regular Plan', 'Direct Growth', 'Regular Growth', 'Growth', 'Regular', 'Direct',
+      'Reg', 'Dir', 'Gr', 'Fund', 'Scheme', 'Plan', 'Option', 'IDCW'];
+    let result = name;
+    for (const term of noiseTerms) {
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp('(^|\\s)' + escaped + '(\\s|$)', 'gi'), ' ');
+    }
+    return result.replace(/\s+/g, ' ').trim();
+  }
+
+  function isActiveEquityFund(f) {
+    const snap = snapshots[f.isin];
+    const ac = (snap?.asset_class || '').toLowerCase();
+    const cat = (snap?.category || f.category || '').toLowerCase();
+    const isEquity = ac === 'equity';
+    const isIndex = cat.includes('index') || cat.includes('etf') || (snap?.expense_ratio && snap.expense_ratio < 0.5);
+    return isEquity && !isIndex;
+  }
+
+  const equityFundsForOverlap = funds.filter(isActiveEquityFund).map(f => ({
+    ...f,
+    color: f.color,
+    data: snapshots[f.isin] || {},
+  }));
+
+  async function fetchOverlap() {
+    if (equityFundsForOverlap.length < 2) return;
+    const API = import.meta.env.VITE_API_URL || '';
+    setOverlapLoading(true);
+    setOverlapError(null);
+    setOverlapData(null);
+    try {
+      const isins = equityFundsForOverlap.map(f => f.isin).join(',');
+      const firstR = await fetch(`${API}/api/holdings/overlap?isins=${isins}`);
+      if (!firstR.ok) throw new Error('Could not calculate overlap');
+      const firstD = await firstR.json();
+      const missing = equityFundsForOverlap.filter(f => (firstD.fund_holdings_counts?.[f.isin] ?? -1) === 0);
+      if (missing.length > 0) {
+        setOverlapError(`Fetching holdings for ${missing.map(f => shortFundName(f.name)).join(', ')}...`);
+        await Promise.all(missing.map(f => fetch(`${API}/api/holdings/fetch/${f.isin}`, { method: 'POST' })));
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await new Promise(res => setTimeout(res, 2000));
+          const checkR = await fetch(`${API}/api/holdings/overlap?isins=${isins}`);
+          if (checkR.ok) {
+            const checkD = await checkR.json();
+            if (equityFundsForOverlap.filter(f => (checkD.fund_holdings_counts?.[f.isin] ?? -1) === 0).length === 0) {
+              setOverlapError(null); setOverlapData(checkD); return;
+            }
+          }
+        }
+        throw new Error('Holdings fetch timed out — please try again');
+      }
+      setOverlapData(firstD);
+    } catch (e) { setOverlapError(e.message); }
+    finally { setOverlapLoading(false); }
+  }
+
+  useEffect(() => {
+    if (activeTab === 'overlap' && equityFundsForOverlap.length >= 2) fetchOverlap();
+    else if (activeTab === 'overlap' && equityFundsForOverlap.length < 2) { setOverlapData(null); setOverlapError(null); }
+  }, [activeTab, funds.map(f => f.isin).join(',')]);
 
   // Compute blended benchmark from benchmarks array (manual weights)
   const totalBmW = benchmarks.reduce((s, b) => s + (b.weight || 0), 0) || 1;
@@ -683,7 +754,11 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                 {corrData?.excluded?.length > 0 && (
                   <div style={{ margin: '10px 0 14px', padding: '10px 14px', background: 'rgba(234,179,8,.06)', border: '1px solid rgba(234,179,8,.3)', borderRadius: 8, fontSize: 11, color: '#92700A' }}>
                     <strong>Excluded from correlation</strong> (insufficient 3Y NAV data):
-                    {' '}{corrData.excluded.map(e => `${e.isin} (${e.years_available}Y available)`).join(', ')}
+                    {' '}{corrData.excluded.map(e => {
+                      const idx = funds.findIndex(f => f.isin === e.isin);
+                      const label = idx >= 0 ? `F${idx + 1} ${funds[idx].name}` : e.isin;
+                      return `${label} (${e.years_available}Y available)`;
+                    }).join(', ')}
                   </div>
                 )}
                 {/* Correlation legend */}
@@ -719,6 +794,168 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
         )}
 
         {/* ── FUND DETAILS ── */}
+        {activeTab === 'overlap' && (() => {
+          const funds2 = equityFundsForOverlap;
+          const nonEquity = funds.filter(f => !isActiveEquityFund(f));
+          const overlapColor = (pct) => pct >= 35 ? '#C0392B' : pct >= 25 ? '#E67E22' : pct >= 15 ? '#F39C12' : pct >= 5 ? '#27AE60' : '#A0A0A0';
+          const overlapLabel = (pct) => pct >= 35 ? 'Very High' : pct >= 25 ? 'High' : pct >= 15 ? 'Moderate' : pct >= 5 ? 'Low' : 'Negligible';
+
+          return (
+            <div style={{ padding: '4px 0' }}>
+              {nonEquity.length > 0 && (
+                <div style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(234,179,8,.06)', border: '1px solid rgba(234,179,8,.3)', borderRadius: 8, fontSize: 12, color: '#92700A' }}>
+                  ⚠ Overlap is only for active equity funds. <strong>{nonEquity.map(f => shortFundName(f.name)).join(', ')}</strong> excluded.
+                </div>
+              )}
+              {funds2.length < 2 && <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Add at least 2 active equity funds to see overlap.</div>}
+              {funds2.length >= 2 && overlapLoading && (
+                <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                  {overlapError || 'Calculating overlap...'}
+                  {overlapError && <div style={{ fontSize: 11, marginTop: 6 }}>Fetching from Morningstar, please wait...</div>}
+                </div>
+              )}
+              {funds2.length >= 2 && overlapError && !overlapLoading && <div style={{ padding: 32, textAlign: 'center', color: 'var(--neg)', fontSize: 13 }}>{overlapError}</div>}
+              {funds2.length >= 2 && overlapData && !overlapLoading && (() => {
+                const { pairwise_matrix, common_all, pair_details, fund_holdings_counts } = overlapData;
+                const pairs = Object.values(pairwise_matrix);
+                const fundMap = Object.fromEntries(funds2.map(f => [f.isin, f]));
+                const fundsWithNoData = funds2.filter(f => (fund_holdings_counts?.[f.isin] ?? -1) === 0);
+                if (fundsWithNoData.length > 0) return (
+                  <div style={{ padding: 24, background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>
+                    <div style={{ marginBottom: 8, fontWeight: 500 }}>Holdings data not available for: {fundsWithNoData.map(f => f.name).join(', ')}</div>
+                    <div style={{ fontSize: 11 }}>Contact admin to fetch holdings for these funds.</div>
+                  </div>
+                );
+                const avgOverlap = pairs.length ? (pairs.reduce((s,p) => s+p.overlap_pct,0)/pairs.length).toFixed(1) : 0;
+                const highestPair = pairs.reduce((best,p) => p.overlap_pct>(best?.overlap_pct||0)?p:best, null);
+                const totalUniqueStocks = overlapData.unique_stock_count || '—';
+                const heldByAllCount = common_all.length;
+                const heldByAllName = common_all.length > 0 ? common_all[0].name : '—';
+                const statCard = (value, label, sub, color) => (
+                  <div style={{ flex: 1, background: 'var(--bg-secondary)', borderRadius: 10, padding: '14px 16px', textAlign: 'center', minWidth: 0 }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: color||'var(--brand-primary)', fontFamily: 'var(--font-mono)' }}>{value}</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 4 }}>{label}</div>
+                    {sub && <div style={{ fontSize: 11, color: 'var(--text-body)', marginTop: 3 }}>{sub}</div>}
+                  </div>
+                );
+                return (
+                  <div>
+                    <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                      {statCard(`${avgOverlap}%`, 'Avg Overlap', `${funds2.length} funds · ${pairs.length} pairs`)}
+                      {statCard(highestPair?`${highestPair.overlap_pct.toFixed(1)}%`:'—','Highest Pair', highestPair?`${shortFundName(fundMap[highestPair.fund_a]?.name)} ↔ ${shortFundName(fundMap[highestPair.fund_b]?.name)}`:'', overlapColor(highestPair?.overlap_pct||0))}
+                      {statCard(totalUniqueStocks,'Unique Stocks',`${funds2.length} funds combined`)}
+                      {statCard(heldByAllCount>0?heldByAllCount:'0','Held By Every Fund',heldByAllCount>0?`Top by weight: ${heldByAllName}`:'None in common',heldByAllCount>0?'var(--brand-primary)':'var(--text-muted)')}
+                    </div>
+                    <div style={{ marginBottom: 20, background: '#fff', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px' }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-body)', marginBottom: 14 }}>Overlap matrix</div>
+                      <table style={{ borderCollapse: 'separate', borderSpacing: 5, margin: '0 auto' }}>
+                        <thead><tr>
+                          <td style={{ width: 120 }}/>
+                          {funds2.map(f => <th key={f.isin} style={{ textAlign: 'center', padding: '0 3px 8px', fontSize: 10, fontWeight: 500, width: 80 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                              <div style={{ width: 8, height: 8, borderRadius: 2, background: f.color }}/>
+                              <div style={{ maxWidth: 75, textAlign: 'center', lineHeight: 1.3 }}>{shortFundName(f.name)}</div>
+                            </div>
+                          </th>)}
+                        </tr></thead>
+                        <tbody>
+                          {funds2.map((fa, i) => (
+                            <tr key={fa.isin}>
+                              <td style={{ textAlign: 'right', padding: '3px 8px 3px 0', fontSize: 10, fontWeight: 500, whiteSpace: 'nowrap' }}>
+                                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: fa.color, marginRight: 5, verticalAlign: 'middle' }}/>
+                                {shortFundName(fa.name)}
+                              </td>
+                              {funds2.map((fb, j) => {
+                                if (i===j) return <td key={fb.isin} style={{ width:80,height:50,background:'#f4f4f4',borderRadius:7,textAlign:'center',fontSize:16,color:'#ccc' }}>—</td>;
+                                const key = i<j?`${fa.isin}|${fb.isin}`:`${fb.isin}|${fa.isin}`;
+                                const p = pairwise_matrix[key]; const pct = p?.overlap_pct||0;
+                                const bg = pct>=35?'rgba(192,57,43,.10)':pct>=25?'rgba(230,126,34,.10)':pct>=15?'rgba(243,156,18,.10)':pct>=5?'rgba(39,174,96,.10)':'#f4f4f4';
+                                return <td key={fb.isin} style={{ width:80,height:50,background:bg,borderRadius:7,textAlign:'center',verticalAlign:'middle' }}>
+                                  <div style={{ fontFamily:'var(--font-mono)',fontWeight:700,fontSize:16,color:overlapColor(pct) }}>{pct.toFixed(0)}%</div>
+                                </td>;
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div style={{ display:'flex',gap:14,marginTop:10,fontSize:10,color:'var(--text-muted)',justifyContent:'center' }}>
+                        <span><span style={{color:'#A0A0A0'}}>●</span> &lt;5% Negligible</span>
+                        <span><span style={{color:'#27AE60'}}>●</span> 5–15% Low</span>
+                        <span><span style={{color:'#F39C12'}}>●</span> 15–25% Moderate</span>
+                        <span><span style={{color:'#E67E22'}}>●</span> 25–35% High</span>
+                        <span><span style={{color:'#C0392B'}}>●</span> &gt;35% Very high</span>
+                      </div>
+                    </div>
+                    {pairs.map((p, pi) => {
+                      const fa=fundMap[p.fund_a], fb=fundMap[p.fund_b];
+                      const pd=pair_details[`${p.fund_a}|${p.fund_b}`]||{};
+                      const shared=pd.shared||[], onlyA=pd.only_a||[], onlyB=pd.only_b||[];
+                      const pct=p.overlap_pct; const clr=overlapColor(pct); const lbl=overlapLabel(pct);
+                      const nameA=shortFundName(fa?.name), nameB=shortFundName(fb?.name);
+                      return (
+                        <div key={`${p.fund_a}|${p.fund_b}`} style={{ background:'#fff',border:'1px solid var(--border)',borderRadius:12,marginBottom:14,overflow:'hidden',boxShadow:'var(--shadow-card)' }}>
+                          <div style={{ display:'flex',alignItems:'center',padding:'12px 18px',background:`${clr}12`,borderBottom:`1px solid ${clr}30`,gap:10 }}>
+                            <div style={{ display:'flex',alignItems:'center',gap:7,flex:1 }}>
+                              <div style={{ width:9,height:9,borderRadius:2,background:fa?.color }}/>
+                              <span style={{ fontWeight:600,fontSize:12,color:'var(--text-body)' }}>{nameA}</span>
+                            </div>
+                            <div style={{ fontSize:10,color:'var(--text-muted)' }}>vs</div>
+                            <div style={{ display:'flex',alignItems:'center',gap:7,flex:1,justifyContent:'flex-end' }}>
+                              <span style={{ fontWeight:600,fontSize:12,color:'var(--text-body)' }}>{nameB}</span>
+                              <div style={{ width:9,height:9,borderRadius:2,background:fb?.color }}/>
+                            </div>
+                            <div style={{ marginLeft:14,background:`${clr}18`,border:`1px solid ${clr}44`,borderRadius:7,padding:'5px 12px',textAlign:'center',minWidth:80 }}>
+                              <div style={{ fontFamily:'var(--font-mono)',fontWeight:700,fontSize:16,color:clr }}>{pct.toFixed(1)}%</div>
+                              <div style={{ fontSize:9,fontWeight:700,letterSpacing:'.05em',textTransform:'uppercase',color:clr }}>{lbl}</div>
+                            </div>
+                          </div>
+                          <div style={{ padding:'14px 18px' }}>
+                            {shared.length>0 && (
+                              <div style={{ marginBottom:16 }}>
+                                <div style={{ fontSize:10,fontWeight:700,color:'#E67E22',letterSpacing:'.05em',textTransform:'uppercase',marginBottom:8 }}>Shared Holdings ({shared.length})</div>
+                                <div style={{ display:'grid',gridTemplateColumns:'1fr 80px 80px',gap:'0 20px',marginBottom:4 }}>
+                                  <div style={{ fontSize:10,color:'var(--text-muted)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.04em' }}>Stock</div>
+                                  <div style={{ fontSize:10,color:fa?.color,fontWeight:700,textTransform:'uppercase',textAlign:'right' }}>{nameA.split(' ')[0]}</div>
+                                  <div style={{ fontSize:10,color:fb?.color,fontWeight:700,textTransform:'uppercase',textAlign:'right' }}>{nameB.split(' ')[0]}</div>
+                                </div>
+                                {shared.map(h => (
+                                  <div key={h.holding_isin} style={{ display:'grid',gridTemplateColumns:'1fr 80px 80px',gap:'0 20px',padding:'5px 8px',alignItems:'center',background:'var(--bg-secondary)',borderRadius:5,marginBottom:3 }}>
+                                    <div style={{ fontSize:12,fontWeight:500,display:'flex',alignItems:'center',gap:7 }}>
+                                      {h.name}<span style={{ fontSize:9,fontWeight:700,color:'#E67E22' }}>● SHARED</span>
+                                    </div>
+                                    <div style={{ fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right',color:fa?.color }}>{h.weight_a.toFixed(1)}%</div>
+                                    <div style={{ fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right',color:fb?.color }}>{h.weight_b.toFixed(1)}%</div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:24 }}>
+                              {[['Only in '+nameA, onlyA, fa],[`Only in ${nameB}`, onlyB, fb]].map(([title, list, fund]) => (
+                                <div key={title}>
+                                  <div style={{ fontSize:10,fontWeight:700,color:'var(--text-muted)',letterSpacing:'.05em',textTransform:'uppercase',marginBottom:8 }}>{title}</div>
+                                  <div style={{ display:'grid',gridTemplateColumns:'1fr auto',gap:'0 14px' }}>
+                                    {Array.from({length:10}).map((_,idx) => {
+                                      const h=list[idx];
+                                      return (<React.Fragment key={idx}>
+                                        <div style={{ fontSize:12,padding:'4px 0',color:h?'var(--text-body)':'transparent' }}>{h?h.name:'·'}</div>
+                                        <div style={{ fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right',padding:'4px 0',color:h?fund?.color:'transparent' }}>{h?`${h.weight.toFixed(1)}%`:''}</div>
+                                      </React.Fragment>);
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          );
+        })()}
+
         {activeTab === 'funds' && (
           <div>
             <div className="ptf-card" style={{ marginBottom: 14 }}>
