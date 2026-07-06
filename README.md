@@ -35,13 +35,32 @@ buglerock-analytics/
 │       │   │   └── steps/
 │       │   │       ├── ClientIPS.jsx           ← Step 1
 │       │   │       ├── BuildPortfolio.jsx      ← Step 2
-│       │   │       ├── Analyse.jsx             ← Step 3
+│       │   │       ├── Analyse.jsx             ← Step 3 (incl. Overlap sub-tab)
 │       │   │       ├── Optimise.jsx            ← Step 4 (Monte Carlo)
 │       │   │       ├── Compare.jsx             ← Step 5
 │       │   │       └── PDFProposal.jsx         ← Step 6
 │       │   ├── FundExplorer/
+│       │   │   └── FundExplorer.jsx
+│       │   ├── FundDetail/
+│       │   │   └── FundDetail.jsx
+│       │   ├── PeerComparison/
+│       │   │   └── CompareFunds.jsx
 │       │   ├── Performance/
+│       │   │   ├── Performance.jsx
+│       │   │   ├── NAVLineChart.jsx
+│       │   │   ├── ReturnMetrics.jsx
+│       │   │   └── RiskMetrics.jsx
+│       │   ├── RollingAnalytics/
+│       │   │   └── RollingAnalytics.jsx        ← rolling return/CAGR analysis
+│       │   ├── Simulator/
+│       │   │   └── Simulator.jsx               ← lumpsum/SIP what-if simulator
+│       │   ├── Chat/
+│       │   │   └── ChatButton.jsx              ← Gemini-powered fund assistant
 │       │   ├── Watchlist/
+│       │   │   └── Watchlist.jsx
+│       │   ├── Layout/
+│       │   │   ├── Header.jsx
+│       │   │   └── Navbar.jsx
 │       │   └── ...
 │       └── styles/
 │           └── global.css
@@ -57,6 +76,10 @@ buglerock-analytics/
     │   ├── peer.py
     │   ├── benchmarks.py
     │   ├── optimise.py
+    │   ├── holdings.py        ← overlap analysis, Morningstar holdings
+    │   ├── rolling.py         ← rolling return / CAGR endpoints
+    │   ├── simulator.py       ← lumpsum/SIP simulator endpoints
+    │   ├── chat.py            ← Gemini chat assistant endpoint
     │   ├── nav.py
     │   ├── gmail.py
     │   └── ...
@@ -65,7 +88,10 @@ buglerock-analytics/
     │   ├── db_service.py
     │   ├── gmail_watcher.py
     │   ├── optimiser.py        ← Monte Carlo engine
-    │   └── nav_fetcher.py
+    │   ├── nav_fetcher.py
+    │   ├── mfapi.py             ← external NAV history fetch (mfapi.in), CAGR/XIRR helpers
+    │   ├── morningstar_service.py  ← Morningstar NewPortfolioApi client (holdings, access code)
+    │   └── nse_fetch.py         ← NSE data fetch helpers
     └── utils/
         └── trading_calendar.py
 ```
@@ -97,12 +123,40 @@ buglerock-analytics/
 - **R1/R2 quality flags** with alternative suggestions
 - **Manual weight** option for funds with <1Y NAV history
 
+### Holdings & Overlap Analysis
+- Fund holdings sourced from Morningstar NewPortfolioApi (`services/morningstar_service.py`)
+- `fund_holdings` table stores per-fund holding-level data (`holding_type='E'` = equity)
+- `/api/holdings/overlap` — pairwise overlap % + common holdings across 2-4 active equity funds
+- `fund_portfolio_stats` stores derived portfolio-level stats per fund/date
+- `morningstar_accesscode` stores/refreshes the Morningstar API access token (`MSTAR_ACCESSCODE`, expiry-tracked)
+- Overlap analysis surfaced as a sub-tab inside Portfolio Builder → Analyse (Step 3)
+
+### Peer Comparison
+- `CompareFunds.jsx` (PeerComparison) — side-by-side comparison of funds across return, risk, cost & rating metrics
+- Backed by `routers/peer.py`
+- Color-coded win/loss cells (green/red) per metric
+
+### Rolling Analytics
+- `RollingAnalytics.jsx` + `routers/rolling.py`
+- Rolling CAGR over 1Y/3Y/5Y windows using external NAV history (`services/mfapi.py`, mfapi.in)
+- Validates requested date range against fund inception date; warns/adjusts if start predates inception
+
+### Simulator
+- `Simulator.jsx` + `routers/simulator.py`
+- Lumpsum / SIP what-if return simulation using historical NAV (CAGR, XIRR)
+- Inception-date validation shared with Rolling Analytics
+
+### Fund Detail & Chat Assistant
+- `FundDetail.jsx` — single-fund deep dive (metrics, holdings, performance)
+- `ChatButton.jsx` + `routers/chat.py` — Gemini-powered (`gemini-2.5-flash`) fund/financial Q&A assistant, scoped to fund context passed from the frontend; no personalized investment advice
+
 ### Data Pipeline
 - Gmail watcher polls every 5 minutes for Morningstar daily Excel
 - Parser v1.5 extracts funds, benchmarks, all metrics
 - `data_date` = most common `nav_date` from the file (not filename date)
 - Benchmarks stored in `DailyFundData` with `is_benchmark=1`
 - NAV history in `nav_history` table (3.6M+ rows)
+- `nse_fetch.py` — supplementary NSE data fetch helpers
 
 ---
 
@@ -116,16 +170,25 @@ buglerock-analytics/
 | `app_settings` | 4 | Gmail token, parser version, mail_date |
 | `benchmark_data` | 0 (cleared) | Legacy — not used |
 | `nav_fetch_log` | ~6,500 | NAV fetch audit |
+| `fund_holdings` | growing | Per-fund, per-holding data from Morningstar (equity/debt) |
+| `fund_portfolio_stats` | growing | Derived portfolio-level stats per fund/date |
+| `holdings_fetch_log` | growing | Morningstar holdings fetch audit trail |
+| `morningstar_accesscode` | 1 | Cached Morningstar API access token + expiry |
 
 ---
 
 ## Environment Variables (Backend)
 
 ```
-DATABASE_URL      = PostgreSQL connection string (new Render DB)
-CORS_ORIGINS      = https://buglerock-analytics-plum.vercel.app
-GEMINI_API_KEY    = Gemini AI key
-WEB_CONCURRENCY   = 2
+DATABASE_URL          = PostgreSQL connection string (new Render DB)
+CORS_ORIGINS          = https://buglerock-analytics-plum.vercel.app
+GEMINI_API_KEY        = Gemini AI key (chat assistant, gemini-2.5-flash)
+WEB_CONCURRENCY       = 2
+APP_PORT              = backend port override
+MSTAR_ACCOUNT_CODE    = Morningstar API account code
+MSTAR_ACCOUNT_PASSWORD = Morningstar API account password
+MSTAR_ACCESSCODE      = cached Morningstar access token (auto-refreshed, stored in DB)
+MSTAR_ACCESSCODE_EXPIRY = expiry timestamp for cached Morningstar access token
 ```
 
 ## Secret Files (Render)
