@@ -460,26 +460,24 @@ def save_fund_holdings(isin: str, holdings_rows: list, stats_row: dict):
     try:
         is_postgres = "postgresql" in str(db.bind.url)
 
-        # Delete existing holdings for this isin+portfolio_date, then insert fresh
-        # (simpler than per-row upsert given holdings composition changes each period)
+        # Delete ALL existing holdings for this ISIN (not just same portfolio_date)
+        # so we never accumulate month-on-month history — DB always holds exactly
+        # one month's disclosure per fund, the latest one Morningstar has published.
+        # If the fetch fails after this delete, the old data is gone — but the
+        # caller's try/except ensures the log still shows "failed", and the
+        # display layer always falls back to whatever is currently in the DB
+        # (which remains intact if the delete+insert happens atomically in one
+        # transaction — either both commit or both roll back).
         if holdings_rows:
-            pdate = holdings_rows[0]["portfolio_date"]
-            db.query(FundHolding).filter(
-                FundHolding.isin == isin,
-                FundHolding.portfolio_date == pdate,
-            ).delete()
+            db.query(FundHolding).filter(FundHolding.isin == isin).delete()
             db.bulk_insert_mappings(FundHolding, holdings_rows)
 
         if stats_row:
-            existing = db.query(FundPortfolioStats).filter(
+            # Delete all existing stats for this ISIN before re-inserting
+            db.query(FundPortfolioStats).filter(
                 FundPortfolioStats.isin == isin,
-                FundPortfolioStats.portfolio_date == stats_row["portfolio_date"],
-            ).first()
-            if existing:
-                for k, v in stats_row.items():
-                    setattr(existing, k, v)
-            else:
-                db.add(FundPortfolioStats(**stats_row))
+            ).delete()
+            db.add(FundPortfolioStats(**stats_row))
 
         db.commit()
 
@@ -574,3 +572,182 @@ def fetch_universe_holdings(isins: list, accesscode: Optional[str] = None) -> di
 
     logger.info(f"Holdings fetch complete: {summary}")
     return summary
+
+
+def fetch_holdings_for_new_isins(candidate_isins: list) -> dict:
+    """
+    Given a list of ISINs (typically "every fund in today's just-parsed daily
+    Excel"), fetch holdings only for the ones that have NEVER been attempted
+    before (no row at all in holdings_fetch_log). This is what lets brand-new
+    funds that appear in a future daily email automatically get their
+    holdings fetched, without needing someone to manually re-run the full
+    universe fetch.
+
+    Cheap by design: on a normal day this is 0-a few funds, since most days
+    introduce no new funds. Capped at MAX_NEW_PER_RUN as a safety valve in
+    case an unusually large batch of new funds appears at once (falls back
+    to leaving the rest for the next scheduled/manual universe fetch).
+    """
+    from models.database import SessionLocal, HoldingsFetchLog
+
+    MAX_NEW_PER_RUN = 50
+
+    db = SessionLocal()
+    try:
+        candidates = {i for i in candidate_isins if i}
+        if not candidates:
+            return {"new_found": 0, "fetched": 0}
+
+        ever_attempted = {
+            row[0] for row in db.query(HoldingsFetchLog.isin)
+            .filter(HoldingsFetchLog.isin.in_(candidates))
+            .distinct()
+            .all()
+        }
+        new_isins = list(candidates - ever_attempted)
+    finally:
+        db.close()
+
+    if not new_isins:
+        return {"new_found": 0, "fetched": 0}
+
+    if len(new_isins) > MAX_NEW_PER_RUN:
+        logger.warning(
+            f"{len(new_isins)} new funds found — fetching first {MAX_NEW_PER_RUN} now, "
+            f"the rest will be picked up by the next universe fetch."
+        )
+    to_fetch = new_isins[:MAX_NEW_PER_RUN]
+
+    logger.info(f"Fetching holdings for {len(to_fetch)} newly-seen fund(s): {to_fetch}")
+    summary = fetch_universe_holdings(to_fetch)
+    return {"new_found": len(new_isins), "fetched": len(to_fetch), **summary}
+
+
+def _expected_latest_month_end(today) -> "date":
+    """Last calendar day of the previous month, relative to `today`."""
+    from datetime import date as date_cls
+    first_of_this_month = today.replace(day=1)
+    return first_of_this_month - timedelta(days=1)
+
+
+def refresh_stale_holdings(max_per_run: int = 2000) -> dict:
+    """
+    Daily holdings freshness check — runs every day after the daily parse.
+
+    Design principles:
+    - No fixed day-of-month window. Checks every day, catches each fund the
+      exact day Morningstar publishes its updated disclosure (varies per fund,
+      typically 10th-25th of the month — no single fixed date).
+    - Identifies the latest portfolio_date from the data already in DB
+      (across all funds), uses that as the "expected" latest date. Any fund
+      still behind that date is stale and gets re-fetched.
+    - Per-fund error isolation: a failure on one fund is logged but never
+      blocks other funds, and never corrupts the existing display data for
+      that fund (the delete+insert is atomic per fund in a single transaction
+      — if it fails, the old data stays intact and the fund keeps showing its
+      last known holdings).
+    - No history accumulation: each successful fetch replaces all previous
+      holdings rows for that ISIN with the new ones.
+    """
+    from datetime import date as date_cls
+    from models.database import SessionLocal, FundHolding, DailyFundData
+    from sqlalchemy import func as sqlfunc
+
+    today = date_cls.today()
+
+    db = SessionLocal()
+    try:
+        # Get the universe of real fund ISINs from the latest data_date
+        latest_data_date = db.query(DailyFundData.data_date).order_by(DailyFundData.data_date.desc()).first()
+        if not latest_data_date:
+            return {"skipped": True, "reason": "no fund universe available"}
+
+        all_isins = {
+            row[0] for row in db.query(DailyFundData.isin)
+            .filter(
+                DailyFundData.data_date == latest_data_date[0],
+                DailyFundData.isin != None,
+                DailyFundData.isin != "",
+                DailyFundData.is_benchmark != 1,
+            )
+            .distinct()
+            .all()
+        }
+
+        # Find the most recent portfolio_date across ALL funds in the DB —
+        # this is the "gold standard" latest date that every fund should ideally
+        # be at. Any fund behind this date is stale.
+        latest_known_portfolio_date = db.query(sqlfunc.max(FundHolding.portfolio_date)).scalar()
+        if not latest_known_portfolio_date:
+            return {"skipped": True, "reason": "no holdings data in DB yet — run universe fetch first"}
+
+        # Latest portfolio_date per ISIN currently in DB
+        latest_by_isin = dict(
+            db.query(FundHolding.isin, sqlfunc.max(FundHolding.portfolio_date))
+            .filter(FundHolding.isin.in_(all_isins))
+            .group_by(FundHolding.isin)
+            .all()
+        )
+
+        # Stale = never fetched, or behind the latest known portfolio_date
+        stale = [
+            isin for isin in all_isins
+            if latest_by_isin.get(isin) is None
+            or latest_by_isin[isin] < latest_known_portfolio_date
+        ]
+    finally:
+        db.close()
+
+    if not stale:
+        logger.info(
+            f"Holdings refresh ({today}): all funds up to date as of {latest_known_portfolio_date}. "
+            f"Nothing to re-fetch."
+        )
+        return {
+            "latest_portfolio_date": str(latest_known_portfolio_date),
+            "stale_found": 0,
+            "fetched": 0,
+            "failed": 0,
+        }
+
+    to_fetch = stale[:max_per_run]
+    logger.info(
+        f"Holdings refresh ({today}): {len(stale)} fund(s) behind latest portfolio_date "
+        f"{latest_known_portfolio_date}, fetching {len(to_fetch)} now."
+    )
+
+    # Fetch per-fund with full error isolation — one failure never blocks others
+    accesscode = get_valid_accesscode()
+    if not accesscode:
+        logger.error("Holdings refresh: no valid Morningstar accesscode available — skipping")
+        return {"skipped": True, "reason": "no valid accesscode"}
+    summary = {"success": 0, "failed": 0, "no_data": 0}
+    for i, isin in enumerate(to_fetch):
+        if not isin:
+            continue
+        try:
+            ok = fetch_and_store_holdings(isin, accesscode)
+            if ok:
+                summary["success"] += 1
+            else:
+                summary["no_data"] += 1
+        except Exception as e:
+            logger.error(f"Holdings refresh: failed for {isin} — {e}", exc_info=True)
+            summary["failed"] += 1
+            try:
+                log_fetch_result(isin, "failed", f"refresh error: {e}")
+            except Exception:
+                pass
+
+        if (i + 1) % 50 == 0:
+            logger.info(f"Holdings refresh progress: {i+1}/{len(to_fetch)}")
+
+        time.sleep(1 / RATE_LIMIT_PER_SEC)
+
+    logger.info(f"Holdings refresh complete: {summary}")
+    return {
+        "latest_portfolio_date": str(latest_known_portfolio_date),
+        "stale_found": len(stale),
+        "fetched": len(to_fetch),
+        **summary,
+    }

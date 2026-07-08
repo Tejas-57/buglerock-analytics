@@ -301,21 +301,17 @@ def fetch_latest(check_days: int = 5, force: bool = False) -> bool:
                 # Never let a holdings-fetch hiccup break the daily NAV parse/save
                 logger.error(f"New-fund holdings fetch failed (non-fatal): {e}", exc_info=True)
 
-            # Once a day (not every 5-min poll), check whether last month-end's
-            # holdings have been published yet by Morningstar. The exact
-            # publish day varies (~10th-17th, not fixed), so this just checks
-            # daily within a generous window and re-fetches whatever is still
-            # stale — funds that already updated are automatically skipped.
+            # Daily holdings freshness check — runs every day, self-limiting:
+            # only re-fetches funds whose stored portfolio_date is behind the
+            # latest known date in the DB. No-op when everything is up to date.
+            # Per-fund error isolation means one failure never affects others.
             try:
-                today_str = str(date.today())
-                if get_setting("last_holdings_refresh_date") != today_str:
-                    from services.morningstar_service import refresh_stale_holdings
-                    refresh_result = refresh_stale_holdings()
-                    set_setting("last_holdings_refresh_date", today_str)
-                    if not refresh_result.get("skipped"):
-                        logger.info(f"Monthly holdings refresh check: {refresh_result}")
+                from services.morningstar_service import refresh_stale_holdings
+                refresh_result = refresh_stale_holdings()
+                if not refresh_result.get("skipped") and refresh_result.get("stale_found", 0) > 0:
+                    logger.info(f"Holdings freshness check: {refresh_result}")
             except Exception as e:
-                logger.error(f"Monthly holdings refresh check failed (non-fatal): {e}", exc_info=True)
+                logger.error(f"Holdings freshness check failed (non-fatal): {e}", exc_info=True)
 
             # Store mail_date in AppSettings for reference
             set_setting("mail_date", str(email_date))
