@@ -547,11 +547,25 @@ def fetch_universe_holdings(isins: list, accesscode: Optional[str] = None) -> di
     delay = 1.0 / RATE_LIMIT_PER_SEC
 
     for i, isin in enumerate(isins):
-        ok = fetch_and_store_holdings(isin, accesscode)
-        if ok:
-            summary["success"] += 1
-        else:
+        if not isin:
+            logger.warning(f"Skipping empty/null ISIN at index {i}")
             summary["failed"] += 1
+            continue
+        try:
+            ok = fetch_and_store_holdings(isin, accesscode)
+            if ok:
+                summary["success"] += 1
+            else:
+                summary["failed"] += 1
+        except Exception as e:
+            # A single bad ISIN (or transient DB/API error) must never kill
+            # the rest of the batch — log and move on to the next fund.
+            logger.error(f"Unexpected error fetching holdings for {isin}: {e}", exc_info=True)
+            summary["failed"] += 1
+            try:
+                log_fetch_result(isin, "failed", f"Unexpected error: {e}")
+            except Exception:
+                pass  # even the error-logging must not be allowed to crash the loop
 
         if (i + 1) % 100 == 0:
             logger.info(f"Holdings fetch progress: {i+1}/{len(isins)}")

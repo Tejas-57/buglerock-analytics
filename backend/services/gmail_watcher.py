@@ -172,12 +172,17 @@ def download_attachment(service, message_id: str) -> tuple:
     return None, None
 
 
-def fetch_latest(check_days: int = 5) -> bool:
+def fetch_latest(check_days: int = 5, force: bool = False) -> bool:
     """
     Fetch the most recent Morningstar email.
     data_date is taken directly from the nav_date in the Excel (most common nav_date).
     mail_date (email arrival date) is stored separately in AppSettings for reference.
     Returns True if new data was loaded.
+
+    force=True: bypass both the email-level and data-level "already processed"
+    checks, re-parsing and re-saving even if data exists in the DB for that
+    date. Use after parser.py changes to immediately apply updated logic to
+    the most recent data without needing a manual file path.
     """
     from services.db_service import has_data_for_date, has_email_for_date, set_setting
     from collections import Counter
@@ -193,7 +198,8 @@ def fetch_latest(check_days: int = 5) -> bool:
         email_date = today - timedelta(days=days_back)
 
         # Skip if we already successfully processed this email AND data exists in DB
-        if has_email_for_date(email_date):
+        # (unless force=True, which bypasses this check entirely)
+        if not force and has_email_for_date(email_date):
             # Double-check data actually exists in DB (may have been lost on DB switch)
             expected_data_date = email_date - timedelta(days=1)
             if has_data_for_date(expected_data_date):
@@ -265,10 +271,10 @@ def fetch_latest(check_days: int = 5) -> bool:
             for bm in parsed["benchmarks"]:
                 bm["data_date"] = data_date
 
-            # Skip if we already have this nav_date in DB
+            # Skip if we already have this nav_date in DB (unless force=True)
             from datetime import date as date_type
             dd = date_type.fromisoformat(data_date) if isinstance(data_date, str) else data_date
-            if has_data_for_date(dd):
+            if not force and has_data_for_date(dd):
                 logger.info(f"Data already present for nav_date={data_date}, skipping")
                 log_email_fetch(
                     email_date=str(email_date),
@@ -280,6 +286,36 @@ def fetch_latest(check_days: int = 5) -> bool:
                 continue
 
             save_parsed_data(parsed)
+
+            # Automatically fetch holdings for any brand-new funds that
+            # appeared in today's file for the first time — cheap (usually
+            # 0-a few funds) and means new funds don't silently stay without
+            # holdings data until someone remembers to re-run the universe fetch.
+            try:
+                from services.morningstar_service import fetch_holdings_for_new_isins
+                new_fund_isins = [f.get("isin") for f in parsed["funds"] if f.get("isin")]
+                result = fetch_holdings_for_new_isins(new_fund_isins)
+                if result.get("new_found"):
+                    logger.info(f"New-fund holdings fetch: {result}")
+            except Exception as e:
+                # Never let a holdings-fetch hiccup break the daily NAV parse/save
+                logger.error(f"New-fund holdings fetch failed (non-fatal): {e}", exc_info=True)
+
+            # Once a day (not every 5-min poll), check whether last month-end's
+            # holdings have been published yet by Morningstar. The exact
+            # publish day varies (~10th-17th, not fixed), so this just checks
+            # daily within a generous window and re-fetches whatever is still
+            # stale — funds that already updated are automatically skipped.
+            try:
+                today_str = str(date.today())
+                if get_setting("last_holdings_refresh_date") != today_str:
+                    from services.morningstar_service import refresh_stale_holdings
+                    refresh_result = refresh_stale_holdings()
+                    set_setting("last_holdings_refresh_date", today_str)
+                    if not refresh_result.get("skipped"):
+                        logger.info(f"Monthly holdings refresh check: {refresh_result}")
+            except Exception as e:
+                logger.error(f"Monthly holdings refresh check failed (non-fatal): {e}", exc_info=True)
 
             # Store mail_date in AppSettings for reference
             set_setting("mail_date", str(email_date))

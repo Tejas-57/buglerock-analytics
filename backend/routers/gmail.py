@@ -66,3 +66,24 @@ def refresh_token():
         return {"success": True, "message": "Token refreshed and saved to DB"}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@router.post("/reparse")
+def force_reparse():
+    """
+    Re-fetch and re-parse the latest Morningstar email from Gmail, bypassing
+    the "already processed" check. Use this after a parser.py fix to
+    immediately apply the updated parsing logic to the most recent data
+    without needing to manually supply a file path.
+
+    Runs synchronously — may take 30-60 seconds depending on file size.
+    """
+    try:
+        from services.gmail_watcher import fetch_latest
+        result = fetch_latest(check_days=3, force=True)
+        if result:
+            return {"success": True, "message": "Latest email re-parsed and saved successfully"}
+        else:
+            return {"success": False, "message": "No email found or re-parse did not produce new data"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
