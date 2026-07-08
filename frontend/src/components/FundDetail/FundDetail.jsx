@@ -343,6 +343,20 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
     }).catch(() => { setError('Failed to load fund data.'); setLoading(false); });
   }, [selectedFund, dateStr]);
 
+  // Top holdings + top sectors — from Morningstar holdings API
+  const [holdingsData, setHoldingsData] = useState(null);
+  const [holdingsLoading, setHoldingsLoading] = useState(false);
+  const [holdingsError, setHoldingsError] = useState(null);
+
+  useEffect(() => {
+    if (!selectedFund?.isin) return;
+    setHoldingsLoading(true); setHoldingsError(null); setHoldingsData(null);
+    fetch(`${API}/api/holdings/${selectedFund.isin}`)
+      .then(r => { if (!r.ok) throw new Error('No holdings data'); return r.json(); })
+      .then(d => { setHoldingsData(d); setHoldingsLoading(false); })
+      .catch(() => { setHoldingsError('Holdings data not available for this fund.'); setHoldingsLoading(false); });
+  }, [selectedFund]);
+
   if (showCompareWarning) {
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -395,6 +409,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
   // Helper — true only if value is a real number (not null, not '-', not 0 for capture ratios)
   const hasVal = (v) => v != null && v !== '-' && !isNaN(parseFloat(v));
   const hasEquityRisk = hasVal(rk('up_capture')) || hasVal(rk('alpha')) || hasVal(rk('beta'));
+  const hasCYData = ['cy2021','cy2022','cy2023','cy2024','cy2025'].some(k => hasVal(f?.returns?.[k]));
   const bmRk = (base) => { const v = bmRisk[`${base}_${period}`]; return v != null && v !== '-' ? v : null; };
 
   const riskRows = [
@@ -423,21 +438,32 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
   const isEquityHybrid = assetClass === 'Hybrid' && equityPct != null && equityPct >= 60;
   const layoutMode = isDebt ? 'debt' : (isDebtHybrid || (assetClass === 'Hybrid' && !isEquityHybrid)) ? 'hybrid' : 'equity';
 
-  // Debt metrics — show section if fund is debt/hybrid or has any bond allocation
-  const bondPctVal = f?.bond_pct != null && f.bond_pct !== '-' ? parseFloat(f.bond_pct) : 0;
-  const hasDebtMetrics = f && (
-    isDebt ||
-    isDebtHybrid ||
-    layoutMode === 'hybrid' ||
-    bondPctVal > 0 ||
-    (f.avg_maturity != null && f.avg_maturity !== '-') ||
-    (f.modified_duration != null && f.modified_duration !== '-') ||
-    (f.ytm != null && f.ytm !== '-')
-  );
   const hasCreditData = f && (
     (f.credit_aaa != null && f.credit_aaa !== '-') ||
-    (f.credit_aa != null && f.credit_aa !== '-')
+    (f.credit_aa != null && f.credit_aa !== '-') ||
+    (f.credit_a != null && f.credit_a !== '-') ||
+    (f.credit_bbb != null && f.credit_bbb !== '-') ||
+    (f.credit_bb != null && f.credit_bb !== '-') ||
+    (f.credit_b != null && f.credit_b !== '-') ||
+    (f.credit_below_b != null && f.credit_below_b !== '-') ||
+    (f.credit_nr != null && f.credit_nr !== '-')
   );
+  const hasSectorData = f && (
+    (f.fi_sector_government != null && f.fi_sector_government !== '-') ||
+    (f.fi_sector_corporate != null && f.fi_sector_corporate !== '-') ||
+    (f.fi_sector_cash_equiv != null && f.fi_sector_cash_equiv !== '-') ||
+    (f.fi_sector_municipal != null && f.fi_sector_municipal !== '-') ||
+    (f.fi_sector_securitized != null && f.fi_sector_securitized !== '-') ||
+    (f.fi_sector_derivative != null && f.fi_sector_derivative !== '-')
+  );
+  // Master switch for the two debt-specific cards — driven by the sheet-level
+  // structural flag (does this fund's source sheet even have these columns),
+  // not by whether this row's values happen to be populated. This is what
+  // correctly excludes equity funds that merely hold a small bond_pct.
+  const hasDebtSection = !!(f?.has_debt_columns);
+  // Same principle for the Equity Risk Metrics card — driven by whether the
+  // fund's source sheet has these columns at all (Debt/Debt ETF sheets don't).
+  const hasEquitySection = !!(f?.has_equity_columns);
   const erColor = erVal == null ? 'var(--text-muted)' : erVal <= 1.0 ? '#1A7A52' : erVal <= 1.5 ? '#7A5A10' : '#912F63';
   const erLabel = erVal == null ? '—' : erVal <= 0.5 ? 'Ultra-low cost' : erVal <= 1.0 ? 'Low cost' : erVal <= 1.5 ? 'Average' : erVal <= 2.0 ? 'Above average' : 'High cost';
 
@@ -562,13 +588,15 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
         </Card>
 
         {/* ④ CALENDAR YEAR */}
-        <Card title={`Calendar year returns${bmName?' vs '+bmName:''}`}>
-          <div style={{ padding: '8px 16px 0', display: 'flex', gap: 10, fontSize: 10, color: 'var(--text-muted)' }}>
-            <span><span style={{ display:'inline-block',width:8,height:8,borderRadius:1,background:'#912F63',marginRight:3,verticalAlign:'middle' }} />Fund</span>
-            {bmName && <span><span style={{ display:'inline-block',width:8,height:8,borderRadius:1,background:'#A795AE',marginRight:3,verticalAlign:'middle',opacity:.85 }} />{bmName}</span>}
-          </div>
-          <CYBarsChart fund={f} benchmark={benchmark} />
-        </Card>
+        {hasCYData && (
+          <Card title={`Calendar year returns${bmName?' vs '+bmName:''}`}>
+            <div style={{ padding: '8px 16px 0', display: 'flex', gap: 10, fontSize: 10, color: 'var(--text-muted)' }}>
+              <span><span style={{ display:'inline-block',width:8,height:8,borderRadius:1,background:'#912F63',marginRight:3,verticalAlign:'middle' }} />Fund</span>
+              {bmName && <span><span style={{ display:'inline-block',width:8,height:8,borderRadius:1,background:'#A795AE',marginRight:3,verticalAlign:'middle',opacity:.85 }} />{bmName}</span>}
+            </div>
+            <CYBarsChart fund={f} benchmark={benchmark} />
+          </Card>
+        )}
 
         {/* ⑤ RISK SECTION — data-driven, shows what's available */}
 
@@ -618,72 +646,33 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
           </>
         )}
 
-        {/* Debt parameters — show for all debt/hybrid funds */}
-        {hasDebtMetrics && (
-          <>
-            <SecLabel>{layoutMode === 'hybrid' ? 'Debt Parameters (Debt Portion)' : 'Debt Parameters'}</SecLabel>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, marginBottom: 14 }}>
-              {[
-                { label: 'Avg Maturity',      value: f?.avg_maturity,       unit: ' yrs', desc: 'Weighted avg time to maturity of bonds' },
-                { label: 'Modified Duration', value: f?.modified_duration,  unit: ' yrs', desc: 'Interest rate sensitivity — lower = less risk' },
-                { label: 'YTM',               value: f?.ytm,                unit: '%',    desc: 'Expected annual return if held to maturity' },
-              ].map(({ label, value, unit, desc }) => {
-                const hasVal = value != null && value !== '-' && !isNaN(parseFloat(value));
-                const v = hasVal ? parseFloat(value) : null;
-                return (
-                  <div key={label} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', textAlign: 'center', background: !hasVal ? 'var(--bg-secondary)' : '#fff' }}>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>{label}</div>
-                    <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, color: hasVal ? 'var(--brand-dark)' : 'var(--text-muted)', letterSpacing: '-.02em', lineHeight: 1, marginBottom: 4 }}>
-                      {hasVal ? `${fmt(v)}${unit}` : '—'}
-                    </div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>{desc}</div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Sharpe/Sortino/Std Dev for debt — only if data exists */}
-            {(() => {
-              const gauges = [
-                (hasVal(rk('sharpe_ratio'))) && { label:`Sharpe (${period.toUpperCase()})`,   value:rk('sharpe_ratio'),  lo:0, hi:2,  thresh:0.5, lowerBetter:false },
-                (hasVal(rk('sortino_ratio'))) && { label:`Sortino (${period.toUpperCase()})`,  value:rk('sortino_ratio'), lo:0, hi:3,  thresh:0.8, lowerBetter:false },
-                (hasVal(rk('std_dev')))       && { label:`Std Dev (${period.toUpperCase()})`,  value:rk('std_dev'),       lo:0, hi:10, thresh:3,   lowerBetter:true  },
-              ].filter(Boolean);
-              if (!gauges.length) return null;
-              return (
-                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${gauges.length},minmax(0,1fr))`, gap: 8, marginBottom: 14 }}>
-                  {gauges.map(g => <RiskGauge key={g.label} label={g.label} value={g.value} lo={g.lo} hi={g.hi} thresh={g.thresh} lowerBetter={g.lowerBetter} />)}
-                </div>
-              );
-            })()}
-          </>
-        )}
-
         {/* ⑥ RISK TABLE + PORTFOLIO */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-          <Card title="Risk metrics detail">
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: 'var(--bg-secondary)' }}>
-                  {['Metric', `Fund (${period.toUpperCase()})`, bmName ? bmName.split(' ').slice(0,3).join(' ') : 'Benchmark', 'Signal'].map(h => (
-                    <th key={h} style={{ padding: '8px 12px', textAlign: h==='Metric'?'left':'right', fontSize: 10, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {riskRows.length===0 ? (
-                  <tr><td colSpan={4} style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)' }}>Risk data not available</td></tr>
-                ) : riskRows.map(row => (
-                  <tr key={row.l} style={{ borderBottom: '1px solid var(--bg-secondary)' }}>
-                    <td style={{ padding: '9px 12px', color: 'var(--text-muted)' }}>{row.l}</td>
-                    <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{row.vf!=null&&row.vf!=='-'?row.fmt(row.vf):'—'}</td>
-                    <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{row.vb!=null&&row.vb!=='-'?row.fmt(row.vb):'—'}</td>
-                    <td style={{ padding: '9px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{row.vf!=null&&row.vf!=='-'?row.sig(row.vf):'—'}</td>
+        <div style={{ display: 'grid', gridTemplateColumns: hasEquitySection ? '1fr 1fr' : '1fr', gap: 14, marginBottom: 14 }}>
+          {hasEquitySection && (
+            <Card title="Equity Risk Metrics">
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-secondary)' }}>
+                    {['Metric', `Fund (${period.toUpperCase()})`, bmName ? bmName.split(' ').slice(0,3).join(' ') : 'Benchmark', 'Signal'].map(h => (
+                      <th key={h} style={{ padding: '8px 12px', textAlign: h==='Metric'?'left':'right', fontSize: 10, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+                </thead>
+                <tbody>
+                  {riskRows.length === 0 ? (
+                    <tr><td colSpan={4} style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)' }}>Risk data not available for this date</td></tr>
+                  ) : riskRows.map(row => (
+                    <tr key={row.l} style={{ borderBottom: '1px solid var(--bg-secondary)' }}>
+                      <td style={{ padding: '9px 12px', color: 'var(--text-muted)' }}>{row.l}</td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{row.vf!=null&&row.vf!=='-'?row.fmt(row.vf):'—'}</td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{row.vb!=null&&row.vb!=='-'?row.fmt(row.vb):'—'}</td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{row.vf!=null&&row.vf!=='-'?row.sig(row.vf):'—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
 
           <Card title="Portfolio composition">
             <div style={{ padding: 14 }}>
@@ -696,7 +685,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
                       <BarRow name="Large cap" value={f.large_cap} color="#912F63" />
                       <BarRow name="Mid cap"   value={f.mid_cap}   color="#6D5479" />
                       <BarRow name="Small cap" value={f.small_cap} color="#C46985" />
-                    </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>Data not available</div>}
+                    </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>{assetClass === 'Precious Metals' ? 'Data not applicable' : 'Data not available'}</div>}
                     {(f.pe_ratio!=null&&f.pe_ratio!=='-')||(f.pb_ratio!=null&&f.pb_ratio!=='-') ? (
                       <div style={{ display: 'flex', gap: 8, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--bg-secondary)' }}>
                         {f.pe_ratio!=null&&f.pe_ratio!=='-' && <div style={{ flex:1,textAlign:'center',padding:8,background:'var(--bg-secondary)',borderRadius:8 }}><div style={{ fontFamily:'var(--font-serif)',fontSize:18,fontWeight:600,color:'var(--brand-dark)' }}>{fmt(f.pe_ratio)}</div><div style={{ fontSize:10,color:'var(--text-muted)',marginTop:2 }}>P/E ratio</div></div>}
@@ -707,43 +696,26 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
                   <div style={{ background: 'var(--border)' }} />
                   <div>
                     <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>Asset allocation</div>
-                    {(f.equity_pct!=null&&f.equity_pct!=='-')||(f.bond_pct!=null&&f.bond_pct!=='-')||(f.cash_pct!=null&&f.cash_pct!=='-') ? (<>
+                    {(f.equity_pct!=null&&f.equity_pct!=='-')||(f.bond_pct!=null&&f.bond_pct!=='-')||(f.cash_pct!=null&&f.cash_pct!=='-')||(f.other_pct!=null&&f.other_pct!=='-') ? (<>
                       <BarRow name="Equity" value={f.equity_pct} color="#3E3452" />
                       <BarRow name="Bonds"  value={f.bond_pct}   color="#A795AE" />
                       <BarRow name="Cash"   value={f.cash_pct}   color="#A2A0A0" />
+                      {(f.other_pct != null && f.other_pct !== '-' && parseFloat(f.other_pct) > 0) && (
+                        <BarRow name={assetClass === 'Precious Metals' ? 'Precious Metals' : 'Other'} value={f.other_pct} color="#D4AF37" />
+                      )}
                     </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>Data not available</div>}
                   </div>
                 </div>
               ) : layoutMode === 'debt' ? (
-                // Debt — credit quality + asset allocation
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr', gap: 14 }}>
-                  <div>
-                    <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>Credit quality</div>
-                    {hasCreditData ? (<>
-                      <BarRow name="AAA / Equiv" value={f.credit_aaa}     color="#1A7A52" />
-                      <BarRow name="AA"           value={f.credit_aa}      color="#2E9E6E" />
-                      <BarRow name="A"            value={f.credit_a}       color="#6D5479" />
-                      <BarRow name="BBB"          value={f.credit_bbb}     color="#B46B10" />
-                      <BarRow name="BB & below"   value={f.credit_bb}      color="#912F63" />
-                      <BarRow name="Not Rated"    value={f.credit_nr}      color="#A2A0A0" />
-                    </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>Data not available</div>}
-                    {f.avg_credit_quality && f.avg_credit_quality !== '-' && (
-                      <div style={{ marginTop: 12, padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: 8, display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Avg credit quality</span>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--brand-dark)' }}>{f.avg_credit_quality}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ background: 'var(--border)' }} />
-                  <div>
-                    <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>Asset allocation</div>
-                    <BarRow name="Equity" value={f.equity_pct} color="#3E3452" />
-                    <BarRow name="Bonds"  value={f.bond_pct}   color="#A795AE" />
-                    <BarRow name="Cash"   value={f.cash_pct}   color="#A2A0A0" />
-                  </div>
+                // Debt — asset allocation (credit quality lives in the Debt Parameters card above)
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>Asset allocation</div>
+                  <BarRow name="Equity" value={f.equity_pct} color="#3E3452" />
+                  <BarRow name="Bonds"  value={f.bond_pct}   color="#A795AE" />
+                  <BarRow name="Cash"   value={f.cash_pct}   color="#A2A0A0" />
                 </div>
               ) : (
-                // Hybrid — market cap + credit quality + asset allocation
+                // Hybrid — market cap + asset allocation (credit quality lives in the Debt Parameters card above)
                 <div>
                   {(f.large_cap!=null&&f.large_cap!=='-')||(f.mid_cap!=null&&f.mid_cap!=='-') ? (<>
                     <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 8 }}>Market cap (equity portion)</div>
@@ -756,16 +728,164 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
                   <BarRow name="Equity" value={f.equity_pct} color="#3E3452" />
                   <BarRow name="Bonds"  value={f.bond_pct}   color="#A795AE" />
                   <BarRow name="Cash"   value={f.cash_pct}   color="#A2A0A0" />
-                  {hasCreditData && (<>
-                    <div style={{ height: 1, background: 'var(--bg-secondary)', margin: '12px 0' }} />
-                    <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 8 }}>Credit quality (debt portion)</div>
-                    <BarRow name="AAA / Equiv" value={f.credit_aaa} color="#1A7A52" />
-                    <BarRow name="AA"           value={f.credit_aa}  color="#2E9E6E" />
-                    <BarRow name="A"            value={f.credit_a}   color="#6D5479" />
-                    <BarRow name="BBB & below"  value={f.credit_bbb} color="#B46B10" />
-                  </>)}
                 </div>
               )}
+            </div>
+          </Card>
+        </div>
+
+        {/* ⑥b DEBT PORTFOLIO METRICS + COMPOSITION — hidden entirely when the fund has no debt data */}
+        {hasDebtSection && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+            <Card title="Debt portfolio metrics">
+              <div style={{ padding: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, marginBottom: 14 }}>
+                  {[
+                    { label: 'Avg Maturity',      value: f?.avg_maturity,      unit: ' yrs', desc: 'Weighted avg time to maturity of bonds' },
+                    { label: 'Modified Duration', value: f?.modified_duration, unit: ' yrs', desc: 'Interest rate sensitivity — lower = less risk' },
+                    { label: 'YTM',               value: f?.ytm,               unit: '%',    desc: 'Expected annual return if held to maturity' },
+                  ].map(({ label, value, unit, desc }) => {
+                    const hv = value != null && value !== '-' && !isNaN(parseFloat(value));
+                    const v = hv ? parseFloat(value) : null;
+                    return (
+                      <div key={label} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', textAlign: 'center', background: !hv ? 'var(--bg-secondary)' : '#fff' }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>{label}</div>
+                        <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, color: hv ? 'var(--brand-dark)' : 'var(--text-muted)', letterSpacing: '-.02em', lineHeight: 1, marginBottom: 4 }}>
+                          {hv ? `${fmt(v)}${unit}` : '—'}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>{desc}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {!(f?.avg_maturity != null && f.avg_maturity !== '-') && !(f?.modified_duration != null && f.modified_duration !== '-') && !(f?.ytm != null && f.ytm !== '-') && (
+                  <div style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', padding: '8px 0' }}>Debt metrics not available for this fund</div>
+                )}
+              </div>
+            </Card>
+
+            <Card title="Debt portfolio composition">
+              <div style={{ padding: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr', gap: 14 }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>
+                      Credit quality {layoutMode === 'hybrid' ? '(debt portion)' : ''}
+                    </div>
+                    {hasCreditData ? (<>
+                      <BarRow name="AAA / Equiv" value={f.credit_aaa}     color="#1A7A52" />
+                      <BarRow name="AA"          value={f.credit_aa}      color="#2E9E6E" />
+                      <BarRow name="A"           value={f.credit_a}       color="#6D5479" />
+                      <BarRow name="BBB"         value={f.credit_bbb}     color="#B46B10" />
+                      <BarRow name="BB"          value={f.credit_bb}      color="#912F63" />
+                      <BarRow name="B"           value={f.credit_b}       color="#C46985" />
+                      <BarRow name="Below B"     value={f.credit_below_b} color="#7A2E4A" />
+                      <BarRow name="Not Rated"   value={f.credit_nr}      color="#A2A0A0" />
+                      {f.avg_credit_quality && f.avg_credit_quality !== '-' && (
+                        <div style={{ marginTop: 8, padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: 8, display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Avg credit quality</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--brand-dark)' }}>{f.avg_credit_quality}</span>
+                        </div>
+                      )}
+                    </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>Data not available</div>}
+                  </div>
+                  <div style={{ background: 'var(--border)' }} />
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 10 }}>
+                      Sector breakdown {layoutMode === 'hybrid' ? '(debt portion)' : ''}
+                    </div>
+                    {hasSectorData ? (<>
+                      <BarRow name="Government"           value={f.fi_sector_government} color="#3E3452" />
+                      <BarRow name="Corporate"             value={f.fi_sector_corporate}  color="#912F63" />
+                      <BarRow name="Cash & Equivalents"    value={f.fi_sector_cash_equiv} color="#A2A0A0" />
+                      <BarRow name="Municipal"             value={f.fi_sector_municipal}  color="#6D5479" />
+                      <BarRow name="Securitized"           value={f.fi_sector_securitized} color="#B46B10" />
+                      <BarRow name="Derivative"            value={f.fi_sector_derivative} color="#C46985" />
+                    </>) : <div style={{ color:'var(--text-muted)',fontSize:12 }}>Data not available</div>}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* ⑥c TOP HOLDINGS + TOP SECTORS — from Morningstar holdings API */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+          <Card title="Top 10 holdings">
+            <div style={{ padding: 14 }}>
+              {holdingsLoading ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Loading holdings...</div>
+              ) : holdingsError || !holdingsData?.holdings?.length ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Holdings data not available for this fund</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: '4px 8px 8px', textAlign: 'left', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>#</th>
+                      <th style={{ padding: '4px 8px 8px', textAlign: 'left', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>Holding</th>
+                      <th style={{ padding: '4px 8px 8px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>Weight</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {holdingsData.holdings.slice(0, 10).map((h, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--bg-secondary)' }}>
+                        <td style={{ padding: '7px 8px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{i + 1}</td>
+                        <td style={{ padding: '7px 8px', fontWeight: 500 }}>{h.name || h.isin || '—'}</td>
+                        <td style={{ padding: '7px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--brand-dark)' }}>
+                          {h.weighting != null ? `${h.weighting.toFixed(2)}%` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {holdingsData?.portfolio_date && !holdingsError && (
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10, textAlign: 'right' }}>As of {holdingsData.portfolio_date}</div>
+              )}
+            </div>
+          </Card>
+
+          <Card title="Top 10 sectors">
+            <div style={{ padding: 14 }}>
+              {(() => {
+                if (holdingsLoading) {
+                  return <div style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Loading sectors...</div>;
+                }
+                const sb = holdingsData?.stats?.sector_breakdown;
+                const SECTOR_LABELS = {
+                  basic_materials: 'Basic Materials',
+                  communication_services: 'Communication Services',
+                  consumer_cyclical: 'Consumer Cyclical',
+                  consumer_defensive: 'Consumer Defensive',
+                  energy: 'Energy',
+                  financial_services: 'Financial Services',
+                  healthcare: 'Healthcare',
+                  industrials: 'Industrials',
+                  real_estate: 'Real Estate',
+                  technology: 'Technology',
+                  utilities: 'Utilities',
+                };
+                const SECTOR_COLORS = ['#912F63','#3E3452','#6D5479','#C46985','#A795AE','#B46B10','#1A7A52','#2E9E6E','#D97706','#A2A0A0','#7A2E4A'];
+                const rows = sb
+                  ? Object.entries(sb)
+                      .filter(([, v]) => v != null && v !== '-' && parseFloat(v) > 0)
+                      .sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]))
+                      .slice(0, 10)
+                  : [];
+                if (!rows.length) {
+                  return <div style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Sector data not available for this fund</div>;
+                }
+                return (
+                  <>
+                    {rows.map(([key, v], i) => (
+                      <BarRow key={key} name={SECTOR_LABELS[key] || key} value={v} color={SECTOR_COLORS[i % SECTOR_COLORS.length]} />
+                    ))}
+                    {holdingsData?.stats?.portfolio_date && (
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10, textAlign: 'right' }}>As of {holdingsData.stats.portfolio_date}</div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </Card>
         </div>

@@ -8,6 +8,7 @@ const TABS = [
   { id: 'exposure', label: 'Exposure' },
   { id: 'correlation', label: 'Correlation' },
   { id: 'overlap', label: 'Overlap' },
+  { id: 'rolling', label: 'Rolling returns' },
   { id: 'funds', label: 'Fund details' },
 ];
 
@@ -164,6 +165,23 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
     else if (activeTab === 'overlap' && equityFundsForOverlap.length < 2) { setOverlapData(null); setOverlapError(null); }
   }, [activeTab, funds.map(f => f.isin).join(',')]);
 
+  // ── Rolling returns state & fetch (daily-NAV based) ─────────────────────
+  const [rollingData, setRollingData] = useState(null);
+  const [rollingLoading, setRollingLoading] = useState(false);
+  const [rollingError, setRollingError] = useState(null);
+
+  useEffect(() => {
+    if (activeTab !== 'rolling' || funds.length === 0) return;
+    const API = import.meta.env.VITE_API_URL || '';
+    const isins = funds.map(f => f.isin).join(',');
+    setRollingLoading(true);
+    setRollingError(null);
+    fetch(`${API}/api/nav/rolling-metrics?isins=${isins}`)
+      .then(r => { if (!r.ok) throw new Error('Failed to compute rolling metrics'); return r.json(); })
+      .then(d => { setRollingData(d.funds || {}); setRollingLoading(false); })
+      .catch(e => { setRollingError(e.message); setRollingLoading(false); });
+  }, [activeTab, funds.map(f => f.isin).join(',')]);
+
   // Compute blended benchmark from benchmarks array (manual weights)
   const totalBmW = benchmarks.reduce((s, b) => s + (b.weight || 0), 0) || 1;
   function blendBm(getter) {
@@ -243,6 +261,175 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
     return corrData.matrix[ri][rj];
   }));
 
+  // ── Export Overlap Report (mirrors Overlap tab styling exactly) ────────
+  function generateOverlapPDF() {
+    if (!overlapData) return;
+    const funds2 = equityFundsForOverlap;
+    const { pairwise_matrix, common_all, pair_details } = overlapData;
+    const fundMap = Object.fromEntries(funds2.map(f => [f.isin, f]));
+    const pairs = Object.values(pairwise_matrix);
+    const overlapColor = (pct) => pct >= 35 ? '#C0392B' : pct >= 25 ? '#E67E22' : pct >= 15 ? '#F39C12' : pct >= 5 ? '#27AE60' : '#A0A0A0';
+    const overlapLabel = (pct) => pct >= 35 ? 'Very High' : pct >= 25 ? 'High' : pct >= 15 ? 'Moderate' : pct >= 5 ? 'Low' : 'Negligible';
+    const overlapBg = (pct) => pct >= 35 ? 'rgba(192,57,43,.10)' : pct >= 25 ? 'rgba(230,126,34,.10)' : pct >= 15 ? 'rgba(243,156,18,.10)' : pct >= 5 ? 'rgba(39,174,96,.10)' : '#f4f4f4';
+
+    const avgOverlap = pairs.length ? (pairs.reduce((s, p) => s + p.overlap_pct, 0) / pairs.length).toFixed(1) : 0;
+    const highestPair = pairs.reduce((best, p) => p.overlap_pct > (best?.overlap_pct || 0) ? p : best, null);
+    const totalUniqueStocks = overlapData.unique_stock_count || '—';
+    const heldByAllCount = common_all.length;
+    const heldByAllName = common_all.length > 0 ? common_all[0].name : '—';
+
+    const clientName = ips?.name || 'Client';
+    const preparedBy = ips?.rm || 'BugleRock Capital';
+    const refDate = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+    const PLUM = '#3E3452', BERRY = '#912F63';
+
+    const statCardHtml = (value, label, sub, color) => `
+      <div style="flex:1;background:#F7F5F3;border-radius:10px;padding:14px 16px;text-align:center;min-width:0">
+        <div style="font-size:22px;font-weight:700;color:${color || BERRY};font-family:'DM Mono',monospace">${value}</div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8A8790;margin-top:4px">${label}</div>
+        ${sub ? `<div style="font-size:10px;color:#4A4750;margin-top:3px">${sub}</div>` : ''}
+      </div>`;
+
+    const matrixHtml = `
+      <table style="border-collapse:separate;border-spacing:5px;margin:0 auto">
+        <thead><tr>
+          <td style="width:110px"></td>
+          ${funds2.map(f => `<th style="text-align:center;padding:0 3px 8px;font-size:9px;font-weight:500;width:74px">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:3px">
+              <div style="width:8px;height:8px;border-radius:2px;background:${f.color}"></div>
+              <div style="max-width:70px;text-align:center;line-height:1.3">${shortFundName(f.name)}</div>
+            </div>
+          </th>`).join('')}
+        </tr></thead>
+        <tbody>
+          ${funds2.map((fa, i) => `<tr>
+            <td style="text-align:right;padding:3px 8px 3px 0;font-size:9px;font-weight:500;white-space:nowrap">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${fa.color};margin-right:5px;vertical-align:middle"></span>${shortFundName(fa.name)}
+            </td>
+            ${funds2.map((fb, j) => {
+              if (i === j) return `<td style="width:74px;height:46px;background:#f4f4f4;border-radius:7px;text-align:center;font-size:15px;color:#ccc">—</td>`;
+              const key = i < j ? `${fa.isin}|${fb.isin}` : `${fb.isin}|${fa.isin}`;
+              const p = pairwise_matrix[key]; const pct = p?.overlap_pct || 0;
+              return `<td style="width:74px;height:46px;background:${overlapBg(pct)};border-radius:7px;text-align:center;vertical-align:middle">
+                <div style="font-family:'DM Mono',monospace;font-weight:700;font-size:15px;color:${overlapColor(pct)}">${pct.toFixed(0)}%</div>
+              </td>`;
+            }).join('')}
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <div style="display:flex;gap:14px;margin-top:10px;font-size:9px;color:#8A8790;justify-content:center">
+        <span><span style="color:#A0A0A0">●</span> &lt;5% Negligible</span>
+        <span><span style="color:#27AE60">●</span> 5–15% Low</span>
+        <span><span style="color:#F39C12">●</span> 15–25% Moderate</span>
+        <span><span style="color:#E67E22">●</span> 25–35% High</span>
+        <span><span style="color:#C0392B">●</span> &gt;35% Very high</span>
+      </div>`;
+
+    const pairCardsHtml = pairs.map(p => {
+      const fa = fundMap[p.fund_a], fb = fundMap[p.fund_b];
+      const pd = pair_details[`${p.fund_a}|${p.fund_b}`] || {};
+      const shared = pd.shared || [], onlyA = pd.only_a || [], onlyB = pd.only_b || [];
+      const pct = p.overlap_pct; const clr = overlapColor(pct); const lbl = overlapLabel(pct);
+      const nameA = shortFundName(fa?.name), nameB = shortFundName(fb?.name);
+      const rows10 = (list, fund) => Array.from({ length: 10 }).map((_, idx) => {
+        const h = list[idx];
+        return `<div style="font-size:11px;padding:4px 0;color:${h ? '#2C2A30' : 'transparent'}">${h ? h.name : '·'}</div>
+                <div style="font-family:'DM Mono',monospace;font-size:11px;text-align:right;padding:4px 0;color:${h ? fund?.color : 'transparent'}">${h ? h.weight.toFixed(1) + '%' : ''}</div>`;
+      }).join('');
+      return `<div class="avoid-break" style="background:#fff;border:1px solid #E8E5EC;border-radius:12px;margin-bottom:14px;overflow:hidden">
+        <div style="display:flex;align-items:center;padding:12px 18px;background:${clr}12;border-bottom:1px solid ${clr}30;gap:10px">
+          <div style="display:flex;align-items:center;gap:7px;flex:1">
+            <div style="width:9px;height:9px;border-radius:2px;background:${fa?.color}"></div>
+            <span style="font-weight:600;font-size:11px;color:#2C2A30">${nameA}</span>
+          </div>
+          <div style="font-size:9px;color:#8A8790">vs</div>
+          <div style="display:flex;align-items:center;gap:7px;flex:1;justify-content:flex-end">
+            <span style="font-weight:600;font-size:11px;color:#2C2A30">${nameB}</span>
+            <div style="width:9px;height:9px;border-radius:2px;background:${fb?.color}"></div>
+          </div>
+          <div style="margin-left:14px;background:${clr}18;border:1px solid ${clr}44;border-radius:7px;padding:5px 12px;text-align:center;min-width:76px">
+            <div style="font-family:'DM Mono',monospace;font-weight:700;font-size:15px;color:${clr}">${pct.toFixed(1)}%</div>
+            <div style="font-size:8px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:${clr}">${lbl}</div>
+          </div>
+        </div>
+        <div style="padding:14px 18px">
+          ${shared.length > 0 ? `<div style="margin-bottom:16px">
+            <div style="font-size:9px;font-weight:700;color:#E67E22;letter-spacing:.05em;text-transform:uppercase;margin-bottom:8px">Shared Holdings (${shared.length})</div>
+            <div style="display:grid;grid-template-columns:1fr 70px 70px;gap:0 16px;margin-bottom:4px">
+              <div style="font-size:9px;color:#8A8790;font-weight:600;text-transform:uppercase">Stock</div>
+              <div style="font-size:9px;color:${fa?.color};font-weight:700;text-transform:uppercase;text-align:right">${nameA.split(' ')[0]}</div>
+              <div style="font-size:9px;color:${fb?.color};font-weight:700;text-transform:uppercase;text-align:right">${nameB.split(' ')[0]}</div>
+            </div>
+            ${shared.map(h => `<div style="display:grid;grid-template-columns:1fr 70px 70px;gap:0 16px;padding:5px 8px;align-items:center;background:#F7F5F3;border-radius:5px;margin-bottom:3px">
+              <div style="font-size:11px;font-weight:500">${h.name}</div>
+              <div style="font-family:'DM Mono',monospace;font-size:11px;text-align:right;color:${fa?.color}">${h.weight_a.toFixed(1)}%</div>
+              <div style="font-family:'DM Mono',monospace;font-size:11px;text-align:right;color:${fb?.color}">${h.weight_b.toFixed(1)}%</div>
+            </div>`).join('')}
+          </div>` : ''}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+            <div>
+              <div style="font-size:9px;font-weight:700;color:#8A8790;letter-spacing:.05em;text-transform:uppercase;margin-bottom:8px">Only in ${nameA}</div>
+              <div style="display:grid;grid-template-columns:1fr auto;gap:0 14px">${rows10(onlyA, fa)}</div>
+            </div>
+            <div>
+              <div style="font-size:9px;font-weight:700;color:#8A8790;letter-spacing:.05em;text-transform:uppercase;margin-bottom:8px">Only in ${nameB}</div>
+              <div style="display:grid;grid-template-columns:1fr auto;gap:0 14px">${rows10(onlyB, fb)}</div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    const w = window.open('', '_blank');
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Overlap Analysis — ${clientName}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Sans:wght@300;400;500;600&family=DM+Mono&display=swap" rel="stylesheet">
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:'DM Sans',sans-serif;background:#fff;color:#2C2A30;font-size:12px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      @page{margin:14mm;size:A4}
+      @media print{.no-print{display:none!important}.avoid-break{page-break-inside:avoid}}
+      .container{max-width:760px;margin:0 auto;padding:20px}
+    </style></head><body><div class="container">
+
+    <div style="background:${PLUM};padding:24px 28px;border-radius:12px;margin-bottom:20px;color:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:26px;font-weight:700;letter-spacing:-.02em;margin-bottom:4px">Portfolio Overlap Analysis</div>
+          <div style="font-size:12px;opacity:.7">${refDate} · Prepared by ${preparedBy}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600">BügleRock Capital</div>
+          <div style="font-size:10px;opacity:.6;margin-top:2px">Sound of Clarity</div>
+        </div>
+      </div>
+      <div style="font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;color:#EDD5E2;margin-top:14px">Prepared for: ${clientName}</div>
+    </div>
+
+    <div style="display:flex;gap:12px;margin-bottom:20px">
+      ${statCardHtml(`${avgOverlap}%`, 'Avg Overlap', `${funds2.length} funds · ${pairs.length} pairs`)}
+      ${statCardHtml(highestPair ? `${highestPair.overlap_pct.toFixed(1)}%` : '—', 'Highest Pair', highestPair ? `${shortFundName(fundMap[highestPair.fund_a]?.name)} ↔ ${shortFundName(fundMap[highestPair.fund_b]?.name)}` : '', highestPair ? overlapColor(highestPair.overlap_pct) : null)}
+      ${statCardHtml(totalUniqueStocks, 'Unique Stocks', `${funds2.length} funds combined`)}
+      ${statCardHtml(heldByAllCount > 0 ? heldByAllCount : '0', 'Held By Every Fund', heldByAllCount > 0 ? `Top by weight: ${heldByAllName}` : 'None in common', heldByAllCount > 0 ? BERRY : '#8A8790')}
+    </div>
+
+    <div class="avoid-break" style="margin-bottom:20px;background:#fff;border:1px solid #E8E5EC;border-radius:12px;padding:16px 18px">
+      <div style="font-size:12px;font-weight:600;color:#2C2A30;margin-bottom:14px">Overlap matrix</div>
+      ${matrixHtml}
+    </div>
+
+    ${pairCardsHtml}
+
+    <div style="margin-top:20px;padding-top:14px;border-top:1px solid #E8E5EC;font-size:8px;color:#8A8790;line-height:1.5">
+      Overlap is calculated on equity holdings only, using each fund's latest available portfolio disclosure. BugleRock Capital does not guarantee the accuracy or completeness of underlying holdings data sourced from Morningstar. For internal/client discussion use.
+    </div>
+
+    <div class="no-print" style="text-align:center;margin:24px 0">
+      <button onclick="window.print()" style="padding:10px 24px;background:${BERRY};color:#fff;border:none;border-radius:8px;font:600 13px 'DM Sans',sans-serif;cursor:pointer">⬇ Print / Save PDF</button>
+    </div>
+    </div></body></html>`);
+    w.document.close();
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       {/* Tab bar */}
@@ -251,6 +438,9 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
           <button key={t.id} className={`ptf-tab ${activeTab === t.id ? 'active' : ''}`} onClick={() => setActiveTab(t.id)}>{t.label}</button>
         ))}
         <div className="ptf-tab-actions">
+          {activeTab === 'overlap' && overlapData && (
+            <button className="btn btn-ghost" onClick={generateOverlapPDF} style={{ fontSize: 11 }}>⬇ Export Overlap Report</button>
+          )}
           <button className="btn btn-ghost" onClick={onEdit} style={{ fontSize: 11 }}>← Edit</button>
           <button className="btn btn-primary" onClick={onOptimise} style={{ fontSize: 11 }}>Optimise →</button>
         </div>
@@ -952,6 +1142,100 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                   </div>
                 );
               })()}
+            </div>
+          );
+        })()}
+
+        {/* ── ROLLING RETURNS ── */}
+        {activeTab === 'rolling' && (() => {
+          if (funds.length === 0) {
+            return <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Add funds to the portfolio to see rolling returns.</div>;
+          }
+          if (rollingLoading) {
+            return <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Computing rolling returns from daily NAV history...</div>;
+          }
+          if (rollingError) {
+            return <div style={{ padding: 32, textAlign: 'center', color: 'var(--neg)', fontSize: 13 }}>{rollingError}</div>;
+          }
+          if (!rollingData) return null;
+
+          const rows = funds.map(f => {
+            const d = rollingData[f.isin] || {};
+            return {
+              f,
+              w: weights[f.isin] || 0,
+              r1y: d.rolling_1y_avg_3y != null ? d.rolling_1y_avg_3y : null,
+              r1yN: d.rolling_1y_window_count || 0,
+              r3y: d.rolling_3y_cagr_avg_5y != null ? d.rolling_3y_cagr_avg_5y : null,
+              r3yN: d.rolling_3y_window_count || 0,
+              years: d.years_available || 0,
+            };
+          });
+
+          function weightedAvg(getter) {
+            let wSum = 0, wTotal = 0;
+            rows.forEach(row => {
+              const v = getter(row);
+              if (v == null) return;
+              wSum += v * row.w; wTotal += row.w;
+            });
+            return wTotal > 0 ? wSum / wTotal : null;
+          }
+          const port1y = weightedAvg(r => r.r1y);
+          const port3y = weightedAvg(r => r.r3y);
+
+          const colorFor = (v) => v == null ? 'var(--text-muted)' : v >= 12 ? 'var(--pos)' : v >= 6 ? '#D97706' : 'var(--neg)';
+
+          return (
+            <div>
+              <div style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                Computed from each fund's daily NAV history. <strong>1Y rolling return</strong> is the average of all overlapping 1-year (252 trading-day) return windows over the trailing 3 years (756 trading days). <strong>3Y rolling CAGR</strong> is the average of all overlapping 3-year (756 trading-day) CAGR windows over the trailing 5 years (1,260 trading days). Funds with less history than the lookback required show "—".
+              </div>
+              <div className="ptf-card">
+                <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Rolling return consistency by fund</div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>Fund</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>Weight</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>1Y Rolling Return — Avg (3Y)</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>3Y Rolling CAGR — Avg (5Y)</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>NAV History</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, fi) => (
+                        <tr key={row.f.isin} style={{ background: fi % 2 === 0 ? 'var(--bg-secondary)' : '#fff' }}>
+                          <td style={{ padding: '8px 12px', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', textAlign: 'left' }}>
+                            <span style={{ display: 'inline-block', width: 3, height: 20, background: row.f.color, borderRadius: 2, marginRight: 8, verticalAlign: 'middle' }} />
+                            {row.f.name}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{f2(row.w)}%</td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: colorFor(row.r1y) }}>
+                            {row.r1y != null ? (row.r1y >= 0 ? '+' : '') + row.r1y.toFixed(1) + '%' : '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: colorFor(row.r3y) }}>
+                            {row.r3y != null ? (row.r3y >= 0 ? '+' : '') + row.r3y.toFixed(1) + '%' : '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{row.years ? `${row.years}Y` : '—'}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ borderTop: '2px solid var(--border)', background: 'rgba(145,47,99,.06)' }}>
+                        <td style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)', textAlign: 'left' }}>Blended portfolio</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{f2(rows.reduce((s, r) => s + r.w, 0))}%</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)' }}>
+                          {port1y != null ? (port1y >= 0 ? '+' : '') + port1y.toFixed(1) + '%' : '—'}
+                        </td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)' }}>
+                          {port3y != null ? (port3y >= 0 ? '+' : '') + port3y.toFixed(1) + '%' : '—'}
+                        </td>
+                        <td style={{ padding: '8px 12px' }} />
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           );
         })()}

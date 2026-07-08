@@ -287,20 +287,47 @@ def build_column_map(rows: list) -> dict:
             col_map.setdefault("factor_liquidity", idx)
         elif "average maturity" in hl:
             col_map.setdefault("avg_maturity", idx)
+        elif "average eff maturity" in hl:  # Hybrid sheet uses "Average Eff Maturity Survey"
+            col_map.setdefault("avg_maturity", idx)
         elif "modified duration" in hl:
+            col_map.setdefault("modified_duration", idx)
+        elif "average mod duration" in hl:  # Hybrid sheet uses "Average Mod Duration Survey"
             col_map.setdefault("modified_duration", idx)
         elif "ytm" in hl:
             col_map.setdefault("ytm", idx)
         elif "average credit quality" in hl:
             col_map.setdefault("avg_credit_quality", idx)
-        elif "credit qual aaa" in hl:
+        # Debt / Debt ETF sheets use "Credit Qual XXX %"; Hybrid sheet uses
+        # "Credit Quality Survey XXX %" — both map to the same col_map keys.
+        elif "credit qual aaa" in hl or "credit quality survey aaa" in hl:
             col_map.setdefault("credit_aaa", idx)
-        elif "credit qual aa %" in hl:
+        elif "credit qual aa %" in hl or "credit quality survey aa %" in hl:
             col_map.setdefault("credit_aa", idx)
-        elif "credit qual a %" in hl:
+        elif "credit qual a %" in hl or "credit quality survey a %" in hl:
             col_map.setdefault("credit_a", idx)
-        elif "credit qual bbb" in hl:
+        elif "credit qual bbb" in hl or "credit quality survey bbb" in hl:
             col_map.setdefault("credit_bbb", idx)
+        elif "credit qual bb %" in hl or "credit quality survey bb %" in hl:
+            col_map.setdefault("credit_bb", idx)
+        elif "credit qual b %" in hl or "credit quality survey b %" in hl:
+            col_map.setdefault("credit_b", idx)
+        elif "credit qual below b" in hl or "credit quality survey below b" in hl:
+            col_map.setdefault("credit_below_b", idx)
+        elif "credit qual not rated" in hl or "credit quality survey not rated" in hl:
+            col_map.setdefault("credit_nr", idx)
+        # Fixed-Income super sector breakdown (Debt, Debt ETF, Hybrid sheets)
+        elif "fixed-inc super sector government" in hl:
+            col_map.setdefault("fi_sector_government", idx)
+        elif "fixed-inc super sector corporate" in hl:
+            col_map.setdefault("fi_sector_corporate", idx)
+        elif "fixed-inc super sector cash" in hl:
+            col_map.setdefault("fi_sector_cash_equiv", idx)
+        elif "fixed-inc super sector municipal" in hl:
+            col_map.setdefault("fi_sector_municipal", idx)
+        elif "fixed-inc super sector securitized" in hl:
+            col_map.setdefault("fi_sector_securitized", idx)
+        elif "fixed-inc super sector derivative" in hl:
+            col_map.setdefault("fi_sector_derivative", idx)
 
     if metric_row_idx is not None:
         metric_row = [cell_str(c) for c in rows[metric_row_idx]]
@@ -583,6 +610,36 @@ def _build_fund(row: dict, col_map: dict, asset_class: str) -> dict:
         "credit_aa":           r("credit_aa"),
         "credit_a":            r("credit_a"),
         "credit_bbb":          r("credit_bbb"),
+        "credit_bb":           r("credit_bb"),
+        "credit_b":            r("credit_b"),
+        "credit_below_b":      r("credit_below_b"),
+        "credit_nr":           r("credit_nr"),
+        "fi_sector_government": r("fi_sector_government"),
+        "fi_sector_corporate":  r("fi_sector_corporate"),
+        "fi_sector_cash_equiv": r("fi_sector_cash_equiv"),
+        "fi_sector_municipal":  r("fi_sector_municipal"),
+        "fi_sector_securitized": r("fi_sector_securitized"),
+        "fi_sector_derivative":  r("fi_sector_derivative"),
+        # Structural flag: does THIS SHEET have debt-parameter columns at all
+        # (maturity/duration/YTM/credit-quality/sector breakdown)? Set once
+        # per sheet from col_map, not from whether this particular fund's row
+        # happens to have values — a Debt/Debt ETF/Hybrid fund might have a
+        # blank row for one date but the sheet still HAS the columns, and an
+        # Equity fund never has them even if it holds some bond_pct.
+        "has_debt_columns": any(k in col_map for k in (
+            "avg_maturity", "modified_duration", "ytm",
+            "credit_aaa", "credit_aa", "credit_a", "credit_bbb",
+            "fi_sector_government", "fi_sector_corporate",
+        )),
+        # Structural flag: does THIS SHEET have equity risk-analytics columns
+        # at all (Up/Down Capture, Alpha, Beta, Sharpe, Sortino)? Debt and
+        # Debt ETF sheets have none of these — every other sheet does.
+        "has_equity_columns": any(k in col_map for k in (
+            "up_capture_1y", "up_capture_3y", "up_capture_5y",
+            "alpha_1y", "alpha_3y", "alpha_5y",
+            "beta_1y", "beta_3y", "beta_5y",
+            "sharpe_ratio_1y", "sharpe_ratio_3y", "sharpe_ratio_5y",
+        )),
     }
 
 

@@ -330,14 +330,22 @@ def trigger_holdings_fetch(isin: str, background_tasks: BackgroundTasks):
 
 
 @router.post("/fetch-universe")
-def trigger_universe_fetch(background_tasks: BackgroundTasks, limit: Optional[int] = None):
+def trigger_universe_fetch(background_tasks: BackgroundTasks, limit: Optional[int] = None, skip_done: bool = True):
     """
     Trigger a holdings fetch for all funds in DailyFundData.
     Runs in background since 1,800 funds takes ~15 minutes at the throttled rate.
     Use `limit` to test with a small batch first.
+
+    skip_done (default True): skip ISINs that already have a successful fetch
+    logged in the last 24 hours. Without this, re-triggering the endpoint
+    (e.g. after a crash/restart) re-processes already-done funds from the
+    start of the list every time, wasting many minutes before reaching new
+    ones — this looked exactly like a "stalled" fetch in practice. Pass
+    skip_done=false to force a full re-fetch of everything regardless.
     """
     from services.morningstar_service import fetch_universe_holdings
-    from models.database import SessionLocal, DailyFundData
+    from models.database import SessionLocal, DailyFundData, HoldingsFetchLog
+    from datetime import datetime, timedelta
 
     db = SessionLocal()
     try:
@@ -345,15 +353,94 @@ def trigger_universe_fetch(background_tasks: BackgroundTasks, limit: Optional[in
         if not latest_date:
             raise HTTPException(404, "No fund data available")
 
-        q = db.query(DailyFundData.isin).filter(DailyFundData.data_date == latest_date[0]).distinct()
-        if limit:
-            q = q.limit(limit)
+        q = (
+            db.query(DailyFundData.isin)
+            .filter(
+                DailyFundData.data_date == latest_date[0],
+                DailyFundData.isin != None,
+                DailyFundData.isin != "",
+                DailyFundData.is_benchmark != 1,  # benchmarks often have no real ISIN
+            )
+            .distinct()
+        )
         isins = [row[0] for row in q.all()]
+
+        if skip_done:
+            cutoff = datetime.utcnow() - timedelta(hours=24)
+            already_done = {
+                row[0] for row in db.query(HoldingsFetchLog.isin)
+                .filter(HoldingsFetchLog.status == "success", HoldingsFetchLog.fetched_at >= cutoff)
+                .distinct()
+                .all()
+            }
+            before = len(isins)
+            isins = [i for i in isins if i not in already_done]
+            skipped = before - len(isins)
+        else:
+            skipped = 0
+
+        if limit:
+            isins = isins[:limit]
     finally:
         db.close()
 
     background_tasks.add_task(fetch_universe_holdings, isins)
-    return {"status": "fetch_triggered", "fund_count": len(isins)}
+    return {"status": "fetch_triggered", "fund_count": len(isins), "skipped_already_done": skipped}
+
+
+@router.get("/admin/fetch-progress")
+def get_fetch_progress(since: Optional[str] = None):
+    """
+    Aggregate progress for a holdings fetch run — e.g. "312/1947 funds processed".
+    since: ISO datetime (e.g. "2026-07-07T11:00:00") to scope counts to a specific
+    run. If omitted, defaults to all-time (NOT "start of today" — a long-running
+    universe fetch can span midnight, and resetting the counter at midnight made
+    an actively-progressing run look like it had "0 processed" right after
+    rollover, which is misleading).
+    """
+    from models.database import SessionLocal, HoldingsFetchLog, DailyFundData
+    from datetime import datetime
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.fromisoformat(since) if since else datetime(2000, 1, 1)
+
+        logs = db.query(HoldingsFetchLog).filter(HoldingsFetchLog.fetched_at >= cutoff).all()
+
+        # Most recent status per ISIN (a fund may appear more than once if retried)
+        latest_by_isin = {}
+        for l in logs:
+            if l.isin not in latest_by_isin or l.fetched_at > latest_by_isin[l.isin].fetched_at:
+                latest_by_isin[l.isin] = l
+
+        status_counts = {"success": 0, "failed": 0, "no_data": 0}
+        for l in latest_by_isin.values():
+            status_counts[l.status] = status_counts.get(l.status, 0) + 1
+
+        processed = len(latest_by_isin)
+
+        latest_date = db.query(DailyFundData.data_date).order_by(DailyFundData.data_date.desc()).first()
+        total_universe = (
+            db.query(DailyFundData.isin).filter(DailyFundData.data_date == latest_date[0]).distinct().count()
+            if latest_date else None
+        )
+
+        last_activity = max((l.fetched_at for l in logs), default=None)
+
+        return {
+            "since": cutoff.isoformat(),
+            "processed": processed,
+            "total_universe": total_universe,
+            "progress": f"{processed}/{total_universe}" if total_universe else str(processed),
+            "status_counts": status_counts,
+            "last_activity": last_activity.isoformat() if last_activity else None,
+            "appears_stalled": (
+                last_activity is not None and
+                (datetime.utcnow() - last_activity).total_seconds() > 60
+            ),
+        }
+    finally:
+        db.close()
 
 
 @router.get("/admin/fetch-status")

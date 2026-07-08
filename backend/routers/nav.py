@@ -101,6 +101,180 @@ def get_nav_series(
     }
 
 
+@router.get("/rolling-metrics")
+def get_rolling_metrics(isins: str):
+    """
+    Compute, per ISIN, from daily NAV history:
+      - 1Y rolling return, averaged over a trailing 3-year lookback (window=252d, lookback=756d)
+      - 3Y rolling CAGR, averaged over a trailing 5-year lookback (window=756d, lookback=1260d)
+    Both are computed as daily-step rolling windows over the most recent available NAV history.
+    Funds with insufficient history return null for the metric that can't be computed.
+    """
+    from models.database import SessionLocal, NavHistory
+    from fastapi import HTTPException
+
+    isin_list = [i.strip() for i in isins.split(",") if i.strip()]
+    if not isin_list:
+        raise HTTPException(400, "At least 1 ISIN required")
+
+    WINDOW_1Y, LOOKBACK_1Y = 252, 252 * 3   # 1Y rolling return, avg over last 3Y
+    WINDOW_3Y, LOOKBACK_3Y = 252 * 3, 252 * 5  # 3Y rolling CAGR, avg over last 5Y
+
+    def rolling_avg(navs, window, lookback):
+        """navs: oldest→newest nav floats. Returns (avg_pct, window_count, is_cagr_len)."""
+        needed = window + lookback
+        n = len(navs)
+        if n < needed:
+            return None, 0
+        tail = navs[-needed:]
+        rets = []
+        for end in range(window, needed):
+            start_v = tail[end - window]
+            end_v = tail[end]
+            if start_v and start_v > 0 and end_v is not None:
+                rets.append(end_v / start_v)
+        if not rets:
+            return None, 0
+        years = window / 252
+        if years > 1:
+            avg = sum(r ** (1 / years) - 1 for r in rets) / len(rets)
+        else:
+            avg = sum(r - 1 for r in rets) / len(rets)
+        return avg * 100, len(rets)
+
+    db = SessionLocal()
+    try:
+        results = {}
+        rows = (
+            db.query(NavHistory.isin, NavHistory.date, NavHistory.nav)
+            .filter(NavHistory.isin.in_(isin_list), NavHistory.nav != None)
+            .order_by(NavHistory.isin, NavHistory.date.asc())
+            .all()
+        )
+        from itertools import groupby
+        by_isin = {isin: list(group) for isin, group in groupby(rows, key=lambda r: r.isin)}
+
+        for isin in isin_list:
+            grp = by_isin.get(isin, [])
+            navs = [r.nav for r in grp]
+            n = len(navs)
+            r1y_avg, r1y_n = rolling_avg(navs, WINDOW_1Y, LOOKBACK_1Y)
+            r3y_avg, r3y_n = rolling_avg(navs, WINDOW_3Y, LOOKBACK_3Y)
+            results[isin] = {
+                "isin": isin,
+                "rolling_1y_avg_3y": r1y_avg,
+                "rolling_1y_window_count": r1y_n,
+                "rolling_3y_cagr_avg_5y": r3y_avg,
+                "rolling_3y_window_count": r3y_n,
+                "days_available": n,
+                "years_available": round(n / 252, 1) if n else 0,
+            }
+        return {"funds": results}
+    finally:
+        db.close()
+
+
+@router.get("/rolling-debug/{isin}")
+def rolling_debug(isin: str):
+    """
+    Diagnostic: inspect a fund's daily NAV series for anomalies that would
+    distort rolling-return calculations — big moves between trading-adjacent
+    rows (possible unadjusted corporate action, split, or bad data row),
+    large data gaps (long stretches with no NAV rows — these are NOT treated
+    as single-day anomalies, since a big % change over months/years is
+    normal and not a split signal), duplicate dates, and the specific 3Y
+    windows contributing the most negative CAGR. Use this to explain
+    surprising rolling-metrics results.
+    """
+    from models.database import SessionLocal, NavHistory
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(NavHistory.date, NavHistory.nav)
+            .filter(NavHistory.isin == isin, NavHistory.nav != None)
+            .order_by(NavHistory.date.asc())
+            .all()
+        )
+        if not rows:
+            return {"isin": isin, "error": "No NAV history found"}
+
+        dates = [r.date for r in rows]
+        navs = [r.nav for r in rows]
+        n = len(navs)
+
+        # Duplicate date check
+        seen = set()
+        dupes = []
+        for d in dates:
+            if d in seen:
+                dupes.append(str(d))
+            seen.add(d)
+
+        # Big single-day move detection (possible split/bonus/bad data) —
+        # only counts if the gap between rows is a real trading-adjacent gap
+        # (<=5 calendar days, i.e. allows for weekends/holidays). Bigger gaps
+        # are genuine data gaps, not single-day anomalies, and are reported
+        # separately so they don't get misdiagnosed as splits.
+        MAX_GAP_DAYS = 5
+        big_moves = []
+        data_gaps = []
+        for i in range(1, n):
+            gap_days = (dates[i] - dates[i - 1]).days
+            if navs[i - 1] and navs[i - 1] > 0:
+                chg = navs[i] / navs[i - 1] - 1
+                if gap_days > MAX_GAP_DAYS:
+                    if abs(chg) > 0.15:
+                        data_gaps.append({
+                            "from_date": str(dates[i - 1]), "to_date": str(dates[i]),
+                            "gap_days": gap_days, "prev_nav": navs[i - 1], "nav": navs[i],
+                            "pct_change_over_gap": round(chg * 100, 2),
+                        })
+                    continue
+                if abs(chg) > 0.15:  # >15% in one trading-adjacent gap is unusual for a NAV series
+                    big_moves.append({
+                        "date": str(dates[i]),
+                        "prev_date": str(dates[i - 1]),
+                        "gap_days": gap_days,
+                        "prev_nav": navs[i - 1],
+                        "nav": navs[i],
+                        "pct_change": round(chg * 100, 2),
+                    })
+
+        # Worst 3Y (756d) rolling windows — which date ranges drag the CAGR down most
+        WINDOW = 252 * 3
+        worst_windows = []
+        if n > WINDOW:
+            window_results = []
+            for end in range(WINDOW, n):
+                start = end - WINDOW
+                if navs[start] and navs[start] > 0:
+                    r = navs[end] / navs[start]
+                    cagr = r ** (1 / 3) - 1
+                    window_results.append({
+                        "start_date": str(dates[start]), "end_date": str(dates[end]),
+                        "start_nav": navs[start], "end_nav": navs[end],
+                        "cagr_pct": round(cagr * 100, 2),
+                    })
+            worst_windows = sorted(window_results, key=lambda w: w["cagr_pct"])[:5]
+
+        return {
+            "isin": isin,
+            "row_count": n,
+            "date_range": {"start": str(dates[0]), "end": str(dates[-1])},
+            "years_available": round(n / 252, 1),
+            "duplicate_dates": dupes[:10],
+            "duplicate_count": len(dupes),
+            "big_single_day_moves": big_moves[:20],
+            "big_move_count": len(big_moves),
+            "data_gaps": data_gaps[:20],
+            "data_gap_count": len(data_gaps),
+            "worst_3y_windows": worst_windows,
+        }
+    finally:
+        db.close()
+
+
 @router.get("/health")
 def nav_health():
     """Check if NAV fetcher is working (tests mfapi with a known Indian fund)."""

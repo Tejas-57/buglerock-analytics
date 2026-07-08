@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Float, Date, DateTime, Text, Integer
+from sqlalchemy import create_engine, Column, String, Float, Date, DateTime, Text, Integer, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import func
@@ -186,6 +186,21 @@ class DailyFundData(Base):
     credit_below_b     = Column(Float)
     credit_nr          = Column(Float)
 
+    # Fixed-Income super sector breakdown (new — from Debt/Debt ETF/Hybrid sheets)
+    fi_sector_government  = Column(Float)
+    fi_sector_corporate    = Column(Float)
+    fi_sector_cash_equiv   = Column(Float)
+    fi_sector_municipal    = Column(Float)
+    fi_sector_securitized  = Column(Float)
+    fi_sector_derivative   = Column(Float)
+
+    # Structural flag: does this fund's source sheet have debt-parameter
+    # columns at all (regardless of whether this particular row has values)
+    has_debt_columns = Column(Boolean, default=False)
+    # Structural flag: does this fund's source sheet have equity risk-analytics
+    # columns at all (Up/Down Capture, Alpha, Beta, Sharpe, Sortino)
+    has_equity_columns = Column(Boolean, default=False)
+
     # Benchmark identifier fields
     is_benchmark    = Column(Integer, default=0)  # 1 if this row is a benchmark
     benchmark_label = Column(String(20))           # e.g. "Benchmark 1"
@@ -330,7 +345,7 @@ class FundHolding(Base):
     # Bond-specific
     maturity_date = Column(Date)
     coupon        = Column(Float)
-    indian_credit_quality = Column(String(20))
+    indian_credit_quality = Column(String(100))
 
     # Exchange
     exchange_id    = Column(String(20))

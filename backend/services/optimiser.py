@@ -20,8 +20,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 RISK_FREE_RATE = 0.065  # 6.5% p.a.
-MIN_WEIGHT = 0.05       # 3% minimum per fund
-MAX_WEIGHT = 0.20       # 20% maximum per fund
+MIN_WEIGHT = 0.10       # 3% minimum per fund
+MAX_WEIGHT = 0.40       # 20% maximum per fund
 N_SIMULATIONS = 10000
 MIN_WEEKS_REQUIRED = 52  # 1 year minimum
 
@@ -53,7 +53,7 @@ EXCLUDED_CATS = {
 PRECIOUS_METALS_CAP = 0.10
 EQUITY_PASSIVE_CAP  = 0.10
 INTERNATIONAL_CAP   = 0.10
-THEMATIC_CAP        = 0.10
+THEMATIC_CAP        = 1.0
 
 THEMATIC_CATS = {
     "Thematic Funds",
