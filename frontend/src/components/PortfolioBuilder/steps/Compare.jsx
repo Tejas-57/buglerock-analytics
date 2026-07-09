@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { fp, f2 } from './BuildPortfolio';
 
-const API = import.meta.env.VITE_API_URL || '';
+const API = process.env.REACT_APP_API_URL || '';
 
 async function fetchSnapshot(isin, dateStr) {
   try {

@@ -130,7 +130,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
   async function fetchOverlap() {
     if (equityFundsForOverlap.length < 2) return;
-    const API = import.meta.env.VITE_API_URL || '';
+    const API = process.env.REACT_APP_API_URL || '';
     setOverlapLoading(true);
     setOverlapError(null);
     setOverlapData(null);
@@ -172,7 +172,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
   useEffect(() => {
     if (activeTab !== 'rolling' || funds.length === 0) return;
-    const API = import.meta.env.VITE_API_URL || '';
+    const API = process.env.REACT_APP_API_URL || '';
     const isins = funds.map(f => f.isin).join(',');
     setRollingLoading(true);
     setRollingError(null);
@@ -242,7 +242,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
   React.useEffect(() => {
     if (activeTab !== 'correlation' || funds.length < 2) return;
-    const API = import.meta.env.VITE_API_URL || '';
+    const API = process.env.REACT_APP_API_URL || '';
     const isins = funds.map(f => f.isin).join(',');
     setCorrLoading(true);
     fetch(`${API}/api/nav/correlation?isins=${isins}`)
