@@ -71,6 +71,21 @@ def merged_fund_list(categories: str, asset_class: str, date: str = Query(None))
     return {"funds": all_funds, "date": str(d)}
 
 
+@router.get("/peers")
+def get_peer_funds(category: str, date: str = Query(None), rankings: str = "R1,R2", exclude: str = ""):
+    """
+    Return R1/R2 ranked funds in the same category — used for peer suggestions
+    in the Compare Funds tab. Rankings and exclude ISINs are comma-separated.
+    """
+    from services.db_service import search_funds_by_category
+    d = resolve_date(date)
+    ranking_list = [r.strip() for r in rankings.split(",") if r.strip()]
+    funds = search_funds_by_category(category, d, rankings=ranking_list)
+    exclude_set = {e.strip() for e in exclude.split(",") if e.strip()}
+    funds = [f for f in funds if f["isin"] not in exclude_set]
+    return {"funds": funds, "category": category, "date": str(d)}
+
+
 @router.get("/search")
 def search_funds(q: str, date: str = Query(None)):
     """Global fund search across all categories."""

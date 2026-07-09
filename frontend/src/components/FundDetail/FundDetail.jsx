@@ -413,11 +413,12 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
   const bmRk = (base) => { const v = bmRisk[`${base}_${period}`]; return v != null && v !== '-' ? v : null; };
 
   const riskRows = [
-    { l:'Std Dev',  vf:rk('std_dev'),      vb:bmRk('std_dev'),      fmt:v=>fmt(v)+'%', sig:v=>parseFloat(v)<12?'Low vol':parseFloat(v)<18?'Moderate':'High vol' },
-    { l:'Alpha',    vf:rk('alpha'),        vb:null,                  fmt:v=>pct(v),     sig:v=>parseFloat(v)>2?'Strong outperform':parseFloat(v)>0?'Positive':parseFloat(v)>-2?'Slight lag':'Underperform' },
-    { l:'Beta',     vf:rk('beta'),         vb:null,                  fmt:v=>fmt(v),     sig:v=>parseFloat(v)<0.8?'Defensive':parseFloat(v)<1.1?'Market-like':'Aggressive' },
-    { l:'Sharpe',   vf:rk('sharpe_ratio'), vb:bmRk('sharpe_ratio'), fmt:v=>fmt(v),     sig:v=>parseFloat(v)>0.8?'Strong':parseFloat(v)>0.5?'Adequate':'Weak' },
-    { l:'Sortino',  vf:rk('sortino_ratio'),vb:bmRk('sortino_ratio'),fmt:v=>fmt(v),     sig:v=>parseFloat(v)>1?'Good':parseFloat(v)>0.6?'Moderate':'Weak' },
+    { l:'Std Dev',            vf:rk('std_dev'),            vb:bmRk('std_dev'),            fmt:v=>fmt(v)+'%', sig:v=>parseFloat(v)<12?'Low vol':parseFloat(v)<18?'Moderate':'High vol' },
+    { l:'Alpha',              vf:rk('alpha'),              vb:null,                        fmt:v=>pct(v),     sig:v=>parseFloat(v)>2?'Strong outperform':parseFloat(v)>0?'Positive':parseFloat(v)>-2?'Slight lag':'Underperform' },
+    { l:'Beta',               vf:rk('beta'),               vb:null,                        fmt:v=>fmt(v),     sig:v=>parseFloat(v)<0.8?'Defensive':parseFloat(v)<1.1?'Market-like':'Aggressive' },
+    { l:'Sharpe',             vf:rk('sharpe_ratio'),       vb:bmRk('sharpe_ratio'),       fmt:v=>fmt(v),     sig:v=>parseFloat(v)>0.8?'Strong':parseFloat(v)>0.5?'Adequate':'Weak' },
+    { l:'Sortino',            vf:rk('sortino_ratio'),      vb:bmRk('sortino_ratio'),      fmt:v=>fmt(v),     sig:v=>parseFloat(v)>1?'Good':parseFloat(v)>0.6?'Moderate':'Weak' },
+    { l:'Information Ratio',  vf:rk('information_ratio'), vb:null,                        fmt:v=>fmt(v),     sig:v=>parseFloat(v)>0.5?'Strong':parseFloat(v)>0?'Positive':parseFloat(v)>-0.5?'Slight lag':'Weak' },
   ].filter(row => row.vf!=null&&row.vf!=='-');
 
   const nav52pct = f?.nav && f?.nav_52w_high && f?.nav_52w_low && f.nav!=='-' && f.nav_52w_high!=='-' && f.nav_52w_low!=='-'
@@ -649,7 +650,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
         {/* ⑥ RISK TABLE + PORTFOLIO */}
         <div style={{ display: 'grid', gridTemplateColumns: hasEquitySection ? '1fr 1fr' : '1fr', gap: 14, marginBottom: 14 }}>
           {hasEquitySection && (
-            <Card title="Equity Risk Metrics">
+            <Card title="Equity risk metrics">
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: 'var(--bg-secondary)' }}>
@@ -832,7 +833,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
                         <td style={{ padding: '7px 8px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{i + 1}</td>
                         <td style={{ padding: '7px 8px', fontWeight: 500 }}>{h.name || h.isin || '—'}</td>
                         <td style={{ padding: '7px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--brand-dark)' }}>
-                          {h.weighting != null ? `${h.weighting.toFixed(2)}%` : '—'}
+                          {h.weighting != null ? `${h.weighting.toFixed(1)}%` : '—'}
                         </td>
                       </tr>
                     ))}

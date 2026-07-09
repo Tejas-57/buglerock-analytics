@@ -81,6 +81,19 @@ export default function CompareFunds({ selectedDate }) {
   const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
   const MAX = 4;
 
+  // Suggested peers — R1/R2 funds in the same category as the first fund
+  const [peerSuggestions, setPeerSuggestions] = useState([]);
+  useEffect(() => {
+    if (!funds.length) { setPeerSuggestions([]); return; }
+    const category = funds[0]?.data?.category || funds[0]?.category;
+    if (!category) { setPeerSuggestions([]); return; }
+    const API = process.env.REACT_APP_API_URL || '';
+    const excludeIsins = funds.map(f => f.isin).join(',');
+    fetch(`${API}/api/funds/peers?category=${encodeURIComponent(category)}&date=${dateStr}&exclude=${excludeIsins}`)
+      .then(r => r.json())
+      .then(d => setPeerSuggestions(d.funds || []))
+      .catch(() => setPeerSuggestions([]));
+  }, [funds.map(f => f.isin).join(','), dateStr]);
 
   // Persist funds to localStorage on every change
   useEffect(() => {
@@ -964,6 +977,55 @@ export default function CompareFunds({ selectedDate }) {
           {/* Table */}
           <div style={activeTab === 'overlap' ? { padding: '16px 0' } : { overflowX: 'auto' }}>
             {renderTable()}
+          </div>
+        </div>
+      )}
+
+      {/* Suggested peers — R1/R2 funds in the same category */}
+      {funds.length >= 1 && funds.length < MAX && peerSuggestions.length > 0 && (
+        <div style={{ marginTop: 20, padding: '14px 16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 12 }}>
+            Suggested peers to compare
+            <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>
+              — R1 &amp; R2 ranked funds in the same category
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {peerSuggestions.slice(0, 6).map(peer => (
+              <button
+                key={peer.isin}
+                onClick={() => addFund(peer)}
+                disabled={!!funds.find(f => f.isin === peer.isin) || funds.length >= MAX || loadingIsins.has(peer.isin)}
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4,
+                  padding: '10px 14px', background: '#fff', border: `1px solid var(--border)`,
+                  borderRadius: 10, cursor: 'pointer', textAlign: 'left', minWidth: 160, maxWidth: 220,
+                  opacity: funds.find(f => f.isin === peer.isin) || funds.length >= MAX ? 0.4 : 1,
+                  transition: 'border-color .15s, box-shadow .15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--brand-primary)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(145,47,99,.12)'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none'; }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, letterSpacing: '.04em', padding: '2px 6px', borderRadius: 4,
+                    background: peer.ranking === 'R1' ? 'rgba(26,122,82,.12)' : 'rgba(180,107,16,.12)',
+                    color: peer.ranking === 'R1' ? '#1A7A52' : '#B46B10',
+                  }}>{peer.ranking}</span>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                    {loadingIsins.has(peer.isin) ? 'Adding…' : '+ Add'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3 }}>
+                  {peer.name?.length > 28 ? peer.name.slice(0, 26) + '…' : peer.name}
+                </div>
+                {peer.nav != null && (
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                    NAV ₹{peer.nav}
+                  </div>
+                )}
+              </button>
+            ))}
           </div>
         </div>
       )}

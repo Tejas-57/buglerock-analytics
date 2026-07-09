@@ -621,6 +621,33 @@ def get_all_funds_for_dropdown(data_date, asset_class: str, category: str) -> li
 
 # ── Global fund search ───────────────────────────────────────────────────────
 
+def search_funds_by_category(category: str, data_date: date, rankings: list = None, limit: int = 50) -> list:
+    """Return funds matching an exact category, optionally filtered by ranking."""
+    db = get_session()
+    try:
+        q = db.query(DailyFundData).filter(
+            DailyFundData.data_date == data_date,
+            DailyFundData.category == category,
+            DailyFundData.isin != None,
+            DailyFundData.name != None,
+            DailyFundData.is_benchmark != 1,
+        )
+        if rankings:
+            q = q.filter(DailyFundData.ranking.in_(rankings))
+        funds = q.order_by(DailyFundData.ranking, DailyFundData.name).limit(limit).all()
+        return [{
+            "isin": f.isin,
+            "name": f.name,
+            "ranking": f.ranking,
+            "category": f.category,
+            "asset_class": remap_asset_class(f.asset_class or "", f.category or ""),
+            "nav": f.nav,
+            "return_1y": f.return_1y,
+        } for f in funds]
+    finally:
+        db.close()
+
+
 def search_funds_global(query: str, data_date: date, limit: int = 50) -> list:
     """Search all funds by name or ISIN across all categories with partial word matching."""
     db = get_session()
