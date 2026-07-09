@@ -827,16 +827,16 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <div className="ptf-card" style={{ padding: '14px 16px' }}>
-                  <div className="ptf-card-hd">Asset allocation vs IPS targets</div>
-                  <AllocRow label="Equity" value={B.equity_pct} color="#912F63" target={[+(ips?.alloc?.eqMin||0), +(ips?.alloc?.eqMax||100)]} />
-                  <AllocRow label="Bonds / Debt" value={B.bond_pct||0} color="#3E3452" target={[+(ips?.alloc?.debtMin||0), +(ips?.alloc?.debtMax||100)]} />
+                  <div className="ptf-card-hd">{ips?.alloc ? 'Asset allocation vs IPS targets' : 'Asset allocation'}</div>
+                  <AllocRow label="Equity" value={B.equity_pct} color="#912F63" target={ips?.alloc ? [+(ips.alloc.eqMin||0), +(ips.alloc.eqMax||100)] : null} />
+                  <AllocRow label="Bonds / Debt" value={B.bond_pct||0} color="#3E3452" target={ips?.alloc ? [+(ips.alloc.debtMin||0), +(ips.alloc.debtMax||100)] : null} />
                   <AllocRow label="Cash / Liquid" value={B.cash_pct||0} color="#A795AE" />
                 </div>
                 <div className="ptf-card" style={{ padding: '14px 16px' }}>
-                  <div className="ptf-card-hd">Market cap split vs IPS targets</div>
-                  <AllocRow label="Large cap" value={B.large_cap} color="#185FA5" target={[+(ips?.alloc?.lcMin||0), +(ips?.alloc?.lcMax||100)]} />
-                  <AllocRow label="Mid cap" value={B.mid_cap} color="#1D9E75" target={[+(ips?.alloc?.mcMin||0), +(ips?.alloc?.mcMax||100)]} />
-                  <AllocRow label="Small cap" value={B.small_cap} color="#D85A30" target={[+(ips?.alloc?.scMin||0), +(ips?.alloc?.scMax||100)]} />
+                  <div className="ptf-card-hd">{ips?.alloc ? 'Market cap split vs IPS targets' : 'Market cap split'}</div>
+                  <AllocRow label="Large cap" value={B.large_cap} color="#185FA5" target={ips?.alloc ? [+(ips.alloc.lcMin||0), +(ips.alloc.lcMax||100)] : null} />
+                  <AllocRow label="Mid cap" value={B.mid_cap} color="#1D9E75" target={ips?.alloc ? [+(ips.alloc.mcMin||0), +(ips.alloc.mcMax||100)] : null} />
+                  <AllocRow label="Small cap" value={B.small_cap} color="#D85A30" target={ips?.alloc ? [+(ips.alloc.scMin||0), +(ips.alloc.scMax||100)] : null} />
                 </div>
               </div>
 
