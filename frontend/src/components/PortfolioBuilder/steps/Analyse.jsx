@@ -1159,9 +1159,10 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
         if (stressError) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--neg)', fontSize: 13 }}>{stressError}</div>;
         if (!stressData) return null;
 
-        const { scenarios } = stressData;
-        const withData = scenarios.filter(s => s.has_data);
-        const worstReturn = Math.min(...withData.map(s => s.portfolio_return ?? 0));
+        const { scenarios } = stressData || {};
+        if (!scenarios || scenarios.length === 0) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No scenario data available.</div>;
+        const withData = scenarios.filter(s => s.has_data && s.portfolio_return != null);
+        const worstReturn = withData.length > 0 ? Math.min(...withData.map(s => s.portfolio_return)) : 0;
 
         const retColor = v => v == null ? 'var(--text-muted)' : v >= 0 ? 'var(--pos)' : 'var(--neg)';
         const fmt2 = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
@@ -1170,7 +1171,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
           <div>
             {/* Key insight banner */}
             {withData.length > 0 && (() => {
-              const worst = withData.reduce((a, b) => (b.portfolio_return ?? 0) < (a.portfolio_return ?? 0) ? b : a);
+              const worst = withData.reduce((a, b) => (b.portfolio_return ?? 0) < (a.portfolio_return ?? 0) ? b : a, withData[0]);
               return (
                 <div style={{ borderLeft: '4px solid #B46B10', background: '#FEF3C7', padding: '11px 14px', borderRadius: '0 8px 8px 0', fontSize: 12, lineHeight: 1.7, marginBottom: 14, color: 'var(--text-primary)' }}>
                   Worst historical scenario for this portfolio: <strong style={{ color: 'var(--neg)' }}>{worst.name}</strong> ({worst.label}) with an estimated drawdown of <strong style={{ color: 'var(--neg)' }}>{fmt2(worst.portfolio_return)}</strong>. Returns are calculated from actual NAV history in the database.
