@@ -698,7 +698,7 @@ def get_stress_test(isins: str, weights: str):
         import yfinance as yf
         # Fetch with a wide window covering all scenarios
         nifty_df = yf.download(
-            "^CNX500",
+            "^CRSLDX",
             start="2007-01-01",
             end=date.today().isoformat(),
             progress=False,
