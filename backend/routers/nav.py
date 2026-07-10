@@ -6,6 +6,9 @@ NAV history endpoints for portfolio analytics.
 from fastapi import APIRouter, Query, BackgroundTasks
 from datetime import date, timedelta
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -657,6 +660,134 @@ def get_correlation(isins: str, as_of_date: str = None):
             },
             "note": None
         }
+
+    finally:
+        db.close()
+
+# ── Stress Test ────────────────────────────────────────────────────────────────
+
+STRESS_SCENARIOS = [
+    {"id": "gfc",        "name": "Global Financial Crisis",                    "label": "Jan 2008 – Oct 2008",  "start": "2008-01-01", "end": "2008-10-31"},
+    {"id": "euro",       "name": "European Sovereign Debt Crisis",             "label": "Nov 2010 – Dec 2011",  "start": "2010-11-01", "end": "2011-12-31"},
+    {"id": "china",      "name": "China Slowdown & Yuan Devaluation",          "label": "Mar 2015 – Feb 2016",  "start": "2015-03-01", "end": "2016-02-29"},
+    {"id": "ilfs",       "name": "IL&FS / NBFC Credit Crisis",                 "label": "Aug 2018 – Oct 2018",  "start": "2018-08-01", "end": "2018-10-31"},
+    {"id": "covid",      "name": "Covid-19 Crash",                             "label": "Jan 2020 – Mar 2020",  "start": "2020-01-01", "end": "2020-03-31"},
+    {"id": "fiirerating","name": "FII-Driven Rerating",                        "label": "Sep 2024 – Mar 2026",  "start": "2024-09-01", "end": "2026-03-31"},
+]
+
+@router.get("/stress-test")
+def get_stress_test(isins: str, weights: str):
+    """
+    For each historical stress scenario, compute actual portfolio return using
+    weighted NAV history from the DB, and Nifty 500 return via yfinance.
+
+    isins:   comma-separated ISINs
+    weights: comma-separated weights (same order, summing to 100)
+    """
+    from models.database import SessionLocal, NavHistory
+
+    isin_list = [i.strip() for i in isins.split(",") if i.strip()]
+    weight_list = [float(w.strip()) / 100 for w in weights.split(",") if w.strip()]
+
+    if len(isin_list) != len(weight_list):
+        raise HTTPException(400, "ISINs and weights must have same length")
+
+    # Fetch Nifty 500 data for all scenario date ranges in one call
+    nifty500_returns = {}
+    try:
+        import yfinance as yf
+        # Fetch with a wide window covering all scenarios
+        nifty_df = yf.download(
+            "^CNX500",
+            start="2007-01-01",
+            end=date.today().isoformat(),
+            progress=False,
+            auto_adjust=True,
+        )
+        if not nifty_df.empty:
+            # Flatten multi-level columns if present
+            if hasattr(nifty_df.columns, 'levels'):
+                nifty_df.columns = nifty_df.columns.get_level_values(0)
+            nifty_close = nifty_df["Close"]
+            for sc in STRESS_SCENARIOS:
+                start = date.fromisoformat(sc["start"])
+                end   = date.fromisoformat(sc["end"])
+                # Filter to scenario window ±10 days
+                mask = (nifty_close.index.date >= start - timedelta(days=10)) & \
+                       (nifty_close.index.date <= end + timedelta(days=10))
+                window = nifty_close[mask]
+                if len(window) >= 2:
+                    start_val = window.iloc[0]
+                    end_val   = window.iloc[-1]
+                    nifty500_returns[sc["id"]] = round((float(end_val) / float(start_val) - 1) * 100, 2)
+                else:
+                    nifty500_returns[sc["id"]] = None
+    except Exception as e:
+        # yfinance unavailable — proceed without benchmark
+        logger.warning(f"Nifty 500 fetch failed (non-fatal): {e}")
+        nifty500_returns = {sc["id"]: None for sc in STRESS_SCENARIOS}
+
+    db = SessionLocal()
+    try:
+        results = []
+        for sc in STRESS_SCENARIOS:
+            start = date.fromisoformat(sc["start"])
+            end   = date.fromisoformat(sc["end"])
+
+            fund_returns = {}
+            has_data = False
+
+            for isin in isin_list:
+                nav_rows = (
+                    db.query(NavHistory)
+                    .filter(
+                        NavHistory.isin == isin,
+                        NavHistory.date >= start - timedelta(days=10),
+                        NavHistory.date <= end + timedelta(days=10),
+                        NavHistory.nav != None,
+                    )
+                    .order_by(NavHistory.date)
+                    .all()
+                )
+
+                if not nav_rows:
+                    fund_returns[isin] = None
+                    continue
+
+                start_row = min(nav_rows, key=lambda r: abs((r.date - start).days))
+                end_row   = min(nav_rows, key=lambda r: abs((r.date - end).days))
+
+                if start_row.nav and end_row.nav and start_row.date != end_row.date:
+                    ret = (end_row.nav / start_row.nav - 1) * 100
+                    fund_returns[isin] = round(ret, 2)
+                    has_data = True
+                else:
+                    fund_returns[isin] = None
+
+            portfolio_return = None
+            if has_data:
+                weighted_sum = 0
+                weight_used = 0
+                for isin, wt in zip(isin_list, weight_list):
+                    if fund_returns.get(isin) is not None:
+                        weighted_sum += fund_returns[isin] * wt
+                        weight_used += wt
+                if weight_used > 0:
+                    portfolio_return = round(weighted_sum / weight_used, 2)
+
+            nifty_ret = nifty500_returns.get(sc["id"])
+            cushion = round(portfolio_return - nifty_ret, 2) if portfolio_return is not None and nifty_ret is not None else None
+
+            results.append({
+                **sc,
+                "portfolio_return": portfolio_return,
+                "nifty500_return": nifty_ret,
+                "cushion": cushion,
+                "fund_returns": fund_returns,
+                "has_data": has_data,
+            })
+
+        return {"scenarios": results, "isins": isin_list, "weights": weight_list}
 
     finally:
         db.close()

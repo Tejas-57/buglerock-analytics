@@ -18,3 +18,4 @@ scipy
 python-dateutil
 pytz
 python-multipart
+yfinance>=0.2.40

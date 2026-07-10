@@ -9,6 +9,7 @@ const TABS = [
   { id: 'correlation', label: 'Correlation' },
   { id: 'overlap', label: 'Overlap' },
   { id: 'rolling', label: 'Rolling returns' },
+  { id: 'stress', label: 'Stress test' },
   { id: 'funds', label: 'Fund details' },
 ];
 
@@ -164,6 +165,23 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
     if (activeTab === 'overlap' && equityFundsForOverlap.length >= 2) fetchOverlap();
     else if (activeTab === 'overlap' && equityFundsForOverlap.length < 2) { setOverlapData(null); setOverlapError(null); }
   }, [activeTab, funds.map(f => f.isin).join(',')]);
+
+  // ── Stress test state ────────────────────────────────────────────────────
+  const [stressData, setStressData] = useState(null);
+  const [stressLoading, setStressLoading] = useState(false);
+  const [stressError, setStressError] = useState(null);
+
+  useEffect(() => {
+    if (activeTab !== 'stress' || funds.length === 0) return;
+    setStressLoading(true); setStressError(null); setStressData(null);
+    const API = process.env.REACT_APP_API_URL || '';
+    const isins = funds.map(f => f.isin).join(',');
+    const wts = funds.map(f => (weights[f.isin] || 0)).join(',');
+    fetch(`${API}/api/nav/stress-test?isins=${isins}&weights=${wts}`)
+      .then(r => r.json())
+      .then(d => { setStressData(d); setStressLoading(false); })
+      .catch(e => { setStressError('Failed to load stress test data.'); setStressLoading(false); });
+  }, [activeTab, funds.map(f => f.isin).join(','), JSON.stringify(weights)]);
 
   // ── Rolling returns state & fetch (daily-NAV based) ─────────────────────
   const [rollingData, setRollingData] = useState(null);
@@ -1135,7 +1153,106 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
         })()}
 
         {/* ── ROLLING RETURNS ── */}
-        {activeTab === 'rolling' && (() => {
+        {activeTab === 'stress' && (() => {
+        if (funds.length === 0) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Add funds to the portfolio to see stress test results.</div>;
+        if (stressLoading) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Computing historical stress scenarios...</div>;
+        if (stressError) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--neg)', fontSize: 13 }}>{stressError}</div>;
+        if (!stressData) return null;
+
+        const { scenarios } = stressData;
+        const withData = scenarios.filter(s => s.has_data);
+        const worstReturn = Math.min(...withData.map(s => s.portfolio_return ?? 0));
+
+        const retColor = v => v == null ? 'var(--text-muted)' : v >= 0 ? 'var(--pos)' : 'var(--neg)';
+        const fmt2 = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+
+        return (
+          <div>
+            {/* Key insight banner */}
+            {withData.length > 0 && (() => {
+              const worst = withData.reduce((a, b) => (b.portfolio_return ?? 0) < (a.portfolio_return ?? 0) ? b : a);
+              return (
+                <div style={{ borderLeft: '4px solid #B46B10', background: '#FEF3C7', padding: '11px 14px', borderRadius: '0 8px 8px 0', fontSize: 12, lineHeight: 1.7, marginBottom: 14, color: 'var(--text-primary)' }}>
+                  Worst historical scenario for this portfolio: <strong style={{ color: 'var(--neg)' }}>{worst.name}</strong> ({worst.label}) with an estimated drawdown of <strong style={{ color: 'var(--neg)' }}>{fmt2(worst.portfolio_return)}</strong>. Returns are calculated from actual NAV history in the database.
+                </div>
+              );
+            })()}
+
+            {/* Impact bars */}
+            <div className="ptf-card" style={{ marginBottom: 14 }}>
+              <div className="ptf-card-hd">Portfolio drawdown by scenario — actual NAV returns</div>
+              <div style={{ padding: 14 }}>
+                {scenarios.map(sc => {
+                  const v = sc.portfolio_return;
+                  const pct = worstReturn < 0 && v != null ? Math.abs(v / worstReturn * 100) : 0;
+                  return (
+                    <div key={sc.id} style={{ marginBottom: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+                        <div>
+                          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{sc.name}</span>
+                          <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 10 }}>{sc.label}</span>
+                        </div>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: retColor(v) }}>{fmt2(v)}</span>
+                      </div>
+                      <div style={{ height: 8, background: 'var(--bg-secondary)', borderRadius: 4, overflow: 'hidden' }}>
+                        {v != null && <div style={{ width: pct.toFixed(0) + '%', height: '100%', background: v >= 0 ? 'var(--pos)' : 'linear-gradient(90deg, #912F63, #C46985)', borderRadius: 4 }} />}
+                      </div>
+                      {!sc.has_data && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>NAV history not available for this period</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Scenario detail table */}
+            <div className="ptf-card">
+              <div className="ptf-card-hd">Scenario detail — fund-level returns</div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg-secondary)' }}>
+                      <th style={{ padding: '8px 14px', textAlign: 'left', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>Scenario</th>
+                      <th style={{ padding: '8px 14px', textAlign: 'center', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>Period</th>
+                      <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>Portfolio</th>
+                      <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>Nifty 500</th>
+                      <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>Cushion vs Index</th>
+                      {funds.map(f => (
+                        <th key={f.isin} style={{ padding: '8px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {f.name?.split(' ').slice(0, 3).join(' ')}
+                          <div style={{ fontSize: 9, fontWeight: 400, color: 'var(--text-muted)' }}>{weights[f.isin]}%</div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scenarios.map((sc, i) => (
+                      <tr key={sc.id} style={{ borderBottom: '1px solid var(--bg-secondary)', background: i % 2 === 0 ? 'var(--bg-secondary)' : '#fff' }}>
+                        <td style={{ padding: '10px 14px', fontWeight: 500, color: 'var(--text-primary)' }}>{sc.name}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{sc.label}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: retColor(sc.portfolio_return) }}>{fmt2(sc.portfolio_return)}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, color: retColor(sc.nifty500_return) }}>{fmt2(sc.nifty500_return)}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: sc.cushion == null ? 'var(--text-muted)' : sc.cushion >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
+                          {sc.cushion == null ? '—' : (sc.cushion >= 0 ? '+' : '') + sc.cushion.toFixed(1) + '%'}
+                        </td>
+                        {funds.map(f => (
+                          <td key={f.isin} style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, color: retColor(sc.fund_returns?.[f.isin]) }}>
+                            {fmt2(sc.fund_returns?.[f.isin])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ padding: '8px 14px', fontSize: 10, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
+                Returns calculated from actual NAV history. "—" means the fund was not active or NAV data is unavailable for that period.
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {activeTab === 'rolling' && (() => {
           if (funds.length === 0) {
             return <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Add funds to the portfolio to see rolling returns.</div>;
           }
