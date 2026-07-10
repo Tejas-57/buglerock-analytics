@@ -694,17 +694,23 @@ def get_stress_test(isins: str, weights: str):
 
     # Fetch Nifty 500 data for all scenario date ranges in one call
     nifty500_returns = {}
+    NIFTY500_TICKERS = ["^CRSLDX", "^CNX500", "NIFTY500.NS", "CNX500.NS"]
     try:
         import yfinance as yf
-        # Fetch with a wide window covering all scenarios
-        nifty_df = yf.download(
-            "^CRSLDX",
-            start="2007-01-01",
-            end=date.today().isoformat(),
-            progress=False,
-            auto_adjust=True,
-        )
-        if not nifty_df.empty:
+        nifty_df = None
+        for ticker in NIFTY500_TICKERS:
+            logger.info(f"Trying Nifty 500 ticker: {ticker}")
+            try:
+                df = yf.download(ticker, start="2007-01-01", end=date.today().isoformat(), progress=False, auto_adjust=True)
+                if not df.empty:
+                    logger.info(f"Nifty 500 ticker {ticker} returned {len(df)} rows")
+                    nifty_df = df
+                    break
+                else:
+                    logger.warning(f"Ticker {ticker} returned empty dataframe")
+            except Exception as te:
+                logger.warning(f"Ticker {ticker} failed: {te}")
+        if nifty_df is not None and not nifty_df.empty:
             # Flatten multi-level columns if present
             if hasattr(nifty_df.columns, 'levels'):
                 nifty_df.columns = nifty_df.columns.get_level_values(0)
@@ -712,7 +718,6 @@ def get_stress_test(isins: str, weights: str):
             for sc in STRESS_SCENARIOS:
                 start = date.fromisoformat(sc["start"])
                 end   = date.fromisoformat(sc["end"])
-                # Filter to scenario window ±10 days
                 mask = (nifty_close.index.date >= start - timedelta(days=10)) & \
                        (nifty_close.index.date <= end + timedelta(days=10))
                 window = nifty_close[mask]
@@ -722,8 +727,10 @@ def get_stress_test(isins: str, weights: str):
                     nifty500_returns[sc["id"]] = round((float(end_val) / float(start_val) - 1) * 100, 2)
                 else:
                     nifty500_returns[sc["id"]] = None
+        else:
+            logger.warning("All Nifty 500 tickers failed or returned empty data")
+            nifty500_returns = {sc["id"]: None for sc in STRESS_SCENARIOS}
     except Exception as e:
-        # yfinance unavailable — proceed without benchmark
         logger.warning(f"Nifty 500 fetch failed (non-fatal): {e}")
         nifty500_returns = {sc["id"]: None for sc in STRESS_SCENARIOS}
 
