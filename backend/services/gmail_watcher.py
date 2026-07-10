@@ -172,7 +172,7 @@ def download_attachment(service, message_id: str) -> tuple:
     return None, None
 
 
-def fetch_latest(check_days: int = 5, force: bool = False) -> bool:
+def fetch_latest(check_days: int = 5, force: bool = False, skip_holdings: bool = False) -> bool:
     """
     Fetch the most recent Morningstar email.
     data_date is taken directly from the nav_date in the Excel (most common nav_date).
@@ -287,31 +287,26 @@ def fetch_latest(check_days: int = 5, force: bool = False) -> bool:
 
             save_parsed_data(parsed)
 
-            # Automatically fetch holdings for any brand-new funds that
-            # appeared in today's file for the first time — cheap (usually
-            # 0-a few funds) and means new funds don't silently stay without
-            # holdings data until someone remembers to re-run the universe fetch.
-            try:
-                from services.morningstar_service import fetch_holdings_for_new_isins
-                new_fund_isins = [f.get("isin") for f in parsed["funds"] if f.get("isin")]
-                result = fetch_holdings_for_new_isins(new_fund_isins)
-                if result.get("new_found"):
-                    logger.info(f"New-fund holdings fetch: {result}")
-            except Exception as e:
-                # Never let a holdings-fetch hiccup break the daily NAV parse/save
-                logger.error(f"New-fund holdings fetch failed (non-fatal): {e}", exc_info=True)
+            # Holdings refresh — skipped when called from /reparse endpoint
+            # (skip_holdings=True) to avoid blocking HTTP response for hours.
+            # On normal daily automated runs, this runs in full.
+            if not skip_holdings:
+                try:
+                    from services.morningstar_service import fetch_holdings_for_new_isins
+                    new_fund_isins = [f.get("isin") for f in parsed["funds"] if f.get("isin")]
+                    result = fetch_holdings_for_new_isins(new_fund_isins)
+                    if result.get("new_found"):
+                        logger.info(f"New-fund holdings fetch: {result}")
+                except Exception as e:
+                    logger.error(f"New-fund holdings fetch failed (non-fatal): {e}", exc_info=True)
 
-            # Daily holdings freshness check — runs every day, self-limiting:
-            # only re-fetches funds whose stored portfolio_date is behind the
-            # latest known date in the DB. No-op when everything is up to date.
-            # Per-fund error isolation means one failure never affects others.
-            try:
-                from services.morningstar_service import refresh_stale_holdings
-                refresh_result = refresh_stale_holdings()
-                if not refresh_result.get("skipped") and refresh_result.get("stale_found", 0) > 0:
-                    logger.info(f"Holdings freshness check: {refresh_result}")
-            except Exception as e:
-                logger.error(f"Holdings freshness check failed (non-fatal): {e}", exc_info=True)
+                try:
+                    from services.morningstar_service import refresh_stale_holdings
+                    refresh_result = refresh_stale_holdings()
+                    if not refresh_result.get("skipped") and refresh_result.get("stale_found", 0) > 0:
+                        logger.info(f"Holdings freshness check: {refresh_result}")
+                except Exception as e:
+                    logger.error(f"Holdings freshness check failed (non-fatal): {e}", exc_info=True)
 
             # Store mail_date in AppSettings for reference
             set_setting("mail_date", str(email_date))

@@ -319,16 +319,8 @@ export default function CompareFunds({ selectedDate }) {
   const TD = (extra) => ({ padding: '7px 12px', borderBottom: '1px solid var(--border)', ...extra });
 
   // Only active equity mutual funds qualify for overlap
-  function isActiveEquityFund(f) {
-    const ac = (f.data?.asset_class || f.asset_class || '').toLowerCase();
-    const cat = (f.data?.category || f.category || '').toLowerCase();
-    // Must be equity asset class, not ETF or index (ETFs have very low expense ratio and specific categories)
-    const isEquity = ac === 'equity';
-    const isIndex = cat.includes('index') || cat.includes('etf') || (f.data?.expense_ratio && f.data.expense_ratio < 0.5);
-    return isEquity && !isIndex;
-  }
-
-  const equityFunds = funds.filter(isActiveEquityFund);
+  // All fund types participate in overlap — not restricted to active equity
+  const equityFunds = funds;
 
   async function fetchOverlap() {
     if (equityFunds.length < 2) return;
@@ -388,22 +380,12 @@ export default function CompareFunds({ selectedDate }) {
   }, [activeTab, funds.map(f => f.isin).join(',')]);
 
   function renderOverlap() {
-    const nonEquity = funds.filter(f => !isActiveEquityFund(f));
-
     return (
       <div style={{ padding: '0 2px' }}>
 
-        {/* Non-equity warning */}
-        {nonEquity.length > 0 && (
-          <div style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(234,179,8,.06)', border: '1px solid rgba(234,179,8,.3)', borderRadius: 8, fontSize: 12, color: '#92700A' }}>
-            ⚠ Overlap is only for active equity funds.{' '}
-            <strong>{nonEquity.map(f => shortFundName(f.name)).join(', ')}</strong> excluded.
-          </div>
-        )}
-
         {equityFunds.length < 2 && (
           <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-            Add at least 2 active equity mutual funds to see overlap.
+            Add at least 2 funds to see overlap.
           </div>
         )}
 

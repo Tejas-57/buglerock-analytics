@@ -419,6 +419,8 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
     { l:'Sharpe',             vf:rk('sharpe_ratio'),       vb:bmRk('sharpe_ratio'),       fmt:v=>fmt(v),     sig:v=>parseFloat(v)>0.8?'Strong':parseFloat(v)>0.5?'Adequate':'Weak' },
     { l:'Sortino',            vf:rk('sortino_ratio'),      vb:bmRk('sortino_ratio'),      fmt:v=>fmt(v),     sig:v=>parseFloat(v)>1?'Good':parseFloat(v)>0.6?'Moderate':'Weak' },
     { l:'Information Ratio',  vf:rk('information_ratio'), vb:null,                        fmt:v=>fmt(v),     sig:v=>parseFloat(v)>0.5?'Strong':parseFloat(v)>0?'Positive':parseFloat(v)>-0.5?'Slight lag':'Weak' },
+    // Tracking error — only populated for ETF and Index funds, follows period selector
+    { l:`Tracking Error (${period.toUpperCase()})`, vf:f?.[`tracking_error_${period}`], vb:null, fmt:v=>fmt(v)+'%', sig:v=>parseFloat(v)<0.5?'Tight track':parseFloat(v)<1?'Good':parseFloat(v)<2?'Moderate':'High drift' },
   ].filter(row => row.vf!=null&&row.vf!=='-');
 
   const nav52pct = f?.nav && f?.nav_52w_high && f?.nav_52w_low && f.nav!=='-' && f.nav_52w_high!=='-' && f.nav_52w_low!=='-'

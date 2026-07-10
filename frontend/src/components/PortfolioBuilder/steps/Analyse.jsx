@@ -760,36 +760,24 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                     })}
                   </tbody>
                   <tfoot>
-                    {RISK_METRICS.map(m => {
-                      const v = B[m.k];
-                      if (v == null) return null;
-                      const s = m.sig(v);
-                      const pct = Math.min(100, Math.max(0, m.lb ? (1 - v / 20) * 100 : (v / (m.good * 2)) * 100));
-                      return (
-                        <tr key={m.k} style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
-                          <td style={{ fontWeight: 700, color: 'var(--brand-dark)' }}>Blended</td>
-                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: SIG_COL[s[1]], textAlign: 'right' }}>{m.fmt(v)}</td>
-                          <td colSpan={RISK_METRICS.length - 1}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <div style={{ width: 60, height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-                                <div style={{ width: pct.toFixed(0) + '%', height: '100%', background: SIG_COL[s[1]], borderRadius: 3 }} />
-                              </div>
-                              <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: SIG_BG[s[1]], color: SIG_COL[s[1]] }}>{s[0]}</span>
-                            </div>
+                    <tr>
+                      <td>Blended portfolio</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>100%</td>
+                      {RISK_METRICS.map(m => {
+                        const v = B[m.k];
+                        return (
+                          <td key={m.k} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                            {v != null && !isNaN(v) ? m.fmt(v) : '—'}
                           </td>
-                        </tr>
-                      );
-                    })[0]}
+                        );
+                      })}
+                    </tr>
                   </tfoot>
                 </table>
               </div>
             </div>
 
             {/* Risk alerts */}
-            {B.down_capture_3y > 100 && <div className="ptf-insight-neg" style={{ marginTop: 10 }}>⚠ Down capture of {f2(B.down_capture_3y)}% — portfolio amplifies benchmark drawdowns.</div>}
-            {B.alpha_3y < 0 && <div className="ptf-insight-warn" style={{ marginTop: 6 }}>⚠ Blended alpha negative ({fp(B.alpha_3y)}) — active fund fees not justified by outperformance.</div>}
-            {B.sharpe_ratio_3y < 0.4 && <div className="ptf-insight-neg" style={{ marginTop: 6 }}>⚠ Sharpe of {f2(B.sharpe_ratio_3y)} is weak. Returns do not adequately compensate for risk taken.</div>}
-            {B.sharpe_ratio_3y >= 0.6 && B.alpha_3y >= 0 && B.down_capture_3y <= 100 && <div className="ptf-insight-pos" style={{ marginTop: 6 }}>✓ Risk profile looks healthy — Sharpe {f2(B.sharpe_ratio_3y)}, positive alpha, down capture {f2(B.down_capture_3y)}%.</div>}
           </div>
         )}
 
@@ -911,24 +899,24 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                     <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Computing correlation...</div>
                   )}
                   <div style={{ padding: '14px 16px', overflowX: 'auto' }}>
-                    <table style={{ borderCollapse: 'collapse', fontSize: 11 }}>
+                    <table style={{ borderCollapse: 'collapse', fontSize: 14 }}>
                       <thead>
                         <tr>
-                          <th style={{ padding: '4px 8px', textAlign: 'left', fontWeight: 600, fontSize: 9, color: 'var(--text-muted)' }}></th>
-                          {funds.map((f, i) => <th key={f.isin} style={{ padding: '4px 8px', textAlign: 'center', fontWeight: 600, fontSize: 9, color: f.color, whiteSpace: 'nowrap' }}>F{i + 1}</th>)}
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, fontSize: 11, color: 'var(--text-muted)' }}></th>
+                          {funds.map((f, i) => <th key={f.isin} style={{ padding: '8px 16px', textAlign: 'center', fontWeight: 700, fontSize: 12, color: f.color, whiteSpace: 'nowrap' }}>F{i + 1}</th>)}
                         </tr>
                       </thead>
                       <tbody>
                         {funds.map((fi, i) => (
                           <tr key={fi.isin}>
-                            <td style={{ padding: '4px 8px', fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            <td style={{ padding: '10px 14px', fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               <span style={{ color: fi.color }}>F{i + 1}</span> {fi.name}
                             </td>
                             {funds.map((fj, j) => {
                               const v = corrMatrix[i][j];
                               const { bg, color } = corrColor(v);
                               return (
-                                <td key={fj.isin} style={{ padding: '4px 6px', textAlign: 'center', background: bg, color, fontFamily: 'var(--font-mono)', fontWeight: 600, borderRadius: 3, border: '2px solid #fff', minWidth: 52 }}>
+                                <td key={fj.isin} style={{ padding: '10px 16px', textAlign: 'center', background: bg, color, fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, borderRadius: 6, border: '3px solid #fff', minWidth: 80 }}>
                                   {v != null ? v.toFixed(2) : '—'}
                                 </td>
                               );

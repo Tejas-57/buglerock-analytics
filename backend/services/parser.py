@@ -285,6 +285,12 @@ def build_column_map(rows: list) -> dict:
             col_map.setdefault("factor_yield", idx)
         elif "factor profile liquidity" in hl:
             col_map.setdefault("factor_liquidity", idx)
+        elif "tracking error 1y" in hl:
+            col_map.setdefault("tracking_error_1y", idx)
+        elif "tracking error 3y" in hl:
+            col_map.setdefault("tracking_error_3y", idx)
+        elif "tracking error 5y" in hl:
+            col_map.setdefault("tracking_error_5y", idx)
         elif "average maturity" in hl:
             col_map.setdefault("avg_maturity", idx)
         elif "average eff maturity" in hl:  # Hybrid sheet uses "Average Eff Maturity Survey"
@@ -352,10 +358,11 @@ def build_column_map(rows: list) -> dict:
         hl = header_val.lower()
         if not hl:
             continue
+        hl_nospace = hl.replace(' ', '')  # normalise "3 y" → "3y", "5 y" → "5y"
         for keyword, db_prefix in RISK_METRIC_MAP:
             if keyword in hl:
                 for tf in RISK_TIMEFRAMES:
-                    if tf in hl:
+                    if tf in hl_nospace:
                         field = f"{db_prefix}_{tf}"
                         col_map.setdefault(field, col_idx)
                         break
@@ -602,6 +609,9 @@ def _build_fund(row: dict, col_map: dict, asset_class: str) -> dict:
         "factor_style":      r("factor_style"),
         "factor_yield":      r("factor_yield"),
         "factor_liquidity":  r("factor_liquidity"),
+        "tracking_error_1y": r("tracking_error_1y"),
+        "tracking_error_3y": r("tracking_error_3y"),
+        "tracking_error_5y": r("tracking_error_5y"),
         "avg_maturity":        r("avg_maturity"),
         "modified_duration":   r("modified_duration"),
         "ytm":                 r("ytm"),

@@ -118,7 +118,7 @@ export default function ClientIPS({ ips, setIps, onSave, onSkip, selectedDate })
               onClick={() => {
                 if (window.confirm('Clear all IPS fields?')) {
                   setIps({
-                    name: '', pan: '', amount: '', rm: 'BugleRock Capital',
+                    name: '', pan: '', amount: '', rm: '',
                     email: '', taxStatus: 'Resident individual',
                     proposalDate: new Date().toISOString().slice(0, 10), nextReviewDate: '',
                     primaryObjective: 'Wealth creation', secondaryObjective: '—',
@@ -131,8 +131,9 @@ export default function ClientIPS({ ips, setIps, onSave, onSkip, selectedDate })
                     benchmarks: [], maxFunds: '5', minAUM: '', maxER: '',
                     constraints: '', existingHoldings: '',
                     deploymentNotes: '', rebalancing: 'Annual rebalancing', adviserNotes: '',
-                    alloc: { eqMin: 60, eqMax: 100, lcMin: 30, lcMax: 70, mcMin: 15, mcMax: 40, scMin: 0, scMax: 25, intlMin: 0, intlMax: 15, debtMin: 0, debtMax: 30, goldMin: 0, goldMax: 10, cashMin: 0, cashMax: 10 },
+                    alloc: null,
                   });
+                  try { localStorage.removeItem('br_ptf_ips'); } catch {}
                 }
               }}
               style={{ padding: '6px 14px', border: 'none', borderRadius: 20, background: 'var(--brand-primary,#912F63)', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0, marginTop: 4, whiteSpace: 'nowrap' }}
@@ -148,7 +149,7 @@ export default function ClientIPS({ ips, setIps, onSave, onSkip, selectedDate })
               <div className="ips-f"><label>Client name / entity</label><input type="text" value={ips.name || ''} onChange={e => update('name', e.target.value)} placeholder="e.g. Priya Sharma" /></div>
               <div className="ips-f"><label>PAN / Reference ID</label><input type="text" value={ips.pan || ''} onChange={e => update('pan', e.target.value)} placeholder="Optional" /></div>
               <div className="ips-f"><label>Investment amount (₹)</label><input type="text" value={ips.amount || ''} onChange={e => update('amount', e.target.value)} placeholder="e.g. 50,00,000" /></div>
-              <div className="ips-f"><label>Prepared by (RM)</label><input type="text" value={ips.rm || 'BugleRock Capital'} onChange={e => update('rm', e.target.value)} /></div>
+              <div className="ips-f"><label>Prepared by (RM)</label><input type="text" value={ips.rm || ''} placeholder="BugleRock Capital" onChange={e => update('rm', e.target.value)} /></div>
               <div className="ips-f"><label>Client email</label><input type="email" value={ips.email || ''} onChange={e => update('email', e.target.value)} placeholder="client@email.com" /></div>
               <div className="ips-f"><label>Tax status</label>
                 <select value={ips.taxStatus || 'Resident individual'} onChange={e => update('taxStatus', e.target.value)}>
@@ -267,9 +268,9 @@ export default function ClientIPS({ ips, setIps, onSave, onSkip, selectedDate })
                   <div className="alloc-row" key={label}>
                     <div className="alloc-lbl">{label}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <input className="alloc-in" value={ips.alloc?.[minKey] ?? defMin} onChange={e => updateAlloc(minKey, e.target.value)} />
+                      <input className="alloc-in" value={ips.alloc?.[minKey] ?? ''} placeholder={String(defMin)} onChange={e => updateAlloc(minKey, e.target.value)} />
                       <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>–</span>
-                      <input className="alloc-in" value={ips.alloc?.[maxKey] ?? defMax} onChange={e => updateAlloc(maxKey, e.target.value)} />
+                      <input className="alloc-in" value={ips.alloc?.[maxKey] ?? ''} placeholder={String(defMax)} onChange={e => updateAlloc(maxKey, e.target.value)} />
                       <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>%</span>
                     </div>
                   </div>
@@ -285,9 +286,9 @@ export default function ClientIPS({ ips, setIps, onSave, onSkip, selectedDate })
                   <div className="alloc-row" key={label}>
                     <div className="alloc-lbl">{label}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <input className="alloc-in" value={ips.alloc?.[minKey] ?? defMin} onChange={e => updateAlloc(minKey, e.target.value)} />
+                      <input className="alloc-in" value={ips.alloc?.[minKey] ?? ''} placeholder={String(defMin)} onChange={e => updateAlloc(minKey, e.target.value)} />
                       <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>–</span>
-                      <input className="alloc-in" value={ips.alloc?.[maxKey] ?? defMax} onChange={e => updateAlloc(maxKey, e.target.value)} />
+                      <input className="alloc-in" value={ips.alloc?.[maxKey] ?? ''} placeholder={String(defMax)} onChange={e => updateAlloc(maxKey, e.target.value)} />
                       <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>%</span>
                     </div>
                   </div>

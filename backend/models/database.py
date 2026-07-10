@@ -172,6 +172,11 @@ class DailyFundData(Base):
     factor_yield      = Column(Float)
     factor_liquidity  = Column(Float)
 
+    # Tracking error — present for ETF and Index funds only
+    tracking_error_1y = Column(Float)
+    tracking_error_3y = Column(Float)
+    tracking_error_5y = Column(Float)
+
     # Debt specific
     avg_maturity       = Column(Float)
     modified_duration  = Column(Float)
