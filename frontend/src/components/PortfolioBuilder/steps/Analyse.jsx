@@ -10,6 +10,7 @@ const TABS = [
   { id: 'overlap', label: 'Overlap' },
   { id: 'rolling', label: 'Rolling returns' },
   { id: 'stress', label: 'Stress test' },
+  { id: 'drift', label: 'Style & drift' },
   { id: 'funds', label: 'Fund details' },
 ];
 
@@ -1247,6 +1248,181 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
               </div>
               <div style={{ padding: '8px 14px', fontSize: 10, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
                 Returns calculated from actual NAV history. "—" means the fund was not active or NAV data is unavailable for that period.
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {activeTab === 'drift' && (() => {
+        if (funds.length === 0) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Add funds to see style and drift analysis.</div>;
+
+        const STYLES = {
+          'Large Value':  { row: 0, col: 0 }, 'Large Blend':  { row: 0, col: 1 }, 'Large Growth':  { row: 0, col: 2 },
+          'Mid Value':    { row: 1, col: 0 }, 'Mid Blend':    { row: 1, col: 1 }, 'Mid Growth':    { row: 1, col: 2 },
+          'Small Value':  { row: 2, col: 0 }, 'Small Blend':  { row: 2, col: 1 }, 'Small Growth':  { row: 2, col: 2 },
+        };
+        const ROW_LBLS = ['Large', 'Mid', 'Small'];
+        const COL_LBLS = ['Value', 'Blend', 'Growth'];
+        const CELL = 72;
+
+        // Accumulate style weights
+        const styleWts = {};
+        Object.keys(STYLES).forEach(s => { styleWts[s] = 0; });
+        let styleTotal = 0;
+        funds.forEach(f => {
+          const snap = snapshots[f.isin] || {};
+          const wt = weights[f.isin] || 0;
+          const style = snap.equity_style;
+          if (style && STYLES[style] != null) {
+            styleWts[style] = (styleWts[style] || 0) + wt;
+            styleTotal += wt;
+          }
+        });
+
+        const domStyle = styleTotal > 0 ? Object.keys(styleWts).reduce((a, b) => styleWts[b] > styleWts[a] ? b : a) : null;
+        const domPct = domStyle && styleTotal > 0 ? (styleWts[domStyle] / styleTotal * 100) : 0;
+
+        // Blended cap tier
+        const blendedLc  = funds.reduce((s, f) => s + ((snapshots[f.isin]?.large_cap || 0) * (weights[f.isin] || 0) / 100), 0);
+        const blendedMc  = funds.reduce((s, f) => s + ((snapshots[f.isin]?.mid_cap   || 0) * (weights[f.isin] || 0) / 100), 0);
+        const blendedSc  = funds.reduce((s, f) => s + ((snapshots[f.isin]?.small_cap || 0) * (weights[f.isin] || 0) / 100), 0);
+        const lcDrift = blendedLc - 60, mcDrift = blendedMc - 25, scDrift = blendedSc - 15;
+
+        // Factor exposure blended
+        const FACTORS = ['momentum', 'quality', 'volatility', 'size', 'style', 'yield', 'liquidity'];
+        const factorBlend = {};
+        FACTORS.forEach(fac => {
+          let wsum = 0, wused = 0;
+          funds.forEach(f => {
+            const v = snapshots[f.isin]?.[`factor_${fac}`];
+            const wt = weights[f.isin] || 0;
+            if (v != null && v !== '-' && !isNaN(parseFloat(v))) {
+              wsum += parseFloat(v) * wt;
+              wused += wt;
+            }
+          });
+          factorBlend[fac] = wused > 0 ? wsum / wused : null;
+        });
+
+        const svgW = 3 * CELL + 80, svgH = 3 * CELL + 80;
+
+        function DriftBar({ label, current, neutral, drift }) {
+          const pct = Math.min(current, 100);
+          const warn = Math.abs(drift) > 10;
+          return (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+                <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{label}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: warn ? '#B46B10' : 'var(--text-primary)' }}>
+                  {current.toFixed(1)}% vs {neutral}% neutral ({drift >= 0 ? '+' : ''}{drift.toFixed(1)}%)
+                </span>
+              </div>
+              <div style={{ height: 8, background: 'var(--bg-secondary)', borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{ width: pct.toFixed(0) + '%', height: '100%', background: warn ? '#B46B10' : 'var(--brand-primary)', borderRadius: 4 }} />
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 14, marginBottom: 14 }}>
+              {/* Style box */}
+              <div className="ptf-card">
+                <div className="ptf-card-hd">Morningstar style box</div>
+                <div style={{ padding: 14 }}>
+                  <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} style={{ display: 'block' }}>
+                    {ROW_LBLS.map((l, i) => (
+                      <text key={l} x={38} y={45 + i * CELL + CELL / 2 + 4} textAnchor="end" fontSize={10} fill="#A2A0A0" fontFamily="var(--font-body)">{l}</text>
+                    ))}
+                    {COL_LBLS.map((l, i) => (
+                      <text key={l} x={46 + i * CELL + CELL / 2} y={30} textAnchor="middle" fontSize={10} fill="#A2A0A0" fontFamily="var(--font-body)">{l}</text>
+                    ))}
+                    {Object.entries(STYLES).map(([style, pos]) => {
+                      const pct = styleTotal > 0 ? (styleWts[style] || 0) / styleTotal * 100 : 0;
+                      const alpha = Math.min(0.95, pct / 40);
+                      const cx = 42 + pos.col * CELL + CELL / 2;
+                      const cy = 40 + pos.row * CELL + CELL / 2;
+                      return (
+                        <g key={style}>
+                          <rect x={42 + pos.col * CELL} y={40 + pos.row * CELL} width={CELL} height={CELL}
+                            fill="#912F63" fillOpacity={alpha} stroke="#E8E5EC" strokeWidth={1} rx={4} />
+                          {pct > 1 && <text x={cx} y={cy + 4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#fff" fontFamily="var(--font-mono)">{pct.toFixed(0)}%</text>}
+                        </g>
+                      );
+                    })}
+                  </svg>
+                  {domStyle && (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.6 }}>
+                      Dominant style: <strong style={{ color: 'var(--brand-primary)' }}>{domStyle}</strong> ({domPct.toFixed(0)}% of portfolio)
+                    </div>
+                  )}
+                  {!domStyle && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>No equity style data available for these funds.</div>}
+                </div>
+              </div>
+
+              {/* Cap-tier drift */}
+              <div className="ptf-card">
+                <div className="ptf-card-hd">Cap-tier drift vs neutral (60 / 25 / 15)</div>
+                <div style={{ padding: 14 }}>
+                  <DriftBar label="Large cap" current={blendedLc} neutral={60} drift={lcDrift} />
+                  <DriftBar label="Mid cap"   current={blendedMc} neutral={25} drift={mcDrift} />
+                  <DriftBar label="Small cap" current={blendedSc} neutral={15} drift={scDrift} />
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
+                    {(Math.abs(lcDrift) > 10 || Math.abs(mcDrift) > 10 || Math.abs(scDrift) > 10)
+                      ? <span style={{ color: '#B46B10' }}>⚠ Meaningful cap-tier drift — portfolio has deviated significantly from the 60/25/15 neutral mix.</span>
+                      : <span style={{ color: 'var(--pos)' }}>✓ Cap-tier allocation is broadly balanced vs the 60/25/15 neutral mix.</span>}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Fund-level style */}
+            <div className="ptf-card" style={{ marginBottom: 14 }}>
+              <div className="ptf-card-hd">Fund-level style positioning</div>
+              <div style={{ padding: '4px 16px' }}>
+                {funds.map((f, i) => {
+                  const snap = snapshots[f.isin] || {};
+                  const wt = weights[f.isin] || 0;
+                  const COLORS = ['#912F63', '#3E3452', '#0F6E56', '#B46B10', '#1558A8'];
+                  return (
+                    <div key={f.isin} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < funds.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                      <div style={{ width: 3, height: 32, borderRadius: 2, background: COLORS[i % COLORS.length], flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>{f.name}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{snap.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}</div>
+                      </div>
+                      <span style={{ fontSize: 11, color: 'var(--text-secondary)', flexShrink: 0 }}>{snap.equity_style || '—'}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: 'var(--brand-primary)', minWidth: 36, textAlign: 'right' }}>{wt}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Factor exposure */}
+            <div className="ptf-card">
+              <div className="ptf-card-hd">Factor exposure — blended portfolio</div>
+              <div style={{ padding: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8 }}>
+                  {FACTORS.map(fac => {
+                    const v = factorBlend[fac];
+                    const pct = v != null ? Math.min(100, Math.max(0, v)) : null;
+                    return (
+                      <div key={fac} style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8 }}>{fac}</div>
+                        <div style={{ height: 80, background: 'var(--bg-secondary)', borderRadius: 6, overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                          {pct != null && <div style={{ height: pct + '%', background: 'var(--brand-primary)', borderRadius: '4px 4px 0 0', opacity: 0.85 }} />}
+                        </div>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: 'var(--brand-dark)', marginTop: 4 }}>
+                          {v != null ? v.toFixed(1) : '—'}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10 }}>Factor scores are weighted averages across all funds in the portfolio. Scale 0–100.</div>
               </div>
             </div>
           </div>
