@@ -200,6 +200,7 @@ export default function PortfolioBuilder({ selectedDate }) {
               funds={activeFunds}
               weights={weights}
               snapshots={snapshots}
+              setSnapshots={setSnapshots}
               setWeights={setWeights}
               originalWeights={originalWeights}
               setOriginalWeights={setOriginalWeights}

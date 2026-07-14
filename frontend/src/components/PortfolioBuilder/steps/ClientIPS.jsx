@@ -309,13 +309,6 @@ export default function ClientIPS({ ips, setIps, onSave, onSkip, selectedDate })
                   onChange={v => update('benchmarks', v)}
                 />
               </div>
-              <div className="ips-f"><label>Max funds</label>
-                <select value={ips.maxFunds || '5'} onChange={e => update('maxFunds', e.target.value)}>
-                  <option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>10</option>
-                </select>
-              </div>
-              <div className="ips-f"><label>Min fund AUM (₹ Cr)</label><input type="text" value={ips.minAUM || ''} onChange={e => update('minAUM', e.target.value)} placeholder="e.g. 500" /></div>
-              <div className="ips-f"><label>Max expense ratio (%)</label><input type="text" value={ips.maxER || ''} onChange={e => update('maxER', e.target.value)} placeholder="e.g. 1.5" /></div>
             </div>
             <div className="ips-g2">
               <div className="ips-f"><label>Investment constraints &amp; exclusions</label>

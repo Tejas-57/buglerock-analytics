@@ -20,9 +20,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 RISK_FREE_RATE = 0.065  # 6.5% p.a.
-MIN_WEIGHT = 0.10       # 3% minimum per fund
-MAX_WEIGHT = 0.40       # 20% maximum per fund
-N_SIMULATIONS = 10000
+MIN_WEIGHT = 0.05       # fallback only — user sets this via Optimise tab (default 5%)
+MAX_WEIGHT = 0.40       # fallback only — user sets this via Optimise tab (default 40%)
+N_SIMULATIONS = 5000    # fallback only — user sets this via Optimise tab dropdown
 MIN_WEEKS_REQUIRED = 52  # 1 year minimum
 
 # ── Sleeve classification ────────────────────────────────────────────────────
@@ -53,7 +53,7 @@ EXCLUDED_CATS = {
 PRECIOUS_METALS_CAP = 0.10
 EQUITY_PASSIVE_CAP  = 0.10
 INTERNATIONAL_CAP   = 0.10
-THEMATIC_CAP        = 1.0
+THEMATIC_CAP        = 0.10
 
 THEMATIC_CATS = {
     "Thematic Funds",
@@ -66,6 +66,16 @@ THEMATIC_CATS = {
     "Cat: IT / Tech Funds",
     "Cat: Healthcare funds",
     "Cat: MNC Funds",
+}
+
+
+SMALL_CAP_CATS = {
+    "India Fund Small Cap",
+    "India Fund Small-Cap",
+    "Cat: Small Cap Funds",
+    "Cat: Small-Cap Funds",
+    "Small Cap",
+    "Small-Cap",
 }
 
 
@@ -203,7 +213,7 @@ def fetch_weekly_returns(isins: List[str], as_of_date: date, lookback_years: int
 
 # ── Constraint builder ───────────────────────────────────────────────────────
 
-def build_weight_bounds(funds: List[dict], manual_weights: Dict[str, float], ips: dict) -> List[Tuple[float, float]]:
+def build_weight_bounds(funds: List[dict], manual_weights: Dict[str, float], ips: dict, min_w_override: float = None, max_w_override: float = None, cfg: dict = None) -> List[Tuple[float, float]]:
     """
     Build (min, max) weight bounds for each fund.
     Manual funds are fixed at their weight.
@@ -235,11 +245,12 @@ def build_weight_bounds(funds: List[dict], manual_weights: Dict[str, float], ips
             sleeve_groups.setdefault(group, []).append(isin)
 
     # Portfolio-level caps
+    _cfg = cfg or {}
     GROUP_CAPS = {
-        "alternatives":   PRECIOUS_METALS_CAP,
-        "equity_passive": EQUITY_PASSIVE_CAP,
-        "international":  INTERNATIONAL_CAP,
-        "thematic":       THEMATIC_CAP,
+        "alternatives":   _cfg.get("cap_precious",      PRECIOUS_METALS_CAP),
+        "equity_passive": _cfg.get("cap_passive",       EQUITY_PASSIVE_CAP),
+        "international":  _cfg.get("cap_international", INTERNATIONAL_CAP),
+        "thematic":       _cfg.get("cap_thematic",      THEMATIC_CAP),
     }
 
     # Per-fund max for each group = cap / number of funds in that group
@@ -259,23 +270,24 @@ def build_weight_bounds(funds: List[dict], manual_weights: Dict[str, float], ips
         for isin in isins:
             isin_group[isin] = group
 
-    # Detect sleeve overcrowding — warn when cap/n < MIN_WEIGHT
+    # Detect sleeve overcrowding — warn when cap/n < effective min weight
+    min_w_eff = min_w_override if min_w_override is not None else MIN_WEIGHT
     sleeve_warnings = []
     for group, isins in sleeve_groups.items():
         cap = GROUP_CAPS[group]
         n = len(isins)
         per_fund = cap / n
-        if per_fund < MIN_WEIGHT:
+        if per_fund < min_w_eff:
             sleeve_warnings.append({
                 "group": group,
                 "n_funds": n,
                 "cap_pct": round(cap * 100, 1),
                 "per_fund_pct": round(per_fund * 100, 2),
-                "min_weight_pct": round(MIN_WEIGHT * 100, 1),
+                "min_weight_pct": round(min_w_eff * 100, 1),
                 "message": (
                     f"{n} funds in '{group}' sleeve exceed the {round(cap*100,0):.0f}% portfolio cap. "
                     f"Each fund is capped at {round(per_fund*100,2):.2f}%, "
-                    f"below the normal {round(MIN_WEIGHT*100,1):.1f}% minimum. "
+                    f"below the {round(min_w_eff*100,1):.1f}% minimum weight. "
                     f"Consider removing some {group} funds."
                 )
             })
@@ -288,7 +300,7 @@ def build_weight_bounds(funds: List[dict], manual_weights: Dict[str, float], ips
             bounds.append((w, w))
             continue
 
-        max_w = MAX_WEIGHT
+        max_w = max_w_override if max_w_override is not None else MAX_WEIGHT
 
         # Apply portfolio-level sleeve cap (divided equally across funds in sleeve)
         group = isin_group.get(isin)
@@ -296,8 +308,8 @@ def build_weight_bounds(funds: List[dict], manual_weights: Dict[str, float], ips
             max_w = min(max_w, group_per_fund_max[group])
 
         # Soft override: lower min to match max when overcrowded
-        # so bounds stay feasible — warning is surfaced to the user separately
-        min_w = min(MIN_WEIGHT, max_w)
+        min_w_base = min_w_override if min_w_override is not None else MIN_WEIGHT
+        min_w = min(min_w_base, max_w)
 
         bounds.append((min_w, max_w))
 
@@ -312,11 +324,17 @@ def run_monte_carlo(
     manual_weights: Dict[str, float],
     ips: dict,
     n_sims: int = N_SIMULATIONS,
+    config: dict = None,
 ) -> dict:
     """
     Run Monte Carlo optimisation.
     Returns strategies, frontier points, and sleeve summary.
     """
+    cfg         = config or {}
+    min_w_user  = cfg.get("min_w", MIN_WEIGHT)   # fraction e.g. 0.05
+    max_w_user  = cfg.get("max_w", MAX_WEIGHT)   # fraction e.g. 0.40
+    max_vol_cap = cfg.get("max_vol")              # % e.g. 16.0 or None
+    objective   = cfg.get("objective", "max_sharpe")
     # Separate optimisable vs manual funds
     opt_funds  = [f for f in funds if f["isin"] not in manual_weights]
     manual_sum = sum(manual_weights.values()) / 100.0  # fraction already allocated
@@ -349,8 +367,9 @@ def run_monte_carlo(
     remaining = 1.0 - manual_sum  # fraction available for optimisation
 
     # Build bounds for optimisable funds
+    # Build bounds using user-specified min/max weight
     opt_fund_objs = [f for f in opt_funds if f["isin"] in valid_isins]
-    bounds, sleeve_warnings = build_weight_bounds(opt_fund_objs, {}, ips)
+    bounds, sleeve_warnings = build_weight_bounds(opt_fund_objs, {}, ips, min_w_override=min_w_user, max_w_override=max_w_user, cfg=cfg)
     if sleeve_warnings:
         logger.warning(f"Sleeve overcrowding: {[w['message'] for w in sleeve_warnings]}")
 
@@ -360,9 +379,59 @@ def run_monte_carlo(
     debt_min   = ips.get("debt", {}).get("min", 0) / 100.0
     debt_max   = ips.get("debt", {}).get("max", 100) / 100.0
 
-    sleeves = [classify_fund(f) for f in opt_fund_objs]
-    eq_wts  = np.array([sleeve_equity_weight(s) for s in sleeves])
-    dt_wts  = np.array([sleeve_debt_weight(s) for s in sleeves])
+    # Commodities and global allocation from config
+    comm_min  = (cfg.get("minComm")  or 0)   / 100.0
+    comm_max  = (cfg.get("maxComm")  or 100) / 100.0
+    intl_min  = (cfg.get("minIntl")  or 0)   / 100.0
+    intl_max  = (cfg.get("maxIntl")  or 100) / 100.0
+
+    sleeves   = [classify_fund(f) for f in opt_fund_objs]
+    eq_wts    = np.array([sleeve_equity_weight(s) for s in sleeves])
+    dt_wts    = np.array([sleeve_debt_weight(s) for s in sleeves])
+    comm_wts  = np.array([1.0 if s == "alternatives"  else 0.0 for s in sleeves])
+    intl_wts  = np.array([1.0 if s == "international" else 0.0 for s in sleeves])
+
+    # Small cap — characteristic-weighted portfolio constraint
+    # Step 1: Fund-level normalize L+M+S to 100% (removes cash/debt drag)
+    # Step 2: Portfolio-level rebase to funds with data only (null = exclude, 0 = include)
+    sc_fund_data = []
+    for f in opt_fund_objs:
+        sc_pct = f.get("small_cap_pct")
+        lc_pct = f.get("large_cap_pct")
+        mc_pct = f.get("mid_cap_pct")
+        if sc_pct is None:
+            sc_fund_data.append(None)
+        else:
+            try:
+                sc = float(sc_pct)
+                lc = float(lc_pct) if lc_pct is not None else 0.0
+                mc = float(mc_pct) if mc_pct is not None else 0.0
+                lms_sum = lc + mc + sc
+                if lms_sum > 0:
+                    # Normalize to 100% at fund level
+                    sc_norm = sc / lms_sum
+                else:
+                    sc_norm = 0.0
+                sc_fund_data.append(sc_norm)
+            except (ValueError, TypeError):
+                sc_fund_data.append(None)
+
+    has_sc_data = any(v is not None for v in sc_fund_data)
+
+    # sc_wts: for funds with data use actual value; for null funds use 0
+    # The filter will rebase weights of null funds out of the calculation
+    sc_wts = np.array([v if v is not None else 0.0 for v in sc_fund_data])
+
+    # sc_rebase_wts: 1.0 for funds with data, 0.0 for null funds
+    # Used to compute the sum of weights that have data → rebase denominator
+    sc_rebase_wts = np.array([1.0 if v is not None else 0.0 for v in sc_fund_data])
+
+    has_sc   = has_sc_data
+    _max_sc  = cfg.get("max_sc")
+    sc_max   = (_max_sc / 100.0) if _max_sc is not None else 1.0
+
+    logger.info(f"Small cap filter: has_sc={has_sc}, sc_max={sc_max}, funds_with_data={sum(1 for v in sc_fund_data if v is not None)}/{len(sc_fund_data)}")
+    logger.info(f"SC exposure per fund: {[(f.get('name','')[:20], round(v*100,1) if v is not None else 'null') for f, v in zip(opt_fund_objs, sc_fund_data)]}")
 
     # Monte Carlo
     all_weights  = []
@@ -370,7 +439,30 @@ def run_monte_carlo(
     all_vols     = []
     all_sharpes  = []
 
-    np.random.seed(42)
+    # Pre-compute bias vectors for objective-driven sampling
+    # For max_return: bias toward funds with higher historical returns
+    # For min_volatility: bias toward funds with lower volatility
+    # For max_sharpe: uniform (unbiased)
+    mu_arr   = np.array(mu)
+    vol_arr  = np.array([float(np.sqrt(cov[i][i])) for i in range(len(mu))])
+
+    def biased_sample():
+        """Sample weights biased toward the objective — 50% biased, 50% uniform for diversity."""
+        if objective == 'max_return' and mu_arr.max() > mu_arr.min():
+            # Bias toward higher-return funds
+            bias = (mu_arr - mu_arr.min()) / (mu_arr.max() - mu_arr.min() + 1e-9)
+            bias = lows + bias * (highs - lows)
+            raw = np.random.uniform(lows, highs) if np.random.random() < 0.5 else np.random.uniform(bias * 0.7, highs)
+        elif objective == 'min_volatility' and vol_arr.max() > vol_arr.min():
+            # Bias toward lower-volatility funds
+            bias = 1 - (vol_arr - vol_arr.min()) / (vol_arr.max() - vol_arr.min() + 1e-9)
+            bias = lows + bias * (highs - lows)
+            raw = np.random.uniform(lows, highs) if np.random.random() < 0.5 else np.random.uniform(lows, bias * 1.3)
+        else:
+            raw = np.random.uniform(lows, highs)
+        return np.clip(raw, lows, highs)
+
+    np.random.seed(None)  # Use random seed so results differ between runs
     attempts = 0
     max_attempts = n_sims * 20
 
@@ -385,53 +477,157 @@ def run_monte_carlo(
     lows  = np.array([lo for lo, hi in bounds])
     highs = np.array([hi for lo, hi in bounds])
 
-    while len(all_weights) < n_sims and attempts < max_attempts:
-        attempts += 1
+    MIN_VALID = max(20, n_sims // 100)  # need at least 1% of target sims
+    constraint_warnings = []  # will be populated if any constraint was relaxed
 
-        # Sample each fund uniformly within its own [min, max] range,
-        # then scale to sum to remaining. This guarantees every draw
-        # starts inside the bounds — no rejection needed for per-fund limits.
-        raw = np.random.uniform(lows, highs)
-        w = raw / raw.sum() * remaining
+    def run_mc(eq_min, eq_max, dt_min, dt_max, c_min, c_max, i_min, i_max, sc_mx, vol_mx):
+        """Run Monte Carlo with given constraints. Returns (weights, returns, vols, sharpes)."""
+        ws, rs, vs, ss = [], [], [], []
+        att = 0
+        while len(ws) < n_sims and att < max_attempts:
+            att += 1
+            raw = biased_sample()
+            w = raw / raw.sum() * remaining
+            w = np.clip(w, lows, highs)
+            if abs(w.sum() - remaining) > 0.005:
+                continue
+            total_eq = float(np.dot(w, eq_wts)) + sum(
+                manual_weights.get(f["isin"], 0) / 100.0 * sleeve_equity_weight(classify_fund(f))
+                for f in funds if f["isin"] in manual_weights
+            )
+            total_dt = float(np.dot(w, dt_wts)) + sum(
+                manual_weights.get(f["isin"], 0) / 100.0 * sleeve_debt_weight(classify_fund(f))
+                for f in funds if f["isin"] in manual_weights
+            )
+            has_equity = any(sleeve_equity_weight(s) > 0 for s in sleeves)
+            has_debt   = any(sleeve_debt_weight(s) > 0 for s in sleeves)
+            has_comm   = any(s == "alternatives"  for s in sleeves)
+            has_intl   = any(s == "international" for s in sleeves)
+            if has_equity and not (eq_min <= total_eq <= eq_max): continue
+            if has_debt   and not (dt_min <= total_dt <= dt_max): continue
+            if has_comm and c_max < 1.0:
+                if not (c_min <= float(np.dot(w, comm_wts)) <= c_max): continue
+            if has_intl and i_max < 1.0:
+                if not (i_min <= float(np.dot(w, intl_wts)) <= i_max): continue
+            if has_sc and sc_mx < 1.0:
+                weight_with_data = float(np.dot(w, sc_rebase_wts))
+                if weight_with_data > 0:
+                    rebased_sc = float(np.dot(w, sc_wts)) / weight_with_data
+                    if rebased_sc > sc_mx: continue
+            port_ret = float(np.dot(w, mu))
+            port_var = float(w @ cov @ w)
+            port_vol = float(np.sqrt(port_var))
+            if vol_mx is not None and port_vol > vol_mx / 100.0: continue
+            port_sharpe = (port_ret - RISK_FREE_RATE) / port_vol if port_vol > 0 else 0
+            ws.append(w); rs.append(port_ret); vs.append(port_vol); ss.append(port_sharpe)
+        return ws, rs, vs, ss
 
-        # After normalisation a few weights may have drifted just outside
-        # bounds — do one hard clip and accept only if still valid
-        w = np.clip(w, lows, highs)
-        if abs(w.sum() - remaining) > 0.005:
-            continue
+    # --- Step 1: try with all constraints as-is ---
+    all_weights, all_returns, all_vols, all_sharpes = run_mc(
+        equity_min, equity_max, debt_min, debt_max,
+        comm_min, comm_max, intl_min, intl_max, sc_max, max_vol_cap
+    )
 
-        # Check sleeve constraints
-        total_eq = float(np.dot(w, eq_wts)) + sum(
-            manual_weights.get(f["isin"], 0) / 100.0 * sleeve_equity_weight(classify_fund(f))
-            for f in funds if f["isin"] in manual_weights
-        )
-        total_dt = float(np.dot(w, dt_wts)) + sum(
-            manual_weights.get(f["isin"], 0) / 100.0 * sleeve_debt_weight(classify_fund(f))
-            for f in funds if f["isin"] in manual_weights
-        )
+    # --- Step 2: if too few results, identify and relax constraints one by one ---
+    if len(all_weights) < MIN_VALID:
+        logger.warning(f"Only {len(all_weights)} valid portfolios — attempting constraint relaxation")
 
-        # Only enforce sleeve constraints if relevant funds exist
-        has_equity = any(sleeve_equity_weight(s) > 0 for s in sleeves)
-        has_debt   = any(sleeve_debt_weight(s) > 0 for s in sleeves)
+        # Track relaxed values — carry them through each step
+        r_eq_min, r_eq_max = equity_min, equity_max
+        r_dt_min, r_dt_max = debt_min, debt_max
+        r_sc_max = sc_max
+        r_vol    = max_vol_cap
+        relaxed_ok = False  # flag — stop cascade once we have enough
 
-        if has_equity and not (equity_min <= total_eq <= equity_max):
-            continue
-        if has_debt and not (debt_min <= total_dt <= debt_max):
-            continue
+        # Try relaxing small cap first
+        if not relaxed_ok and has_sc and r_sc_max < 1.0:
+            test_w, test_r, test_v, test_s = run_mc(
+                r_eq_min, r_eq_max, r_dt_min, r_dt_max,
+                comm_min, comm_max, intl_min, intl_max, 1.0, r_vol
+            )
+            if len(test_w) >= max(10, MIN_VALID // 3):
+                actual_sc_vals = sorted([
+                    float(np.dot(w, sc_wts)) / max(float(np.dot(w, sc_rebase_wts)), 1e-9)
+                    for w in test_w
+                ])
+                p10_idx = max(0, int(len(actual_sc_vals) * 0.10))
+                min_feasible_sc = round(actual_sc_vals[p10_idx] * 100, 1)
+                r_sc_max = min_feasible_sc / 100.0
+                logger.warning(f"Small cap constraint relaxed from {sc_max*100:.0f}% to {min_feasible_sc:.1f}%")
+                constraint_warnings.append({
+                    "constraint": "small_cap",
+                    "label": "Small cap exposure",
+                    "requested": round(sc_max * 100, 1),
+                    "relaxed_to": min_feasible_sc,
+                    "message": f"Small cap exposure cap of {sc_max*100:.0f}% is not achievable with this fund set. Auto-relaxed to {min_feasible_sc:.1f}% — the minimum feasible level given current fund selection."
+                })
+                all_weights, all_returns, all_vols, all_sharpes = run_mc(
+                    r_eq_min, r_eq_max, r_dt_min, r_dt_max,
+                    comm_min, comm_max, intl_min, intl_max, r_sc_max, r_vol
+                )
+                logger.info(f"After sc relaxation: {len(all_weights)} valid portfolios (MIN_VALID={MIN_VALID})")
+                if len(all_weights) > 0:
+                    relaxed_ok = True
 
-        # Portfolio metrics
-        port_ret = float(np.dot(w, mu))
-        port_var = float(w @ cov @ w)
-        port_vol = float(np.sqrt(port_var))
-        port_sharpe = (port_ret - RISK_FREE_RATE) / port_vol if port_vol > 0 else 0
+        # Try relaxing max_vol if still too few
+        if not relaxed_ok and r_vol is not None:
+            test_w, test_r, test_v, test_s = run_mc(
+                r_eq_min, r_eq_max, r_dt_min, r_dt_max,
+                comm_min, comm_max, intl_min, intl_max, r_sc_max, None
+            )
+            if len(test_w) >= max(10, MIN_VALID // 3):
+                actual_vols = sorted([v * 100 for v in test_v])
+                p10_idx = max(0, int(len(actual_vols) * 0.10))
+                min_feasible_vol = round(actual_vols[p10_idx], 1)
+                r_vol = min_feasible_vol
+                constraint_warnings.append({
+                    "constraint": "max_vol",
+                    "label": "Max portfolio volatility",
+                    "requested": max_vol_cap,
+                    "relaxed_to": min_feasible_vol,
+                    "message": f"Volatility cap of {max_vol_cap:.0f}% is not achievable. Auto-relaxed to {min_feasible_vol:.1f}% — the minimum feasible given current fund selection."
+                })
+                all_weights, all_returns, all_vols, all_sharpes = run_mc(
+                    r_eq_min, r_eq_max, r_dt_min, r_dt_max,
+                    comm_min, comm_max, intl_min, intl_max, r_sc_max, r_vol
+                )
+                if len(all_weights) > 0:
+                    relaxed_ok = True
 
-        all_weights.append(w)
-        all_returns.append(port_ret)
-        all_vols.append(port_vol)
-        all_sharpes.append(port_sharpe)
+        # Try relaxing equity/debt if still too few
+        if not relaxed_ok and (r_eq_min > 0 or r_eq_max < 1.0 or r_dt_min > 0 or r_dt_max < 1.0):
+            test_w, test_r, test_v, test_s = run_mc(
+                0, 1.0, 0, 1.0,
+                comm_min, comm_max, intl_min, intl_max, r_sc_max, r_vol
+            )
+            if len(test_w) >= max(10, MIN_VALID // 3):
+                r_eq_min, r_eq_max = 0, 1.0
+                r_dt_min, r_dt_max = 0, 1.0
+                constraint_warnings.append({
+                    "constraint": "equity_debt",
+                    "label": "Equity / Debt allocation",
+                    "requested": f"Equity {equity_min*100:.0f}–{equity_max*100:.0f}%, Debt {debt_min*100:.0f}–{debt_max*100:.0f}%",
+                    "relaxed_to": "Unconstrained",
+                    "message": f"Equity/debt allocation constraints are too tight for this fund set. Auto-relaxed to unconstrained."
+                })
+                all_weights, all_returns, all_vols, all_sharpes = test_w, test_r, test_v, test_s
+                if len(all_weights) > 0:
+                    relaxed_ok = True
+
+        # Final fallback — run completely unconstrained
+        if not relaxed_ok and len(all_weights) < MIN_VALID:
+            logger.warning("All constraints too tight — running unconstrained")
+            all_weights, all_returns, all_vols, all_sharpes = run_mc(0, 1.0, 0, 1.0, 0, 1.0, 0, 1.0, 1.0, None)
+            constraint_warnings.append({
+                "constraint": "all",
+                "label": "All constraints",
+                "requested": "Multiple",
+                "relaxed_to": "Unconstrained",
+                "message": "Combination of constraints is infeasible for this fund set. All constraints have been removed. Please review your fund selection and constraint settings."
+            })
 
     if not all_weights:
-        return {"error": "Could not generate valid portfolios — check IPS constraints"}
+        return {"error": "Could not generate valid portfolios. Try removing some funds or widening constraints."}
 
     all_weights = np.array(all_weights)
     all_returns = np.array(all_returns)
@@ -521,6 +717,7 @@ def run_monte_carlo(
         "n_valid_simulations": len(all_weights),
         "optimised_isins": valid_isins,
         "sleeve_warnings": sleeve_warnings,
+        "constraint_warnings": constraint_warnings,
     }
 
 
@@ -543,8 +740,8 @@ def get_ranking_flags(funds: List[dict], date: date) -> List[dict]:
             if ranking in ("R1", "R2"):
                 continue
 
-            # Find R1/R2 alternatives in same category
-            suggestions = db.query(
+            # Find R1/R2 alternatives in same category — deduplicate by name
+            suggestions_raw = db.query(
                 DailyFundData.isin,
                 DailyFundData.name,
                 DailyFundData.ranking,
@@ -554,7 +751,18 @@ def get_ranking_flags(funds: List[dict], date: date) -> List[dict]:
                 DailyFundData.category == fund.get("category"),
                 DailyFundData.ranking.in_(["R1", "R2"]),
                 DailyFundData.isin != fund["isin"],
-            ).order_by(DailyFundData.ranking, DailyFundData.return_1y.desc()).limit(3).all()
+            ).order_by(DailyFundData.ranking, DailyFundData.return_1y.desc()).limit(20).all()
+
+            # Deduplicate by AMC+name prefix (same fund, different plans)
+            seen_names, suggestions = set(), []
+            for s in suggestions_raw:
+                # Use first 3 words of name as dedup key
+                key = ' '.join(s.name.split()[:3]).lower()
+                if key not in seen_names:
+                    seen_names.add(key)
+                    suggestions.append(s)
+                if len(suggestions) == 3:
+                    break
 
             flags.append({
                 "isin":     fund["isin"],
@@ -581,9 +789,10 @@ def optimise_portfolio(payload: dict) -> dict:
     logger.info(f"Optimiser started for {len(payload.get('funds', []))} funds")
     funds          = payload["funds"]
     ips            = payload.get("ips", {})
-    manual_weights = payload.get("manual_weights", {})  # {isin: weight_pct}
+    manual_weights = payload.get("manual_weights", {})
     date_str       = payload.get("date")
     as_of_date     = date.fromisoformat(date_str) if date_str else date.today()
+    cfg            = payload.get("config", {})
 
     # Step 1: Classify all funds
     for fund in funds:
@@ -612,13 +821,13 @@ def optimise_portfolio(payload: dict) -> dict:
     # Step 4: Get ranking flags
     ranking_flags = get_ranking_flags(funds, as_of_date)
 
-    # Step 5: Run Monte Carlo
-    logger.info(f"NAV fetch complete. Running Monte Carlo...")
-    opt_result = run_monte_carlo(funds, returns_map, manual_weights, ips)
+    # Step 5: Run Monte Carlo with user config
+    n_sims = int(cfg.get("n_sims", N_SIMULATIONS))
+    logger.info(f"NAV fetch complete. Running Monte Carlo ({n_sims} sims, objective={cfg.get('objective','max_sharpe')})...")
+    opt_result = run_monte_carlo(funds, returns_map, manual_weights, ips, n_sims=n_sims, config=cfg)
     logger.info(f"Monte Carlo complete. Valid sims: {opt_result.get('n_valid_simulations', 0)}")
 
     # Step 6: Build sleeve summary for current weights
-    total_w = sum(f.get("current_weight", 0) for f in funds)
     sleeve_summary = {}
     for fund in funds:
         s = fund["_sleeve"]

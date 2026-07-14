@@ -1,461 +1,755 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { fp, f2, COLORS } from './BuildPortfolio';
 
 const API = process.env.REACT_APP_API_URL || '';
+const BERRY = '#912F63', PLUM = '#3E3452', MUT = '#6D5479';
+const POS = '#1A7A52', NEG = '#B91C1C', WARN = '#D97706';
+const GR10 = '#F8F6FA', GR20 = '#E8E5EC', GR60 = '#A2A0A0', GR80 = '#374151';
 
-function MetricCard({ label, value, color }) {
+const OBJECTIVES = [
+  { id: 'max_sharpe',     label: 'Maximise Sharpe ratio', desc: 'Best return per unit of risk — the classic MVO objective.' },
+  { id: 'max_return',    label: 'Maximise returns',      desc: 'Highest 3Y return, regardless of risk taken.' },
+  { id: 'min_volatility', label: 'Minimise volatility',   desc: 'Lowest portfolio volatility — for conservative mandates.' },
+];
+const OBJ_COLOR = { max_sharpe: BERRY, max_return: PLUM, min_volatility: POS };
+
+function NI({ value, onChange, placeholder = '—', min = 0, max = 100, step = 1, width = 58, disabled = false }) {
   return (
-    <div style={{ textAlign: 'center', padding: '4px 6px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border)' }}>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: color || 'var(--brand-dark)', marginBottom: 1 }}>{value}</div>
-      <div style={{ fontSize: 7, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{label}</div>
-    </div>
+    <input type="number" value={value} onChange={e => onChange(e.target.value === '' ? '' : +e.target.value)}
+      placeholder={placeholder} min={min} max={max} step={step} disabled={disabled}
+      style={{ width, padding: '5px 7px', border: `1.5px solid ${GR20}`, borderRadius: 8, fontFamily: 'var(--font-mono)', fontSize: 12, textAlign: 'center', outline: 'none', background: disabled ? GR10 : '#fff', opacity: disabled ? 0.4 : 1, cursor: disabled ? 'not-allowed' : 'text' }} />
   );
 }
 
-function FrontierChart({ frontier, curve, strategies }) {
-  if (!frontier || frontier.length === 0) return null;
-
-  const allPts = [...(frontier || []), ...(curve || [])];
-  const allVols = allPts.map(p => p[0]);
-  const allRets = allPts.map(p => p[1]);
-  const minVol = Math.min(...allVols), maxVol = Math.max(...allVols);
-  const minRet = Math.min(...allRets), maxRet = Math.max(...allRets);
-  const W = 340, H = 150, PAD = 24;
-
-  function toX(v) { return PAD + ((v - minVol) / (maxVol - minVol || 1)) * (W - PAD * 2); }
-  function toY(r) { return H - PAD - ((r - minRet) / (maxRet - minRet || 1)) * (H - PAD * 2); }
-
-  const STRAT_STYLE = {
-    max_sharpe:    { color: '#912F63', label: 'Max Sharpe', symbol: '★' },
-    min_volatility:{ color: '#1A7A52', label: 'Min Volatility', symbol: '◆' },
-    max_return:    { color: '#3E3452', label: 'Max Return', symbol: '▲' },
-  };
-
+function MinMax({ label, sub, minVal, maxVal, onMin, onMax, noMin }) {
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8 }}>Efficient Frontier</div>
-      <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: '#fff', padding: 12 }}>
-        <svg width="100%" style={{ display: 'block', flex: 1 }} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
-
-          {/* Frontier dots — coloured by Sharpe */}
-          {(() => {
-            const sharpes = frontier.map(x => x[2] ?? 0);
-            const sMin = Math.min(...sharpes), sMax = Math.max(...sharpes);
-            return frontier.map((p, i) => {
-              const t = sMax > sMin ? ((p[2] ?? 0) - sMin) / (sMax - sMin) : 0.5;
-              const r = Math.round(t * 255);
-              const g = Math.round(180 + t * 75);
-              const b = Math.round((1 - t) * 180);
-              return <circle key={i} cx={toX(p[0])} cy={toY(p[1])} r={2} fill={`rgb(${r},${g},${b})`} opacity={0.75} />;
-            });
-          })()}
-          {/* Strategy markers */}
-          {strategies && Object.entries(strategies).map(([key, strat]) => {
-            const style = STRAT_STYLE[key];
-            if (!strat?.metrics) return null;
-            const cx = toX(strat.metrics.volatility);
-            const cy = toY(strat.metrics.return);
-            return (
-              <g key={key}>
-                <circle cx={cx} cy={cy} r={7} fill={style.color} opacity={0.15} />
-                <circle cx={cx} cy={cy} r={4} fill={style.color} />
-                <text x={cx} y={cy - 7} textAnchor="middle" fontSize={5} fontWeight="600" fill={style.color}>{style.label}</text>
-              </g>
-            );
-          })}
-          {/* Axes labels */}
-          <text x={W / 2} y={H - 4} textAnchor="middle" fontSize={6} fill="#999">Volatility (%)</text>
-          <text x={8} y={H / 2} textAnchor="middle" fontSize={6} fill="#999" transform={`rotate(-90, 8, ${H / 2})`}>Return (%)</text>
-        </svg>
-        {/* Legend */}
-        <div style={{ display: 'flex', gap: 16, justifyContent: 'center', marginTop: 6 }}>
-          {Object.entries(STRAT_STYLE).map(([key, s]) => (
-            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--text-muted)' }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: s.color }} />
-              {s.label}
-            </div>
-          ))}
-        </div>
+    <div>
+      <div style={{ fontSize: 10.5, fontWeight: 600, color: GR80, marginBottom: 5 }}>
+        {label}{sub && <span style={{ fontSize: 9.5, fontWeight: 400, color: GR60 }}> — {sub}</span>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 10, color: GR60, width: 22, opacity: noMin ? 0.4 : 1 }}>Min</span>
+        <NI value={minVal} onChange={onMin} disabled={noMin} />
+        <span style={{ fontSize: 10, color: GR60 }}>%</span>
+        <span style={{ fontSize: 10, color: GR60, width: 26, textAlign: 'center' }}>Max</span>
+        <NI value={maxVal} onChange={onMax} />
+        <span style={{ fontSize: 10, color: GR60 }}>%</span>
       </div>
     </div>
   );
 }
 
-export default function Optimise({ funds, weights, snapshots = {}, setWeights, originalWeights = {}, setOriginalWeights, benchmarks = [], ips = {}, onBack, onCompare, selectedDate, savedResult = null, onSaveResult }) {
-  const [loading, setLoading]         = useState(false);
-  const [result, setResult]           = useState(savedResult);
-  const [error, setError]             = useState(null);
+function blendMetrics(funds, weights, snapshots) {
+  let std3y = 0, ret3y = 0, sharpe = 0, wused = 0;
+  funds.forEach(f => {
+    const w = (weights[f.isin] || 0) / 100;
+    const s = snapshots[f.isin] || {};
+    const r = s.risk || {};
+    const v = r.std_dev_3y;
+    if (v != null && !isNaN(parseFloat(v))) { std3y += parseFloat(v) * w; wused += w; }
+    if (s.returns?.['3y'] != null) ret3y += parseFloat(s.returns['3y']) * w;
+    if (r.sharpe_ratio_3y != null) sharpe += parseFloat(r.sharpe_ratio_3y) * w;
+  });
+  return { std3y, ret3y, sharpe };
+}
+
+export default function Optimise({ funds, weights, snapshots = {}, setSnapshots, setWeights, originalWeights = {}, setOriginalWeights, benchmarks = [], ips = {}, onBack, onCompare, selectedDate, savedResult = null, onSaveResult }) {
+  const [activeTab, setActiveTab]       = useState('configure');
+  const [loading, setLoading]           = useState(false);
+  const [result, setResult]             = useState(savedResult);
+  const [error, setError]               = useState(null);
   const [selectedStrat, setSelectedStrat] = useState('max_sharpe');
-  // Restore result from parent if returning to this step
-  React.useEffect(() => { if (savedResult && !result) { setResult(savedResult); } }, [savedResult]);
-  const [manualWeights, setManualWeights] = useState({});  // {isin: weight_pct}
-  const [applied, setApplied]         = useState(false);
+  const [manualWeights, setManualWeights] = useState({});
 
-  const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().slice(0, 10) : (selectedDate || '');
+  const [objective, setObjective]         = useState('max_sharpe');
+  const [nSims, setNSims]                 = useState(5000);
+  const [respectIPS, setRespectIPS]       = useState(true);
+  const [minW, setMinW]                   = useState(5);
+  const [maxW, setMaxW]                   = useState(40);
+  const [minEq, setMinEq]                 = useState('');
+  const [maxEq, setMaxEq]                 = useState('');
+  const [minDebt, setMinDebt]             = useState('');
+  const [maxDebt, setMaxDebt]             = useState('');
+  const [minComm, setMinComm]             = useState('');
+  const [maxComm, setMaxComm]             = useState('');
+  const [maxSc, setMaxSc]                 = useState('');
+  const [minIntl, setMinIntl]             = useState('');
+  const [maxIntl, setMaxIntl]             = useState('');
+  const [maxVol, setMaxVol]               = useState('');
+  const [capPreciousMetals, setCapPreciousMetals] = useState(10);
+  const [capPassive, setCapPassive]               = useState(10);
+  const [capInternational, setCapInternational]   = useState(10);
+  const [capThematic, setCapThematic]             = useState(10);
 
-  // Auto-populate manual weights for insufficient data funds when result arrives
+  const dateStr     = selectedDate instanceof Date ? selectedDate.toISOString().slice(0, 10) : (selectedDate || '');
+  const totalWeight = Object.values(weights).reduce((s, w) => s + w, 0);
+
+  useEffect(() => {
+    if (respectIPS && ips.alloc) {
+      setMinEq(ips.alloc.eqMin ?? ''); setMaxEq(ips.alloc.eqMax ?? '');
+      setMinDebt(ips.alloc.debtMin ?? ''); setMaxDebt(ips.alloc.debtMax ?? '');
+      setMaxSc(ips.alloc.scMax ?? '');
+      setMinIntl(ips.alloc.intlMin ?? ''); setMaxIntl(ips.alloc.intlMax ?? '');
+    } else if (!respectIPS) {
+      setMinEq(''); setMaxEq(''); setMinDebt(''); setMaxDebt('');
+      setMaxSc(''); setMinIntl(''); setMaxIntl('');
+    }
+  }, [respectIPS]);
+
+  useEffect(() => { if (savedResult && !result) { setResult(savedResult); setActiveTab('results'); } }, [savedResult]);
+
+  // Fetch missing snapshots — in case user reached Optimise without visiting Analyse
+  useEffect(() => {
+    const missing = funds.filter(f => !snapshots[f.isin]);
+    if (missing.length === 0 || !setSnapshots) return;
+    const dateStr2 = selectedDate instanceof Date ? selectedDate.toISOString().slice(0, 10) : (selectedDate || '');
+    missing.forEach(f => {
+      fetch(`${API}/api/home/snapshot?isin=${f.isin}&date=${dateStr2}`)
+        .then(r => r.json())
+        .then(data => { if (data && !data.error) setSnapshots(prev => ({ ...prev, [f.isin]: data })); })
+        .catch(() => {});
+    });
+  }, [funds.map(f => f.isin).join(',')]);
   useEffect(() => {
     if (result?.insufficient_data?.length > 0) {
-      const newManual = { ...manualWeights };
-      result.insufficient_data.forEach(f => {
-        if (!(f.isin in newManual)) {
-          newManual[f.isin] = weights[f.isin] || 0;
-        }
-      });
-      setManualWeights(newManual);
+      const m = { ...manualWeights };
+      result.insufficient_data.forEach(f => { if (!(f.isin in m)) m[f.isin] = weights[f.isin] || 0; });
+      setManualWeights(m);
     }
   }, [result]);
 
-  const totalWeight = Object.values(weights).reduce((s, w) => s + w, 0);
+  const currM = useMemo(() => blendMetrics(funds, weights, snapshots), [funds, weights, snapshots]);
+  const volColor = currM.std3y <= 13 ? POS : currM.std3y <= 20 ? WARN : NEG;
+  const volLabel = currM.std3y <= 10 ? 'Low — conservative-grade.'
+    : currM.std3y <= 13 ? 'Mod-conservative range.'
+    : currM.std3y <= 16 ? 'Moderate — typical diversified equity.'
+    : currM.std3y <= 20 ? 'Mod-aggressive — elevated but typical for equity-heavy.'
+    : 'High volatility — aggressive portfolio.';
+
+  const violations = [];
+  if (minW * funds.length > 100) violations.push(`Min weight × ${funds.length} funds = ${minW * funds.length}%`);
+  if (maxVol !== '' && currM.std3y > maxVol) violations.push(`Current vol ${currM.std3y.toFixed(1)}% > cap ${maxVol}%`);
 
   async function runOptimise() {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    setApplied(false);
-
+    setLoading(true); setError(null); setActiveTab('results');
     const payload = {
-      funds: funds.map(f => ({
-        isin:        f.isin,
-        name:        f.name,
-        weight:      weights[f.isin] || 0,
-        category:    f.category || '',
-        asset_class: f.asset_class || 'Equity',  // fallback to Equity if missing
-        ranking:     f.ranking || null,
-      })),
+      funds: funds.map(f => { const s = snapshots[f.isin] || {}; return { isin: f.isin, name: f.name, weight: weights[f.isin] || 0, category: f.category || '', asset_class: f.asset_class || 'Equity', ranking: f.ranking || null, small_cap_pct: s.small_cap != null ? parseFloat(s.small_cap) || null : null, mid_cap_pct: s.mid_cap != null ? parseFloat(s.mid_cap) || null : null, large_cap_pct: s.large_cap != null ? parseFloat(s.large_cap) || null : null }; }),
       ips: {
         riskProfile: ips.riskProfile || 'Moderate',
-        equity:   { min: parseFloat(ips.alloc?.eqMin ?? 40),   max: parseFloat(ips.alloc?.eqMax ?? 60) },
-        debt:     { min: parseFloat(ips.alloc?.debtMin ?? 0),  max: parseFloat(ips.alloc?.debtMax ?? 30) },
-        largeCap: { min: parseFloat(ips.alloc?.lcMin ?? 30),   max: parseFloat(ips.alloc?.lcMax ?? 70) },
-        midCap:   { min: parseFloat(ips.alloc?.mcMin ?? 15),   max: parseFloat(ips.alloc?.mcMax ?? 40) },
-        smallCap: { min: parseFloat(ips.alloc?.scMin ?? 0),    max: parseFloat(ips.alloc?.scMax ?? 25) },
+        equity:   { min: +minEq || 0,  max: +maxEq || 100 },
+        debt:     { min: +minDebt || 0, max: +maxDebt || 100 },
+        largeCap: { min: +(ips.alloc?.lcMin ?? 0), max: +(ips.alloc?.lcMax ?? 100) },
+        midCap:   { min: +(ips.alloc?.mcMin ?? 0), max: +(ips.alloc?.mcMax ?? 100) },
+        smallCap: { min: 0, max: +maxSc || 100 },
       },
+      config: { objective, nSims, respectIPS, minW, maxW, maxVol: maxVol || null, minComm: minComm || null, maxComm: maxComm || null, maxSc: maxSc || null, minIntl: minIntl || null, maxIntl: maxIntl || null, capPreciousMetals, capPassive, capInternational, capThematic },
       manual_weights: manualWeights,
       date: dateStr,
     };
-
     try {
-      const res = await fetch(`${API}/api/portfolio/optimise`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch(`${API}/api/portfolio/optimise`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await res.json();
-      if (data.error) {
-        setError(data.error);
-      } else {
-        setResult(data);
-        if (onSaveResult) onSaveResult(data);
-        setSelectedStrat('max_sharpe');
-      }
-    } catch (e) {
-      setError('Failed to connect to optimiser. Check backend is running.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function updateManualWeight(isin, val) {
-    const v = Math.max(0, Math.min(100, parseInt(val) || 0));
-    setManualWeights(prev => ({ ...prev, [isin]: v }));
+      if (data.error) { setError(data.error); }
+      else { setResult(data); if (onSaveResult) onSaveResult(data); setSelectedStrat(objective); }
+    } catch { setError('Failed to connect to optimiser.'); }
+    finally { setLoading(false); }
   }
 
   function applyStrategy() {
-    if (!result?.strategies?.[selectedStrat]) return;
-    const strat = result.strategies[selectedStrat];
-    // Lock original weights from build portfolio on first apply only
+    const strat = result?.strategies?.[selectedStrat];
+    if (!strat) return;
     setOriginalWeights(prev => Object.keys(prev).length > 0 ? prev : { ...weights });
-    const newWeights = {};
-    funds.forEach(f => {
-      newWeights[f.isin] = strat.weights[f.isin] ?? weights[f.isin] ?? 0;
-    });
-    setWeights(newWeights);
-    setApplied(true);
+    const newW = {};
+    funds.forEach(f => { newW[f.isin] = strat.weights[f.isin] ?? weights[f.isin] ?? 0; });
+    setWeights(newW);
     onCompare();
   }
 
-  if (!funds.length) {
+  if (!funds.length) return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 12, padding: '60px 20px', textAlign: 'center' }}>
+      <div style={{ fontSize: 32, opacity: .3 }}>◈</div>
+      <div style={{ fontFamily: 'var(--font-serif)', fontSize: 19, fontWeight: 600, color: 'var(--brand-dark)' }}>No portfolio to optimise</div>
+      <div style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 260 }}>Add at least two funds and set their weights in Step 2.</div>
+    </div>
+  );
+
+  const strat = result?.strategies?.[selectedStrat];
+
+  function TabStrip() {
+    const tabs = [
+      { id: 'configure', label: '⚙ Configure', desc: 'Set constraints & objective' },
+      { id: 'results',   label: '◈ Optimised results', desc: result ? 'Frontier, strategies & weights' : 'Run optimisation first', disabled: !result && !loading },
+    ];
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 12, padding: '60px 20px', textAlign: 'center' }}>
-        <div style={{ fontSize: 32, opacity: .3 }}>◈</div>
-        <div style={{ fontFamily: 'var(--font-serif)', fontSize: 19, fontWeight: 600, color: 'var(--brand-dark)' }}>No portfolio to optimise</div>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 260 }}>Add at least two funds and set their weights in Step 2.</div>
+      <div style={{ display: 'flex', alignItems: 'stretch', borderBottom: `2px solid ${GR20}`, background: '#fff', padding: '0 20px', gap: 2, flexShrink: 0 }}>
+        {tabs.map(t => (
+          <button key={t.id}
+            onClick={() => !t.disabled && setActiveTab(t.id)}
+            style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+              padding: '10px 16px', border: 'none', background: 'none', cursor: t.disabled ? 'not-allowed' : 'pointer',
+              borderBottom: `3px solid ${activeTab === t.id ? BERRY : 'transparent'}`,
+              opacity: t.disabled ? 0.4 : 1, transition: 'all .12s', marginBottom: -2,
+            }}>
+            <span style={{ fontSize: 12, fontWeight: activeTab === t.id ? 700 : 500, color: activeTab === t.id ? BERRY : GR80 }}>{t.label}</span>
+            <span style={{ fontSize: 9.5, color: GR60, marginTop: 1 }}>{t.desc}</span>
+          </button>
+        ))}
+        <div style={{ flex: 1 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {result && (
+            <span style={{ fontSize: 10, color: POS, fontWeight: 600 }}>
+              ✓ Last run: {nSims.toLocaleString()} sims · {OBJECTIVES.find(o => o.id === selectedStrat)?.label}
+            </span>
+          )}
+          <button onClick={runOptimise} disabled={loading || totalWeight !== 100}
+            style={{ padding: '7px 20px', border: 'none', borderRadius: 20, background: loading || totalWeight !== 100 ? GR20 : BERRY, color: loading || totalWeight !== 100 ? GR60 : '#fff', fontSize: 12, fontWeight: 600, cursor: loading || totalWeight !== 100 ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}>
+            {loading ? '⏳ Running…' : result ? 'Run Optimizer ⚡' : '⚡ Run optimisation'}
+          </button>
+        </div>
       </div>
     );
   }
 
-  const strat = result?.strategies?.[selectedStrat];
-  const STRAT_OPTIONS = [
-    { id: 'max_sharpe',    label: 'Max Sharpe',    icon: '◈', color: '#912F63', desc: 'Best risk-adjusted return' },
-    { id: 'min_volatility',label: 'Min Volatility', icon: '↓', color: '#1A7A52', desc: 'Lowest portfolio volatility' },
-    { id: 'max_return',    label: 'Max Return',     icon: '↑', color: '#3E3452', desc: 'Highest expected return' },
-  ];
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      {/* Header */}
-      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', background: '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 16, fontWeight: 600, color: 'var(--brand-dark)' }}>Optimise portfolio</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Monte Carlo · 10,000 simulations · {dateStr}</div>
+  function ConfigureTab() {
+    return (
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ background: GR10, borderBottom: `1px solid ${GR20}`, padding: '10px 20px', display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 210 }}>
+            <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: GR60, marginBottom: 4 }}>Optimisation objective</div>
+            <select value={objective} onChange={e => setObjective(e.target.value)}
+              style={{ padding: '7px 10px', border: `1.5px solid ${GR20}`, borderRadius: 8, fontSize: 12, background: '#fff', outline: 'none', color: GR80, width: '100%' }}>
+              {OBJECTIVES.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+            <div style={{ fontSize: 10, color: GR60, marginTop: 3 }}>{OBJECTIVES.find(o => o.id === objective)?.desc}</div>
+          </div>
+          <div style={{ minWidth: 170 }}>
+            <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: GR60, marginBottom: 4 }}>Monte Carlo simulations</div>
+            <select value={nSims} onChange={e => setNSims(+e.target.value)}
+              style={{ padding: '7px 10px', border: `1.5px solid ${GR20}`, borderRadius: 8, fontSize: 12, background: '#fff', outline: 'none', color: GR80, width: '100%' }}>
+              <option value={1000}>1,000 — Fast</option>
+              <option value={3000}>3,000</option>
+              <option value={5000}>5,000 — Default</option>
+              <option value={10000}>10,000 — Deep</option>
+            </select>
+            <div style={{ fontSize: 10, color: GR60, marginTop: 3 }}>Feasible portfolios sampled per run.</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: GR60, marginBottom: 4 }}>IPS constraints</div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', padding: '7px 12px', border: `1.5px solid ${respectIPS ? BERRY : GR20}`, borderRadius: 8, background: respectIPS ? 'rgba(145,47,99,.06)' : '#fff', fontSize: 12, color: GR80 }}>
+              <input type="checkbox" checked={respectIPS} onChange={e => setRespectIPS(e.target.checked)} style={{ accentColor: BERRY, width: 14, height: 14 }} />
+              <span style={{ fontWeight: 500 }}>Honour IPS</span>
+              {ips.riskProfile && <span style={{ fontSize: 9.5, color: BERRY, background: '#fff', padding: '1px 7px', borderRadius: 12, border: `1px solid ${BERRY}` }}>{ips.riskProfile}</span>}
+            </label>
+            <div style={{ fontSize: 10, color: GR60, marginTop: 3 }}>
+              {respectIPS && ips.alloc ? <span style={{ color: POS }}>✓ IPS targets imported — override any field below.</span>
+                : respectIPS && !ips.alloc ? <span style={{ color: WARN }}>⚠ No IPS allocation set. Fill Section D or enter manually.</span>
+                : 'Leave blank = unconstrained.'}
+            </div>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={onBack} style={{ padding: '6px 14px', border: '1px solid var(--border)', borderRadius: 20, background: '#fff', fontSize: 11, cursor: 'pointer', color: 'var(--text-secondary)' }}>← Edit portfolio</button>
-          <button onClick={runOptimise} disabled={loading || totalWeight !== 100}
-            style={{ padding: '7px 18px', border: 'none', borderRadius: 20, background: loading || totalWeight !== 100 ? 'var(--border)' : 'var(--brand-primary)', color: '#fff', fontSize: 11, fontWeight: 600, cursor: loading || totalWeight !== 100 ? 'not-allowed' : 'pointer' }}>
-            {loading ? 'Running...' : '▶ Run optimiser'}
-          </button>
-        </div>
-      </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
-
-        {/* Pre-flight checks */}
-        {!result && !loading && (
-          <div style={{ marginBottom: 16, padding: 16, background: 'var(--bg-secondary)', borderRadius: 10, border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 10 }}>Pre-flight checks</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                <span style={{ color: funds.length >= 2 ? 'var(--pos)' : 'var(--brand-primary)' }}>{funds.length >= 2 ? '✓' : '✗'}</span>
-                <span>{funds.length} fund{funds.length !== 1 ? 's' : ''} in portfolio {funds.length < 2 ? '— add at least 2' : ''}</span>
+        <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <div className="ptf-card" style={{ marginBottom: 0 }}>
+            <div className="ptf-card-hd">Position constraints</div>
+            <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <div style={{ fontSize: 10.5, fontWeight: 600, color: GR80, marginBottom: 5 }}>Min weight per fund</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <NI value={minW} onChange={setMinW} min={0} max={20} step={0.5} width={66} />
+                  <span style={{ fontSize: 11, color: GR60 }}>%</span>
+                </div>
+                <div style={{ fontSize: 10, color: GR60, marginTop: 4, lineHeight: 1.5 }}>Floor — prevents holdings collapsing to zero. Typical: 5%.</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                <span style={{ color: totalWeight === 100 ? 'var(--pos)' : 'var(--brand-primary)' }}>{totalWeight === 100 ? '✓' : '✗'}</span>
-                <span>Weights sum to {totalWeight}% {totalWeight !== 100 ? '— must be 100%' : ''}</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                <span style={{ color: 'var(--pos)' }}>✓</span>
-                <span>IPS constraints: Equity {ips.alloc?.equity?.min || 40}–{ips.alloc?.equity?.max || 60}% · Debt {ips.alloc?.debt?.min || 30}–{ips.alloc?.debt?.max || 50}%</span>
+              <div>
+                <div style={{ fontSize: 10.5, fontWeight: 600, color: GR80, marginBottom: 5 }}>Max weight per fund</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <NI value={maxW} onChange={setMaxW} min={5} max={100} step={1} width={66} />
+                  <span style={{ fontSize: 11, color: GR60 }}>%</span>
+                </div>
+                <div style={{ fontSize: 10, color: GR60, marginTop: 4, lineHeight: 1.5 }}>Ceiling — prevents single-fund dominance. Typical: 25–40%.</div>
               </div>
             </div>
           </div>
-        )}
 
-        {/* Error */}
-        {error && (
-          <div style={{ padding: 14, background: 'rgba(145,47,99,.06)', border: '1px solid rgba(145,47,99,.2)', borderRadius: 8, marginBottom: 16, fontSize: 12, color: 'var(--brand-primary)' }}>
-            ⚠ {error}
+          <div className="ptf-card" style={{ marginBottom: 0 }}>
+            <div className="ptf-card-hd">
+              Asset class exposure
+              {respectIPS && ips.alloc && (
+                <span style={{ fontSize: 9, color: BERRY, background: 'rgba(145,47,99,.06)', border: `1px solid rgba(145,47,99,.2)`, borderRadius: 10, padding: '2px 8px', fontWeight: 600 }}>
+                  ✓ From IPS — editable
+                </span>
+              )}
+            </div>
+            <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <MinMax label="Equity" minVal={minEq} maxVal={maxEq} onMin={setMinEq} onMax={setMaxEq} />
+              <div style={{ fontSize: 9.5, color: GR60, marginTop: -6 }}>Domestic equity (all caps) + international equity funds.</div>
+              <MinMax label="Debt" minVal={minDebt} maxVal={maxDebt} onMin={setMinDebt} onMax={setMaxDebt} />
+              <div style={{ fontSize: 9.5, color: GR60, marginTop: -6 }}>Bonds, gilt, liquid, credit risk, duration funds.</div>
+              <MinMax label="Commodities" minVal={minComm} maxVal={maxComm} onMin={setMinComm} onMax={setMaxComm} />
+              <div style={{ fontSize: 9.5, color: GR60, marginTop: -6 }}>Gold ETFs, silver, multi-commodity funds.</div>
+              <MinMax label="Small cap" sub="within equity" minVal="" maxVal={maxSc} onMin={() => {}} onMax={setMaxSc} noMin />
+              <div style={{ fontSize: 9.5, color: GR60, marginTop: -6 }}>Guide: Conservative 15% · Moderate 28% · Aggressive 40%.</div>
+              <MinMax label="Global allocation" sub="within equity" minVal={minIntl} maxVal={maxIntl} onMin={setMinIntl} onMax={setMaxIntl} />
+              <div style={{ fontSize: 9.5, color: GR60, marginTop: -6 }}>International, global, US, EM, and overseas equity funds.</div>
+              <div style={{ fontSize: 9.5, color: GR60 }}>Leave blank = unconstrained.</div>
+            </div>
+          </div>
+
+          <div className="ptf-card" style={{ marginBottom: 0 }}>
+            <div className="ptf-card-hd">Portfolio risk guardrail</div>
+            <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <div style={{ fontSize: 10.5, fontWeight: 600, color: GR80, marginBottom: 5 }}>Max portfolio std deviation</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <NI value={maxVol} onChange={setMaxVol} min={1} max={50} step={0.5} width={66} />
+                  <span style={{ fontSize: 11, color: GR60 }}>% annualised</span>
+                </div>
+                <div style={{ fontSize: 10, color: GR60, marginTop: 6, lineHeight: 1.6 }}>
+                  Hard ceiling on 3Y annualised std dev.<br /><br />
+                  <span style={{ color: GR80, fontWeight: 500 }}>Risk profile benchmarks:</span><br />
+                  Conservative: ≤ 10% · Mod-conservative: ≤ 13%<br />
+                  Moderate: ≤ 16% · Mod-aggressive: ≤ 20%<br />
+                  Aggressive: ≤ 25% · Blank: unconstrained
+                </div>
+              </div>
+              {currM.std3y > 0 && (
+                <div style={{ background: GR10, border: `1px solid ${GR20}`, borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: GR60, marginBottom: 6 }}>Current portfolio</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 17, fontWeight: 700, color: volColor }}>{currM.std3y.toFixed(1)}%</span>
+                    <span style={{ fontSize: 10, color: GR60 }}>3Y std dev</span>
+                  </div>
+                  <div style={{ height: 5, background: GR20, borderRadius: 3, overflow: 'hidden', marginBottom: 4 }}>
+                    <div style={{ width: Math.min(100, currM.std3y / 30 * 100).toFixed(0) + '%', height: '100%', background: volColor, borderRadius: 3 }} />
+                  </div>
+                  <div style={{ fontSize: 10, color: GR60 }}>{volLabel}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding: '0 16px 14px' }}>
+          <div className="ptf-card">
+            <div className="ptf-card-hd">
+              Internal sleeve caps
+              <span style={{ fontSize: 9, fontWeight: 400, color: GR60, textTransform: 'none', letterSpacing: 0 }}>each capped at 10% by default; adjust as needed</span>
+            </div>
+            <div style={{ padding: '14px 16px', display: 'flex', gap: 32, flexWrap: 'wrap' }}>
+              {[
+                ['Precious metals / alternatives', capPreciousMetals, setCapPreciousMetals, 'Gold ETFs, silver, multi-commodity'],
+                ['Equity passive (index / ETF)',   capPassive,        setCapPassive,        'Index funds, ETFs tracking benchmarks'],
+                ['Thematic funds',                 capThematic,       setCapThematic,       'Sector, ESG, smart-beta funds'],
+              ].map(([label, val, setter, hint]) => (
+                <div key={label}>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: GR80, marginBottom: 4 }}>{label}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 10, color: GR60 }}>Max</span>
+                    <NI value={val} onChange={setter} min={0} max={100} step={1} width={58} />
+                    <span style={{ fontSize: 10, color: GR60 }}>%</span>
+                  </div>
+                  <div style={{ fontSize: 9, color: GR60, marginTop: 3 }}>{hint}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding: '9px 20px', background: violations.length === 0 ? '#E8F5EE' : '#FEF3C7', borderTop: `1px solid ${GR20}`, borderBottom: `1px solid ${GR20}`, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 13 }}>{violations.length === 0 ? '✅' : '⚠️'}</span>
+          <div style={{ flex: 1, fontSize: 11, lineHeight: 1.55, color: GR80 }}>
+            {violations.length === 0
+              ? <span><strong style={{ color: POS }}>Ready to optimise</strong> — all constraints are valid. Click <strong>⚡ Run optimisation</strong> above.</span>
+              : <span><strong style={{ color: WARN }}>{violations.join(' · ')}</strong> — adjust constraints before running.</span>}
+          </div>
+          {totalWeight !== 100 && <span style={{ fontSize: 11, color: WARN, fontWeight: 600 }}>Weights sum to {totalWeight}% — must be 100%</span>}
+        </div>
+      </div>
+    );
+  }
+
+  function ResultsTab() {
+    if (loading) return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 40 }}>
+        <div style={{ width: 44, height: 44, borderRadius: '50%', border: `3px solid ${GR20}`, borderTopColor: BERRY, animation: 'spin 0.8s linear infinite' }} />
+        <div style={{ fontSize: 14, fontWeight: 600, color: GR80 }}>Running {nSims.toLocaleString()} Monte Carlo simulations…</div>
+        <div style={{ fontSize: 12, color: GR60 }}>Sampling feasible portfolios · Filtering by constraints · Building efficient frontier</div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+
+    if (error) return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}>
+        <div style={{ fontSize: 28, opacity: .4 }}>⚠</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: BERRY }}>{error}</div>
+        <button onClick={() => setActiveTab('configure')}
+          style={{ padding: '8px 20px', border: `1px solid ${GR20}`, borderRadius: 20, background: '#fff', fontSize: 12, cursor: 'pointer', color: GR80 }}>
+          ← Back to configure
+        </button>
+      </div>
+    );
+
+    if (!result) return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40, textAlign: 'center' }}>
+        <div style={{ fontSize: 32, opacity: .2 }}>◈</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: GR80 }}>No results yet</div>
+        <div style={{ fontSize: 12, color: GR60 }}>Configure your constraints and click Run optimisation.</div>
+        <button onClick={() => setActiveTab('configure')}
+          style={{ padding: '8px 20px', border: `1px solid ${GR20}`, borderRadius: 20, background: '#fff', fontSize: 12, cursor: 'pointer', color: GR80 }}>
+          ← Go to configure
+        </button>
+      </div>
+    );
+
+    const frontier = result.frontier || [];
+    const allVols = frontier.map(p => p[0]);
+    const allRets = frontier.map(p => p[1]);
+    const vMin = Math.min(...allVols), vMax = Math.max(...allVols);
+    const rMin = Math.min(...allRets), rMax = Math.max(...allRets);
+    const W = 500, H = 220, PAD = 32;
+    const toX = v => PAD + ((v - vMin) / (vMax - vMin || 1)) * (W - PAD * 2);
+    const toY = r => H - PAD - ((r - rMin) / (rMax - rMin || 1)) * (H - PAD * 2);
+
+    try { return (
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: GR60, textTransform: 'uppercase', letterSpacing: '.06em' }}>Run with:</span>
+          {[
+            `${nSims.toLocaleString()} sims`,
+            OBJECTIVES.find(o => o.id === selectedStrat)?.label || selectedStrat,
+            `Min ${minW}% · Max ${maxW}% per fund`,
+            maxVol ? `Vol cap ${maxVol}%` : null,
+            respectIPS && ips.alloc ? `IPS: ${ips.riskProfile}` : null,
+          ].filter(Boolean).map(chip => (
+            <span key={chip} style={{ fontSize: 10, padding: '2px 10px', borderRadius: 12, background: GR10, border: `1px solid ${GR20}`, color: GR80 }}>{chip}</span>
+          ))}
+          <button onClick={() => setActiveTab('configure')}
+            style={{ marginLeft: 'auto', padding: '4px 12px', border: `1px solid ${GR20}`, borderRadius: 20, background: '#fff', fontSize: 11, cursor: 'pointer', color: GR60 }}>
+            ← Adjust constraints
+          </button>
+        </div>
+
+        {result.constraint_warnings?.length > 0 && (
+          <div style={{ padding: 14, background: 'rgba(180,107,16,.08)', border: '1.5px solid rgba(180,107,16,.35)', borderRadius: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: WARN, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.05em' }}>
+              ⚠ Constraints auto-relaxed — results shown with adjusted limits
+            </div>
+            {result.constraint_warnings.map((cw, i) => (
+              <div key={i} style={{ marginBottom: i < result.constraint_warnings.length - 1 ? 10 : 0, paddingBottom: i < result.constraint_warnings.length - 1 ? 10 : 0, borderBottom: i < result.constraint_warnings.length - 1 ? '1px solid rgba(180,107,16,.2)' : 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: GR80 }}>{cw.label}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, background: 'rgba(180,107,16,.12)', padding: '2px 8px', borderRadius: 10, color: WARN }}>
+                    Requested {cw.requested}% → Auto-relaxed to {cw.relaxed_to}%
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: GR60, lineHeight: 1.6 }}>{cw.message}</div>
+              </div>
+            ))}
           </div>
         )}
 
-        {/* Loading */}
-        {loading && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 20px', gap: 12 }}>
-            <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid var(--border)', borderTopColor: 'var(--brand-primary)', animation: 'spin 0.8s linear infinite' }} />
-            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Running 10,000 Monte Carlo simulations…</div>
-            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        {result.insufficient_data?.length > 0 && (
+          <div style={{ padding: 14, background: 'rgba(180,107,16,.06)', border: `1px solid rgba(180,107,16,.25)`, borderRadius: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: WARN, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>⚠ Manual weight required</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>These funds have insufficient NAV history. Set weights manually and re-run.</div>
+            {result.insufficient_data.map(f => (
+              <div key={f.isin} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{f.name}</span>
+                <span style={{ fontSize: 10, color: GR60 }}>{f.weeks}w data</span>
+                <input type="number" min="0" max="100" value={manualWeights[f.isin] || 0}
+                  onChange={e => setManualWeights(prev => ({ ...prev, [f.isin]: Math.max(0, Math.min(100, +e.target.value || 0)) }))}
+                  style={{ width: 52, padding: '3px 6px', border: `1px solid ${WARN}`, borderRadius: 6, fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textAlign: 'center' }} />
+                <span style={{ fontSize: 11, color: GR60 }}>%</span>
+              </div>
+            ))}
+            <button onClick={runOptimise} style={{ marginTop: 8, padding: '6px 14px', border: 'none', borderRadius: 20, background: WARN, color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Re-run with manual weights</button>
           </div>
         )}
 
-        {/* Results */}
-        {result && (
-          <>
-            {/* Insufficient data — manual weights */}
-            {result.insufficient_data?.length > 0 && (
-              <div style={{ marginBottom: 16, padding: 14, background: 'rgba(180,107,16,.06)', border: '1px solid rgba(180,107,16,.25)', borderRadius: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#B46B10', marginBottom: 8, letterSpacing: '.04em', textTransform: 'uppercase' }}>⚠ Manual weight required</div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>These funds have insufficient NAV history (&lt;1Y) and were excluded from optimisation. Enter weights manually — other funds will adjust automatically.</div>
-                {result.insufficient_data.map(f => (
-                  <div key={f.isin} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                    <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{f.name}</span>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{f.weeks}w data</span>
-                    <input type="number" min="0" max="100" value={manualWeights[f.isin] || 0}
-                      onChange={e => updateManualWeight(f.isin, e.target.value)}
-                      style={{ width: 52, padding: '3px 6px', border: '1px solid #B46B10', borderRadius: 6, fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textAlign: 'center' }} />
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>%</span>
+        {result.ranking_flags?.length > 0 && (
+          <div style={{ padding: 14, background: 'rgba(109,84,121,.05)', border: '1px solid rgba(109,84,121,.2)', borderRadius: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: MUT, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>Fund quality flags</div>
+            {result.ranking_flags.map(flag => (
+              <div key={flag.isin} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>⚠ <strong>{flag.name}</strong> — {flag.ranking || 'Unranked'}</div>
+                {flag.suggestions?.length > 0 && (
+                  <div style={{ paddingLeft: 16 }}>
+                    <div style={{ fontSize: 10, color: GR60, marginBottom: 3 }}>Suggested R1/R2 alternatives:</div>
+                    {flag.suggestions.map(s => <div key={s.isin} style={{ fontSize: 11, color: GR80, marginBottom: 2 }}>{s.ranking} · {s.name} · 1Y {s.return_1y != null ? fp(s.return_1y) : '—'}</div>)}
                   </div>
-                ))}
-                <button onClick={runOptimise}
-                  style={{ marginTop: 8, padding: '6px 14px', border: 'none', borderRadius: 20, background: '#B46B10', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
-                  Re-run with manual weights
-                </button>
+                )}
               </div>
-            )}
+            ))}
+          </div>
+        )}
 
-            {/* Ranking flags */}
-            {result.ranking_flags?.length > 0 && (
-              <div style={{ marginBottom: 16, padding: 14, background: 'rgba(109,84,121,.05)', border: '1px solid rgba(109,84,121,.2)', borderRadius: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--brand-mid)', marginBottom: 8, letterSpacing: '.04em', textTransform: 'uppercase' }}>Fund quality flags</div>
-                {result.ranking_flags.map(flag => (
-                  <div key={flag.isin} style={{ marginBottom: 10 }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 4 }}>
-                      ⚠ <strong>{flag.name}</strong> — {flag.ranking ? `Ranked ${flag.ranking}` : 'Unranked'}
-                    </div>
-                    {flag.suggestions.length > 0 && (
-                      <div style={{ paddingLeft: 16 }}>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>Suggested R1/R2 alternatives:</div>
-                        {flag.suggestions.map(s => (
-                          <div key={s.isin} style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 2 }}>
-                            {s.ranking} · {s.name} · 1Y {s.return_1y != null ? fp(s.return_1y) : '—'}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {result.sleeve_warnings?.length > 0 && (
-              <div style={{ marginBottom: 16, padding: 14, background: 'rgba(234,179,8,.06)', border: '1px solid rgba(234,179,8,.3)', borderRadius: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#92700A', marginBottom: 8, letterSpacing: '.04em', textTransform: 'uppercase' }}>Sleeve cap warnings</div>
-                {result.sleeve_warnings.map((w, i) => (
-                  <div key={i} style={{ fontSize: 12, color: '#92700A', marginBottom: 4 }}>
-                    ⚠ {w.message}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Efficient frontier + strategy selector side by side */}
-            {(() => {
-              const frontier = result.frontier || [];
-              const allPts = [...frontier, ...(result.curve || [])];
-              const allVols = allPts.map(p => p[0]);
-              const allRets = allPts.map(p => p[1]);
-              const minVol = Math.min(...allVols), maxVol = Math.max(...allVols);
-              const minRet = Math.min(...allRets), maxRet = Math.max(...allRets);
-              const W = 400, H = 200, PAD = 28;
-              const toX = v => PAD + ((v - minVol) / (maxVol - minVol || 1)) * (W - PAD * 2);
-              const toY = r => H - PAD - ((r - minRet) / (maxRet - minRet || 1)) * (H - PAD * 2);
-              const SCOL = { max_sharpe: '#912F63', min_volatility: '#1A7A52', max_return: '#3E3452' };
-              const SLBL = { max_sharpe: 'Max Sharpe', min_volatility: 'Min Volatility', max_return: 'Max Return' };
-              return (
-                <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'stretch' }}>
-                  {/* Left — frontier chart 70% */}
-                  <div style={{ flex: 7, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>Efficient Frontier</div>
-                    <div style={{ border: '1px solid var(--border)', borderRadius: 10, background: '#fff', padding: 10, flex: 1, display: 'flex', flexDirection: 'column' }}>
-                      <svg width="100%" style={{ display: 'block', flex: 1 }} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
-                        {/* Frontier dots — coloured by Sharpe (teal=low, yellow=high) */}
-                        {(() => {
-                          const sharpes = frontier.map(x => x[2] ?? 0);
-                          const sMin = Math.min(...sharpes), sMax = Math.max(...sharpes);
-                          return frontier.map((p, i) => {
-                            const t = sMax > sMin ? ((p[2] ?? 0) - sMin) / (sMax - sMin) : 0.5;
-                            const r = Math.round(t * 255);
-                            const g = Math.round(180 + t * 75);
-                            const b = Math.round((1 - t) * 180);
-                            return <circle key={i} cx={toX(p[0])} cy={toY(p[1])} r={2} fill={`rgb(${r},${g},${b})`} opacity={0.75} />;
-                          });
-                        })()}
-
-                        {Object.entries(result.strategies || {}).map(([key, strat]) => {
-                          if (!strat?.metrics) return null;
-                          const cx = toX(strat.metrics.volatility), cy = toY(strat.metrics.return);
-                          return <g key={key}>
-                            <circle cx={cx} cy={cy} r={8} fill={SCOL[key]} opacity={0.15} />
-                            <circle cx={cx} cy={cy} r={4} fill={SCOL[key]} />
-                            <text x={cx} y={cy - 9} textAnchor="middle" fontSize={6} fontWeight="700" fill={SCOL[key]}>{SLBL[key]}</text>
-                          </g>;
-                        })}
-                        <text x={W/2} y={H-6} textAnchor="middle" fontSize={6} fill="#aaa">Volatility (%)</text>
-                        <text x={10} y={H/2} textAnchor="middle" fontSize={6} fill="#aaa" transform={`rotate(-90,10,${H/2})`}>Return (%)</text>
-                      </svg>
-                      <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 4 }}>
-                        {Object.entries(SCOL).map(([k, c]) => (
-                          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--text-muted)' }}>
-                            <div style={{ width: 7, height: 7, borderRadius: '50%', background: c }} />{SLBL[k]}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  {/* Right — strategy cards 30% */}
-                  <div style={{ flex: 3, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
-                {STRAT_OPTIONS.map(opt => {
-                  const s = result.strategies?.[opt.id];
-                  const sel = selectedStrat === opt.id;
+        <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
+          <div style={{ flex: 7, minWidth: 0 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: GR60, marginBottom: 6 }}>Efficient Frontier</div>
+            <div style={{ border: `1px solid ${GR20}`, borderRadius: 10, background: '#fff', padding: 12 }}>
+              <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
+                {(() => {
+                  const sharpes = frontier.map(x => x[2] ?? 0);
+                  const sMin = Math.min(...sharpes), sMax = Math.max(...sharpes);
+                  return frontier.map((p, i) => {
+                    const t = sMax > sMin ? ((p[2] ?? 0) - sMin) / (sMax - sMin) : 0.5;
+                    return <circle key={i} cx={toX(p[0])} cy={toY(p[1])} r={2.5}
+                      fill={`rgb(${Math.round(t*255)},${Math.round(180+t*75)},${Math.round((1-t)*180)})`} opacity={0.7} />;
+                  });
+                })()}
+                {Object.entries(result.strategies || {}).map(([key, s]) => {
+                  if (!s?.metrics) return null;
+                  const color = OBJ_COLOR[key] || BERRY;
+                  const label = OBJECTIVES.find(o => o.id === key)?.label?.split(' ').slice(1).join(' ') || key;
+                  const cx = toX(s.metrics.volatility), cy = toY(s.metrics.return);
                   return (
-                    <div key={opt.id} onClick={() => setSelectedStrat(opt.id)}
-                      style={{ border: `2px solid ${sel ? opt.color : 'var(--border)'}`, borderRadius: 10, padding: '10px 14px', cursor: 'pointer', background: sel ? `${opt.color}08` : '#fff', transition: 'all .15s', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                        <span style={{ fontSize: 13, color: opt.color }}>{opt.icon}</span>
-                        <div>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: opt.color }}>{opt.label}</div>
-                          <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{opt.desc}</div>
-                        </div>
-                      </div>
-                      {s?.metrics ? (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 5 }}>
-                          <MetricCard label="Return" value={`${s.metrics.return >= 0 ? '+' : ''}${s.metrics.return}%`} color={s.metrics.return >= 0 ? 'var(--pos)' : 'var(--neg)'} />
-                          <MetricCard label="Volatility" value={`${s.metrics.volatility}%`} />
-                          <MetricCard label="Sharpe" value={f2(s.metrics.sharpe)} color={s.metrics.sharpe >= 0.5 ? 'var(--pos)' : 'var(--text-muted)'} />
-                        </div>
-                      ) : (
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Not available</div>
-                      )}
-                    </div>
+                    <g key={key}>
+                      <circle cx={cx} cy={cy} r={9} fill={color} opacity={0.15} />
+                      <circle cx={cx} cy={cy} r={5} fill={color} />
+                      <text x={cx} y={cy - 10} textAnchor="middle" fontSize={7} fontWeight="700" fill={color}>{label}</text>
+                    </g>
                   );
                 })}
+                <text x={W/2} y={H-4} textAnchor="middle" fontSize={8} fill="#bbb">Volatility (3Y std dev %)</text>
+                <text x={10} y={H/2} textAnchor="middle" fontSize={8} fill="#bbb" transform={`rotate(-90,10,${H/2})`}>3Y CAGR %</text>
+              </svg>
+              <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 6 }}>
+                {OBJECTIVES.map(o => (
+                  <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: GR60 }}>
+                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: OBJ_COLOR[o.id] }} />{o.label}
                   </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ flex: 3, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+            {OBJECTIVES.map(opt => {
+              const s = result.strategies?.[opt.id];
+              const sel = selectedStrat === opt.id;
+              const color = OBJ_COLOR[opt.id];
+              return (
+                <div key={opt.id} onClick={() => setSelectedStrat(opt.id)}
+                  style={{ border: `2px solid ${sel ? color : GR20}`, borderRadius: 10, padding: '10px 12px', cursor: 'pointer', background: sel ? `${color}08` : '#fff', transition: 'all .15s', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color }}>{opt.label}</div>
+                    <div style={{ fontSize: 9, color: GR60 }}>{opt.desc}</div>
+                  </div>
+                  {s?.metrics ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 4 }}>
+                      {[['Return', `${s.metrics.return >= 0 ? '+' : ''}${s.metrics.return}%`, s.metrics.return >= 0 ? POS : NEG],
+                        ['Vol', `${s.metrics.volatility}%`, GR80],
+                        ['Sharpe', f2(s.metrics.sharpe), s.metrics.sharpe >= 0.5 ? POS : GR60]].map(([lbl, val, clr]) => (
+                        <div key={lbl} style={{ textAlign: 'center', padding: '5px 4px', background: GR10, borderRadius: 6, border: `1px solid ${GR20}` }}>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: clr }}>{val}</div>
+                          <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: GR60 }}>{lbl}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <div style={{ fontSize: 10, color: GR60, fontStyle: 'italic' }}>Not available</div>}
                 </div>
               );
-            })()}
+            })}
+          </div>
+        </div>
 
-            {/* Weight comparison table */}
-            {strat && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8 }}>Weight rebalancing — {strat.name}</div>
-                <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                    <thead>
-                      <tr style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
-                        <th style={{ padding: '8px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Fund</th>
-                        <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Current</th>
-                        <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)' }}>Optimised</th>
-                        <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Change</th>
+        {/* Asset class & market cap comparison */}
+        {strat && (() => {
+          const baseW = Object.keys(originalWeights).length > 0 ? originalWeights : weights;
+          const optW = {};
+          funds.forEach(f => { optW[f.isin] = strat.weights[f.isin] ?? baseW[f.isin] ?? 0; });
+
+          function blend(wts) {
+            let eq = 0, debt = 0, cash = 0, lc = 0, mc = 0, sc = 0;
+            let totalW = 0, capW = 0;
+            funds.forEach(f => {
+              const w = (wts[f.isin] || 0) / 100;
+              if (w <= 0) return;
+              const s = snapshots[f.isin] || {};
+
+              // Step 1: Normalize fund-level asset class to 100%
+              const rawEq   = parseFloat(s.equity_pct) || 0;
+              const rawDebt = parseFloat(s.bond_pct)   || 0;
+              const rawCash = parseFloat(s.cash_pct)   || 0;
+              const acSum   = rawEq + rawDebt + rawCash;
+              const normEq   = acSum > 0 ? rawEq   / acSum * 100 : rawEq;
+              const normDebt = acSum > 0 ? rawDebt / acSum * 100 : rawDebt;
+              const normCash = acSum > 0 ? rawCash / acSum * 100 : rawCash;
+
+              eq   += normEq   * w;
+              debt += normDebt * w;
+              cash += normCash * w;
+              totalW += w;
+
+              // Step 2: Market cap — normalize L+M+S to 100% at fund level first
+              // This removes cash/debt/other drag before portfolio-level aggregation
+              const rawLc = parseFloat(s.large_cap) || 0;
+              const rawMc = parseFloat(s.mid_cap)   || 0;
+              const rawSc = parseFloat(s.small_cap);
+              if (rawSc != null && !isNaN(rawSc)) {
+                const lmsSum = rawLc + rawMc + rawSc;
+                if (lmsSum > 0) {
+                  lc += (rawLc / lmsSum * 100) * w;
+                  mc += (rawMc / lmsSum * 100) * w;
+                  sc += (rawSc / lmsSum * 100) * w;
+                  capW += w;
+                }
+              }
+            });
+            // Normalize portfolio-level asset class
+            const acTot = eq + debt + cash;
+            const norm = v => acTot > 0 ? v / acTot * 100 : v;
+            // Normalize market cap by weight of funds that had cap data
+            const capNorm = v => capW > 0 ? v / capW : 0;
+            return {
+              eq: norm(eq), debt: norm(debt), cash: norm(cash),
+              lc: capNorm(lc), mc: capNorm(mc), sc: capNorm(sc),
+              hasCapData: capW > 0,
+            };
+          }
+
+          const orig = blend(baseW);
+          const opt  = blend(optW);
+
+          const rows = [
+            { section: 'Asset class', items: [
+              { label: 'Equity',        origV: orig.eq,   optV: opt.eq,   color: BERRY },
+              { label: 'Bonds / Debt',  origV: orig.debt, optV: opt.debt, color: PLUM  },
+              { label: 'Cash / Liquid', origV: orig.cash, optV: opt.cash, color: GR60  },
+            ]},
+            { section: 'Market cap (equity portion)', items: orig.hasCapData ? [
+              { label: 'Large cap',  origV: orig.lc, optV: opt.lc, color: BERRY },
+              { label: 'Mid cap',    origV: orig.mc, optV: opt.mc, color: MUT   },
+              { label: 'Small cap',  origV: orig.sc, optV: opt.sc, color: WARN  },
+            ] : [] },
+          ];
+
+          // Check if we have any snapshot data at all
+          const hasSnapData = funds.some(f => {
+            const s = snapshots[f.isin] || {};
+            return s.equity_pct != null || s.bond_pct != null;
+          });
+
+          if (!hasSnapData) return (
+            <div className="ptf-card">
+              <div className="ptf-card-hd">Portfolio composition — original vs optimised</div>
+              <div style={{ padding: '16px', fontSize: 12, color: GR60 }}>
+                Visit the <strong>Analyse</strong> tab first to load fund composition data, then re-run the optimiser.
+              </div>
+            </div>
+          );
+
+          return (
+            <div className="ptf-card">
+              <div className="ptf-card-hd">Portfolio composition — original vs optimised</div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: GR10, borderBottom: `1px solid ${GR20}` }}>
+                    <th style={{ padding: '7px 14px', textAlign: 'left', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: GR60 }}>Metric</th>
+                    <th style={{ padding: '7px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: GR60 }}>Original</th>
+                    <th style={{ padding: '7px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: BERRY }}>Optimised</th>
+                    <th style={{ padding: '7px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: GR60 }}>Change</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(({ section, items }) => items.length === 0 ? null : (
+                    <React.Fragment key={section}>
+                      <tr style={{ background: GR10 }}>
+                        <td colSpan={4} style={{ padding: '5px 14px', fontSize: 9, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: BERRY }}>{section}</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {funds.map((f, idx) => {
-                        // Current = original build portfolio weights (never the optimised ones)
-                        const baseWeights = Object.keys(originalWeights).length > 0 ? originalWeights : weights;
-                        const cur = baseWeights[f.isin] || 0;
-                        const opt = parseFloat((strat.weights[f.isin] ?? cur).toFixed(1));
-                        const diff = opt - cur;
+                      {items.map(({ label, origV, optV, color }) => {
+                        const diff = optV - origV;
                         return (
-                          <tr key={f.isin} style={{ borderBottom: idx < funds.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                            <td style={{ padding: '10px 14px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <div style={{ width: 3, height: 28, borderRadius: 2, background: f.color || COLORS[idx % COLORS.length], flexShrink: 0 }} />
-                                <div>
-                                  <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>{f.name}</div>
-                                  <span style={{ fontSize: 9, background: 'var(--bg-secondary)', padding: '1px 5px', borderRadius: 10, color: 'var(--text-muted)' }}>{f.category}</span>
-                                </div>
-                              </div>
-                            </td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{cur}%</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--brand-primary)' }}>{opt}%</td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: diff > 0 ? 'var(--pos)' : diff < 0 ? 'var(--brand-primary)' : 'var(--text-muted)' }}>
+                          <tr key={label} style={{ borderBottom: `1px solid ${GR20}` }}>
+                            <td style={{ padding: '8px 14px', color: GR80, fontWeight: 500 }}>{label}</td>
+                            <td style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: GR60 }}>{origV.toFixed(1)}%</td>
+                            <td style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color }}>{optV.toFixed(1)}%</td>
+                            <td style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 11, color: diff > 0.5 ? POS : diff < -0.5 ? NEG : GR60 }}>
                               {diff > 0 ? '+' : ''}{diff.toFixed(1)}%
                             </td>
                           </tr>
                         );
                       })}
-                    </tbody>
-                  </table>
-                </div>
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
+
+        {strat && (
+          <div style={{ borderRadius: 10, border: `1px solid ${GR20}`, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: PLUM, color: '#fff' }}>
+              <span style={{ fontSize: 14 }}>⚖</span>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em' }}>Weight rebalancing — {strat.name}</div>
+                <div style={{ fontSize: 9, opacity: .7, marginTop: 1 }}>Optimised vs current portfolio weights</div>
               </div>
-            )}
-
-            {/* Disclaimer */}
-            <div style={{ padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 8, border: '1px solid var(--border)', fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16 }}>
-              <strong>Disclaimer:</strong> These optimised weights are generated using Monte Carlo simulation based on historical NAV data. Past performance is not indicative of future returns. This is for illustrative purposes only and does not constitute investment advice. BugleRock Capital does not guarantee the accuracy or completeness of this analysis.
             </div>
-
-            {/* Apply button */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button onClick={onBack} style={{ padding: '8px 18px', border: '1px solid var(--border)', borderRadius: 20, background: '#fff', fontSize: 12, cursor: 'pointer', color: 'var(--text-secondary)' }}>← Back</button>
-              <button onClick={applyStrategy} disabled={!strat}
-                style={{ padding: '8px 22px', border: 'none', borderRadius: 20, background: strat ? 'var(--brand-primary)' : 'var(--border)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: strat ? 'pointer' : 'not-allowed' }}>
-                Apply {strat?.name} → Compare
-              </button>
-            </div>
-          </>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, background: '#fff' }}>
+              <thead>
+                <tr style={{ background: GR10, borderBottom: `1px solid ${GR20}` }}>
+                  {[['Fund', 'left'], ['Current', 'right'], ['Optimised', 'right'], ['Change', 'right']].map(([h, align], i) => (
+                    <th key={h} style={{ padding: '8px 14px', textAlign: align, fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: i === 2 ? BERRY : GR60 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {funds.map((f, idx) => {
+                  const baseW = Object.keys(originalWeights).length > 0 ? originalWeights : weights;
+                  const cur = baseW[f.isin] || 0;
+                  const opt = parseFloat((strat.weights[f.isin] ?? cur).toFixed(1));
+                  const diff = opt - cur;
+                  return (
+                    <tr key={f.isin} style={{ borderBottom: idx < funds.length - 1 ? `1px solid ${GR20}` : 'none' }}>
+                      <td style={{ padding: '10px 14px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ width: 3, height: 28, borderRadius: 2, background: f.color || COLORS[idx % COLORS.length], flexShrink: 0 }} />
+                          <div>
+                            <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }}>{f.name}</div>
+                            <span style={{ fontSize: 9, background: GR10, padding: '1px 5px', borderRadius: 10, color: GR60 }}>{f.category}</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: GR60 }}>{cur}%</td>
+                      <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: BERRY }}>{opt}%</td>
+                      <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: diff > 0 ? POS : diff < 0 ? NEG : GR60 }}>
+                        {diff > 0 ? '+' : ''}{diff.toFixed(1)}%
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
+
+        <div style={{ padding: '10px 14px', background: GR10, borderRadius: 8, border: `1px solid ${GR20}`, fontSize: 10, color: GR60, lineHeight: 1.6 }}>
+          <strong>Disclaimer:</strong> Optimised weights are generated using Monte Carlo simulation on historical NAV data. Past performance is not indicative of future returns. For illustrative purposes only — not investment advice. BugleRock Capital does not guarantee accuracy or completeness of this analysis.
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <button onClick={onBack} style={{ padding: '8px 18px', border: `1px solid ${GR20}`, borderRadius: 20, background: '#fff', fontSize: 12, cursor: 'pointer', color: GR60 }}>← Edit portfolio</button>
+          <button onClick={applyStrategy} disabled={!strat}
+            style={{ padding: '9px 24px', border: 'none', borderRadius: 20, background: strat ? BERRY : GR20, color: strat ? '#fff' : GR60, fontSize: 13, fontWeight: 600, cursor: strat ? 'pointer' : 'not-allowed' }}>
+            Apply {strat?.name} → Compare
+          </button>
+        </div>
       </div>
+    ); } catch(e) { return (
+      <div style={{ padding: 20, color: '#B91C1C', fontSize: 13, background: '#FEF2F2', borderRadius: 8, margin: 16 }}>
+        <strong>Render error in Results tab:</strong> {e.message}<br/>
+        <pre style={{ fontSize: 11, marginTop: 8, whiteSpace: 'pre-wrap' }}>{e.stack?.slice(0,500)}</pre>
+      </div>
+    ); }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <TabStrip />
+      {activeTab === 'configure' ? <ConfigureTab /> : <ResultsTab />}
     </div>
   );
 }
