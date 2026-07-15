@@ -859,6 +859,162 @@ def get_ranking_flags(funds: List[dict], date: date) -> List[dict]:
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
+def run_slsqp(funds, returns_map, manual_weights, ips, config=None):
+    """
+    Analytical SLSQP optimiser — finds the true mathematical optimum for each objective.
+    Uses scipy.optimize.minimize with SLSQP method.
+    Also runs a small Monte Carlo pass (500 sims) just for the frontier scatter plot.
+    """
+    from scipy.optimize import minimize
+
+    cfg = config or {}
+    min_w = cfg.get("min_w", MIN_WEIGHT)
+    max_w = cfg.get("max_w", MAX_WEIGHT)
+    max_vol_cap = cfg.get("max_vol")
+    _max_sc = cfg.get("max_sc")
+    sc_max = (_max_sc / 100.0) if _max_sc is not None else None
+
+    # Build fund list and returns
+    opt_funds = [f for f in funds if f["isin"] not in manual_weights]
+    manual_sum = sum(manual_weights.values()) / 100.0
+    remaining = 1.0 - manual_sum
+    valid_isins = [f["isin"] for f in opt_funds if f["isin"] in returns_map and len(returns_map[f["isin"]]) >= MIN_WEEKS_REQUIRED]
+    if len(valid_isins) < 2:
+        return {"error": "Insufficient NAV data for SLSQP. Need at least 2 funds with 1Y+ history."}
+
+    opt_fund_objs = [f for f in opt_funds if f["isin"] in valid_isins]
+    n = len(valid_isins)
+
+    # Build returns matrix
+    min_len = min(len(returns_map[isin]) for isin in valid_isins)
+    R = np.array([returns_map[isin][:min_len] for isin in valid_isins])
+    mu = np.mean(R, axis=1) * 52
+    cov = np.cov(R) * 52
+
+    # Bounds
+    bounds_list, sleeve_warnings = build_weight_bounds(opt_fund_objs, {}, ips, min_w_override=min_w, max_w_override=max_w, cfg=cfg)
+    bounds = [(lo * remaining, hi * remaining) for lo, hi in bounds_list]
+
+    # Build sc weights for sc constraint
+    sc_fund_data = []
+    for f in opt_fund_objs:
+        sc_pct = f.get("small_cap_pct")
+        lc_pct = f.get("large_cap_pct")
+        mc_pct = f.get("mid_cap_pct")
+        if sc_pct is None:
+            sc_fund_data.append(None)
+        else:
+            try:
+                sc = float(sc_pct); lc = float(lc_pct) if lc_pct else 0.0; mc = float(mc_pct) if mc_pct else 0.0
+                lms = lc + mc + sc
+                sc_fund_data.append(sc / lms if lms > 0 else 0.0)
+            except: sc_fund_data.append(None)
+
+    sc_wts = np.array([v if v is not None else 0.0 for v in sc_fund_data])
+    sc_rebase_wts = np.array([1.0 if v is not None else 0.0 for v in sc_fund_data])
+
+    sleeves = [classify_fund(f) for f in opt_fund_objs]
+    eq_wts = np.array([sleeve_equity_weight(s) for s in sleeves])
+    dt_wts = np.array([sleeve_debt_weight(s) for s in sleeves])
+
+    equity_min = ips.get("equity", {}).get("min", 0) / 100.0
+    equity_max = ips.get("equity", {}).get("max", 100) / 100.0
+    debt_min   = ips.get("debt", {}).get("min", 0) / 100.0
+    debt_max   = ips.get("debt", {}).get("max", 100) / 100.0
+    comm_min   = (cfg.get("minComm") or 0) / 100.0
+    comm_max   = (cfg.get("maxComm") or 100) / 100.0
+    intl_min   = (cfg.get("minIntl") or 0) / 100.0
+    intl_max   = (cfg.get("maxIntl") or 100) / 100.0
+
+    # Build constraints list for scipy
+    constraints = [
+        {'type': 'eq', 'fun': lambda w: w.sum() - remaining},  # weights sum to remaining
+    ]
+    if equity_max < 1.0 or equity_min > 0:
+        if any(sleeve_equity_weight(s) > 0 for s in sleeves):
+            constraints.append({'type': 'ineq', 'fun': lambda w: equity_max - float(np.dot(w, eq_wts))})
+            constraints.append({'type': 'ineq', 'fun': lambda w: float(np.dot(w, eq_wts)) - equity_min})
+    if debt_max < 1.0 or debt_min > 0:
+        if any(sleeve_debt_weight(s) > 0 for s in sleeves):
+            constraints.append({'type': 'ineq', 'fun': lambda w: debt_max - float(np.dot(w, dt_wts))})
+            constraints.append({'type': 'ineq', 'fun': lambda w: float(np.dot(w, dt_wts)) - debt_min})
+    if sc_max is not None and any(v is not None for v in sc_fund_data):
+        def sc_constraint(w):
+            wdata = float(np.dot(w, sc_rebase_wts))
+            if wdata <= 0: return 1.0
+            return sc_max - float(np.dot(w, sc_wts)) / wdata
+        constraints.append({'type': 'ineq', 'fun': sc_constraint})
+    if max_vol_cap is not None:
+        constraints.append({'type': 'ineq', 'fun': lambda w: max_vol_cap/100.0 - float(np.sqrt(w @ cov @ w))})
+
+    # Objective functions
+    def neg_sharpe(w):
+        r = float(np.dot(w, mu))
+        v = float(np.sqrt(w @ cov @ w))
+        return -(r - RISK_FREE_RATE) / v if v > 0 else 0
+
+    def neg_return(w): return -float(np.dot(w, mu))
+    def portfolio_vol(w): return float(np.sqrt(w @ cov @ w))
+
+    x0 = np.array([remaining / n] * n)  # equal weight start
+    constraint_warnings = []
+
+    def solve(obj_fn, obj_name):
+        try:
+            res = minimize(obj_fn, x0, method='SLSQP', bounds=bounds, constraints=constraints,
+                          options={'maxiter': 1000, 'ftol': 1e-9})
+            if res.success or res.fun < 1e6:
+                w = np.clip(res.x, 0, 1)
+                w = w / w.sum() * remaining
+                ret = round(float(np.dot(w, mu)) * 100, 2)
+                vol = round(float(np.sqrt(w @ cov @ w)) * 100, 2)
+                sharpe = round((float(np.dot(w, mu)) - RISK_FREE_RATE) / float(np.sqrt(w @ cov @ w)), 3) if vol > 0 else 0
+                weight_map = {isin: round(float(w[i]) * 100, 2) for i, isin in enumerate(valid_isins)}
+                for isin, mw in manual_weights.items():
+                    weight_map[isin] = mw
+                return {"name": obj_name, "weights": weight_map, "metrics": {"return": ret, "volatility": vol, "sharpe": sharpe}}
+            else:
+                logger.warning(f"SLSQP {obj_name} failed: {res.message}")
+                return None
+        except Exception as e:
+            logger.warning(f"SLSQP {obj_name} error: {e}")
+            return None
+
+    strategies = {}
+    s_sharpe = solve(neg_sharpe,  "Max Sharpe");  s_sharpe and strategies.update({"max_sharpe": s_sharpe})
+    s_return = solve(neg_return,  "Max Return");   s_return and strategies.update({"max_return": s_return})
+    s_vol    = solve(portfolio_vol,"Min Volatility"); s_vol and strategies.update({"min_volatility": s_vol})
+
+    # Small Monte Carlo pass for frontier scatter only (500 sims)
+    frontier = []
+    try:
+        lows  = np.array([b[0] for b in bounds])
+        highs = np.array([b[1] for b in bounds])
+        seed_str = ''.join(sorted(valid_isins))
+        np.random.seed(abs(hash(seed_str)) % (2**31))
+        for _ in range(2000):
+            raw = np.random.uniform(lows, highs)
+            w = raw / raw.sum() * remaining
+            w = np.clip(w, lows, highs)
+            port_ret = float(np.dot(w, mu))
+            port_vol = float(np.sqrt(w @ cov @ w))
+            port_sharpe = (port_ret - RISK_FREE_RATE) / port_vol if port_vol > 0 else 0
+            frontier.append([round(port_vol * 100, 2), round(port_ret * 100, 2), round(port_sharpe, 3)])
+    except Exception as e:
+        logger.warning(f"Frontier generation failed: {e}")
+
+    return {
+        "strategies": strategies,
+        "frontier": frontier,
+        "curve": [],
+        "n_valid_simulations": len(frontier),
+        "optimised_isins": valid_isins,
+        "sleeve_warnings": sleeve_warnings,
+        "constraint_warnings": constraint_warnings,
+        "method": "slsqp",
+    }
+
+
 def optimise_portfolio(payload: dict) -> dict:
     """
     Main entry point called by the API endpoint.
@@ -898,11 +1054,18 @@ def optimise_portfolio(payload: dict) -> dict:
     # Step 4: Get ranking flags
     ranking_flags = get_ranking_flags(funds, as_of_date)
 
-    # Step 5: Run Monte Carlo with user config
+    # Step 5: Run optimiser — Monte Carlo or SLSQP
+    method = cfg.get("method", "monte_carlo")
     n_sims = int(cfg.get("n_sims", N_SIMULATIONS))
-    logger.info(f"NAV fetch complete. Running Monte Carlo ({n_sims} sims, objective={cfg.get('objective','max_sharpe')})...")
-    opt_result = run_monte_carlo(funds, returns_map, manual_weights, ips, n_sims=n_sims, config=cfg)
-    logger.info(f"Monte Carlo complete. Valid sims: {opt_result.get('n_valid_simulations', 0)}")
+
+    if method == "slsqp":
+        logger.info(f"Running SLSQP analytical optimiser...")
+        opt_result = run_slsqp(funds, returns_map, manual_weights, ips, config=cfg)
+        logger.info(f"SLSQP complete.")
+    else:
+        logger.info(f"Running Monte Carlo ({n_sims} sims, objective={cfg.get('objective','max_sharpe')})...")
+        opt_result = run_monte_carlo(funds, returns_map, manual_weights, ips, n_sims=n_sims, config=cfg)
+        logger.info(f"Monte Carlo complete. Valid sims: {opt_result.get('n_valid_simulations', 0)}")
 
     # Step 6: Build sleeve summary for current weights
     sleeve_summary = {}
