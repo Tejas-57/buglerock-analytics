@@ -331,16 +331,27 @@ def run_monte_carlo(
     Returns strategies, frontier points, and sleeve summary.
     """
     cfg         = config or {}
-    min_w_user  = cfg.get("min_w", MIN_WEIGHT)   # fraction e.g. 0.05
-    max_w_user  = cfg.get("max_w", MAX_WEIGHT)   # fraction e.g. 0.40
-    max_vol_cap = cfg.get("max_vol")              # % e.g. 16.0 or None
+    min_w_user  = cfg.get("min_w", MIN_WEIGHT)
+    max_w_user  = cfg.get("max_w", MAX_WEIGHT)
+    max_vol_cap = cfg.get("max_vol")
     objective   = cfg.get("objective", "max_sharpe")
+
     # Separate optimisable vs manual funds
     opt_funds  = [f for f in funds if f["isin"] not in manual_weights]
-    manual_sum = sum(manual_weights.values()) / 100.0  # fraction already allocated
+    manual_sum = sum(manual_weights.values()) / 100.0
 
     if not opt_funds:
         return {"error": "All funds are manual — nothing to optimise"}
+
+    # FIX 1: Hard-block infeasible min weight before running
+    n_opt = len(opt_funds)
+    if min_w_user * n_opt > (1.0 - manual_sum) + 0.001:
+        min_pct = round(min_w_user * 100, 1)
+        total_pct = round(min_w_user * n_opt * 100, 1)
+        return {
+            "error": f"Min weight per fund ({min_pct}%) × {n_opt} funds = {total_pct}% — exceeds 100%. "
+                     f"Reduce min weight to at most {round((1.0 - manual_sum) / n_opt * 100, 1)}% or remove some funds."
+        }
 
     # Build aligned returns matrix
     valid_isins = []
@@ -417,20 +428,29 @@ def run_monte_carlo(
                 sc_fund_data.append(None)
 
     has_sc_data = any(v is not None for v in sc_fund_data)
+    all_sc_null = not has_sc_data  # Fix 3: track if ALL funds have null sc data
 
     # sc_wts: for funds with data use actual value; for null funds use 0
-    # The filter will rebase weights of null funds out of the calculation
     sc_wts = np.array([v if v is not None else 0.0 for v in sc_fund_data])
-
-    # sc_rebase_wts: 1.0 for funds with data, 0.0 for null funds
-    # Used to compute the sum of weights that have data → rebase denominator
     sc_rebase_wts = np.array([1.0 if v is not None else 0.0 for v in sc_fund_data])
 
     has_sc   = has_sc_data
     _max_sc  = cfg.get("max_sc")
     sc_max   = (_max_sc / 100.0) if _max_sc is not None else 1.0
 
-    logger.info(f"Small cap filter: has_sc={has_sc}, sc_max={sc_max}, funds_with_data={sum(1 for v in sc_fund_data if v is not None)}/{len(sc_fund_data)}")
+    # Fix 3: If user set a small cap cap but ALL funds have null sc data, warn immediately
+    sc_null_warning = None
+    if _max_sc is not None and all_sc_null:
+        sc_null_warning = {
+            "constraint": "small_cap_no_data",
+            "label": "Small cap exposure",
+            "requested": _max_sc,
+            "relaxed_to": "N/A",
+            "message": f"Small cap cap of {_max_sc:.0f}% was set but none of the selected funds have small cap exposure data available. "
+                       f"The constraint has been ignored. Visit the Analyse tab first to load fund data, or select funds with Morningstar coverage."
+        }
+
+    logger.info(f"Small cap filter: has_sc={has_sc}, sc_max={sc_max}, funds_with_data={sum(1 for v in sc_fund_data if v is not None)}/{len(sc_fund_data)}, all_null={all_sc_null}")
     logger.info(f"SC exposure per fund: {[(f.get('name','')[:20], round(v*100,1) if v is not None else 'null') for f, v in zip(opt_fund_objs, sc_fund_data)]}")
 
     # Monte Carlo
@@ -446,15 +466,14 @@ def run_monte_carlo(
     mu_arr   = np.array(mu)
     vol_arr  = np.array([float(np.sqrt(cov[i][i])) for i in range(len(mu))])
 
-    def biased_sample():
-        """Sample weights biased toward the objective — 50% biased, 50% uniform for diversity."""
-        if objective == 'max_return' and mu_arr.max() > mu_arr.min():
-            # Bias toward higher-return funds
+    def biased_sample(obj=None):
+        """Sample weights biased toward the given objective."""
+        _obj = obj or objective
+        if _obj == 'max_return' and mu_arr.max() > mu_arr.min():
             bias = (mu_arr - mu_arr.min()) / (mu_arr.max() - mu_arr.min() + 1e-9)
             bias = lows + bias * (highs - lows)
             raw = np.random.uniform(lows, highs) if np.random.random() < 0.5 else np.random.uniform(bias * 0.7, highs)
-        elif objective == 'min_volatility' and vol_arr.max() > vol_arr.min():
-            # Bias toward lower-volatility funds
+        elif _obj == 'min_volatility' and vol_arr.max() > vol_arr.min():
             bias = 1 - (vol_arr - vol_arr.min()) / (vol_arr.max() - vol_arr.min() + 1e-9)
             bias = lows + bias * (highs - lows)
             raw = np.random.uniform(lows, highs) if np.random.random() < 0.5 else np.random.uniform(lows, bias * 1.3)
@@ -462,9 +481,23 @@ def run_monte_carlo(
             raw = np.random.uniform(lows, highs)
         return np.clip(raw, lows, highs)
 
-    np.random.seed(None)  # Use random seed so results differ between runs
+    # Deterministic seed based on input — same portfolio always gives same result
+    seed_str = ''.join(sorted([f.get('isin','') for f in funds])) + str(round(sum(f.get('current_weight',0) for f in funds)))
+    np.random.seed(abs(hash(seed_str)) % (2**31))
     attempts = 0
     max_attempts = n_sims * 20
+
+    def run_combined_mc(eq_min, eq_max, dt_min, dt_max, c_min, c_max, i_min, i_max, sc_mx, vol_mx):
+        """Run three separate objective-biased passes and combine — ensures each strategy
+        has a well-explored region of the feasible space to pick from."""
+        all_w, all_r, all_v, all_s = [], [], [], []
+        for obj in ['max_sharpe', 'max_return', 'min_volatility']:
+            w_obj, r_obj, v_obj, s_obj = run_mc(
+                eq_min, eq_max, dt_min, dt_max, c_min, c_max, i_min, i_max, sc_mx, vol_mx,
+                obj_override=obj
+            )
+            all_w += w_obj; all_r += r_obj; all_v += v_obj; all_s += s_obj
+        return all_w, all_r, all_v, all_s
 
     # Pre-validate: check bounds are feasible (sum of mins <= remaining <= sum of maxs)
     sum_min = sum(lo for lo, hi in bounds)
@@ -477,16 +510,16 @@ def run_monte_carlo(
     lows  = np.array([lo for lo, hi in bounds])
     highs = np.array([hi for lo, hi in bounds])
 
-    MIN_VALID = max(20, n_sims // 100)  # need at least 1% of target sims
+    MIN_RELAX = 5  # trigger relaxation only if genuinely infeasible (< 5 valid portfolios)
     constraint_warnings = []  # will be populated if any constraint was relaxed
 
-    def run_mc(eq_min, eq_max, dt_min, dt_max, c_min, c_max, i_min, i_max, sc_mx, vol_mx):
+    def run_mc(eq_min, eq_max, dt_min, dt_max, c_min, c_max, i_min, i_max, sc_mx, vol_mx, obj_override=None):
         """Run Monte Carlo with given constraints. Returns (weights, returns, vols, sharpes)."""
         ws, rs, vs, ss = [], [], [], []
         att = 0
         while len(ws) < n_sims and att < max_attempts:
             att += 1
-            raw = biased_sample()
+            raw = biased_sample(obj_override)
             w = raw / raw.sum() * remaining
             w = np.clip(w, lows, highs)
             if abs(w.sum() - remaining) > 0.005:
@@ -522,14 +555,14 @@ def run_monte_carlo(
             ws.append(w); rs.append(port_ret); vs.append(port_vol); ss.append(port_sharpe)
         return ws, rs, vs, ss
 
-    # --- Step 1: try with all constraints as-is ---
-    all_weights, all_returns, all_vols, all_sharpes = run_mc(
+    # --- Step 1: run with all constraints ---
+    all_weights, all_returns, all_vols, all_sharpes = run_combined_mc(
         equity_min, equity_max, debt_min, debt_max,
         comm_min, comm_max, intl_min, intl_max, sc_max, max_vol_cap
     )
 
     # --- Step 2: if too few results, identify and relax constraints one by one ---
-    if len(all_weights) < MIN_VALID:
+    if len(all_weights) < MIN_RELAX:
         logger.warning(f"Only {len(all_weights)} valid portfolios — attempting constraint relaxation")
 
         # Track relaxed values — carry them through each step
@@ -545,29 +578,36 @@ def run_monte_carlo(
                 r_eq_min, r_eq_max, r_dt_min, r_dt_max,
                 comm_min, comm_max, intl_min, intl_max, 1.0, r_vol
             )
-            if len(test_w) >= max(10, MIN_VALID // 3):
+            if len(test_w) >= max(10, 30):
                 actual_sc_vals = sorted([
                     float(np.dot(w, sc_wts)) / max(float(np.dot(w, sc_rebase_wts)), 1e-9)
                     for w in test_w
                 ])
                 p10_idx = max(0, int(len(actual_sc_vals) * 0.10))
                 min_feasible_sc = round(actual_sc_vals[p10_idx] * 100, 1)
-                r_sc_max = min_feasible_sc / 100.0
-                logger.warning(f"Small cap constraint relaxed from {sc_max*100:.0f}% to {min_feasible_sc:.1f}%")
-                constraint_warnings.append({
-                    "constraint": "small_cap",
-                    "label": "Small cap exposure",
-                    "requested": round(sc_max * 100, 1),
-                    "relaxed_to": min_feasible_sc,
-                    "message": f"Small cap exposure cap of {sc_max*100:.0f}% is not achievable with this fund set. Auto-relaxed to {min_feasible_sc:.1f}% — the minimum feasible level given current fund selection."
-                })
-                all_weights, all_returns, all_vols, all_sharpes = run_mc(
-                    r_eq_min, r_eq_max, r_dt_min, r_dt_max,
-                    comm_min, comm_max, intl_min, intl_max, r_sc_max, r_vol
-                )
-                logger.info(f"After sc relaxation: {len(all_weights)} valid portfolios (MIN_VALID={MIN_VALID})")
-                if len(all_weights) > 0:
-                    relaxed_ok = True
+
+                # Only relax if the minimum feasible sc EXCEEDS the requested cap
+                # If min_feasible_sc <= requested cap, the cap IS achievable — don't relax
+                if min_feasible_sc > round(r_sc_max * 100, 1):
+                    r_sc_max = min_feasible_sc / 100.0
+                    logger.warning(f"Small cap constraint relaxed from {sc_max*100:.0f}% to {min_feasible_sc:.1f}%")
+                    constraint_warnings.append({
+                        "constraint": "small_cap",
+                        "label": "Small cap exposure",
+                        "requested": round(sc_max * 100, 1),
+                        "relaxed_to": min_feasible_sc,
+                        "message": f"Small cap exposure cap of {sc_max*100:.0f}% is not achievable with this fund set. Auto-relaxed to {min_feasible_sc:.1f}% — the minimum feasible level given current fund selection."
+                    })
+                    all_weights, all_returns, all_vols, all_sharpes = run_combined_mc(
+                        r_eq_min, r_eq_max, r_dt_min, r_dt_max,
+                        comm_min, comm_max, intl_min, intl_max, r_sc_max, r_vol
+                    )
+                    logger.info(f"After sc relaxation: {len(all_weights)} valid portfolios (MIN_RELAX={MIN_RELAX})")
+                    if len(all_weights) > 0:
+                        relaxed_ok = True
+                else:
+                    # sc cap is achievable — sc is not the problem, don't relax it
+                    logger.info(f"SC cap {r_sc_max*100:.0f}% is achievable (min feasible={min_feasible_sc}%) — sc not the bottleneck")
 
         # Try relaxing max_vol if still too few
         if not relaxed_ok and r_vol is not None:
@@ -575,24 +615,27 @@ def run_monte_carlo(
                 r_eq_min, r_eq_max, r_dt_min, r_dt_max,
                 comm_min, comm_max, intl_min, intl_max, r_sc_max, None
             )
-            if len(test_w) >= max(10, MIN_VALID // 3):
+            if len(test_w) >= max(10, 30):
                 actual_vols = sorted([v * 100 for v in test_v])
                 p10_idx = max(0, int(len(actual_vols) * 0.10))
                 min_feasible_vol = round(actual_vols[p10_idx], 1)
-                r_vol = min_feasible_vol
-                constraint_warnings.append({
-                    "constraint": "max_vol",
-                    "label": "Max portfolio volatility",
-                    "requested": max_vol_cap,
-                    "relaxed_to": min_feasible_vol,
-                    "message": f"Volatility cap of {max_vol_cap:.0f}% is not achievable. Auto-relaxed to {min_feasible_vol:.1f}% — the minimum feasible given current fund selection."
-                })
-                all_weights, all_returns, all_vols, all_sharpes = run_mc(
-                    r_eq_min, r_eq_max, r_dt_min, r_dt_max,
-                    comm_min, comm_max, intl_min, intl_max, r_sc_max, r_vol
-                )
-                if len(all_weights) > 0:
-                    relaxed_ok = True
+                if min_feasible_vol > r_vol:
+                    r_vol = min_feasible_vol
+                    constraint_warnings.append({
+                        "constraint": "max_vol",
+                        "label": "Max portfolio volatility",
+                        "requested": max_vol_cap,
+                        "relaxed_to": min_feasible_vol,
+                        "message": f"Volatility cap of {max_vol_cap:.0f}% is not achievable. Auto-relaxed to {min_feasible_vol:.1f}% — the minimum feasible given current fund selection."
+                    })
+                    all_weights, all_returns, all_vols, all_sharpes = run_combined_mc(
+                        r_eq_min, r_eq_max, r_dt_min, r_dt_max,
+                        comm_min, comm_max, intl_min, intl_max, r_sc_max, r_vol
+                    )
+                    if len(all_weights) >= MIN_RELAX:
+                        relaxed_ok = True
+                else:
+                    logger.info(f"Vol cap {r_vol}% is achievable (min feasible={min_feasible_vol}%) — vol not the bottleneck")
 
         # Try relaxing equity/debt if still too few
         if not relaxed_ok and (r_eq_min > 0 or r_eq_max < 1.0 or r_dt_min > 0 or r_dt_max < 1.0):
@@ -600,7 +643,8 @@ def run_monte_carlo(
                 0, 1.0, 0, 1.0,
                 comm_min, comm_max, intl_min, intl_max, r_sc_max, r_vol
             )
-            if len(test_w) >= max(10, MIN_VALID // 3):
+            if len(test_w) >= MIN_RELAX:
+                # Relaxing equity/debt produced enough portfolios — it was the bottleneck
                 r_eq_min, r_eq_max = 0, 1.0
                 r_dt_min, r_dt_max = 0, 1.0
                 constraint_warnings.append({
@@ -611,20 +655,53 @@ def run_monte_carlo(
                     "message": f"Equity/debt allocation constraints are too tight for this fund set. Auto-relaxed to unconstrained."
                 })
                 all_weights, all_returns, all_vols, all_sharpes = test_w, test_r, test_v, test_s
-                if len(all_weights) > 0:
-                    relaxed_ok = True
+                relaxed_ok = True
 
         # Final fallback — run completely unconstrained
-        if not relaxed_ok and len(all_weights) < MIN_VALID:
+        if not relaxed_ok and len(all_weights) < MIN_RELAX:
             logger.warning("All constraints too tight — running unconstrained")
-            all_weights, all_returns, all_vols, all_sharpes = run_mc(0, 1.0, 0, 1.0, 0, 1.0, 0, 1.0, 1.0, None)
+            all_weights, all_returns, all_vols, all_sharpes = run_combined_mc(0, 1.0, 0, 1.0, 0, 1.0, 0, 1.0, 1.0, None)
+            # Build precise diagnosis — sc and vol were already relaxed by this point
+            # so the remaining cause is equity/debt or a multi-constraint combination
+            reasons = []
+            if equity_max < 0.99 or equity_min > 0:
+                reasons.append(
+                    f"Equity allocation ({round(equity_min*100)}–{round(equity_max*100)}%) "
+                    f"— your fund set is {round(sum(sleeve_equity_weight(classify_fund(f)) for f in opt_fund_objs)/len(opt_fund_objs)*100)}% equity on average, "
+                    f"making the equity range infeasible"
+                )
+            if debt_max < 0.99 or debt_min > 0:
+                reasons.append(
+                    f"Debt allocation ({round(debt_min*100)}–{round(debt_max*100)}%) "
+                    f"— your fund set may not have enough debt funds to satisfy this range"
+                )
+            if has_sc and r_sc_max < 1.0:
+                reasons.append(
+                    f"Small cap cap (relaxed to {round(r_sc_max*100, 1)}%) "
+                    f"combined with other constraints left no feasible space"
+                )
+            if r_vol is not None:
+                reasons.append(
+                    f"Volatility cap (relaxed to {r_vol}%) "
+                    f"combined with other constraints left no feasible space"
+                )
+            reason_text = " · ".join(reasons) if reasons else "Combination of all active constraints"
             constraint_warnings.append({
                 "constraint": "all",
-                "label": "All constraints",
+                "label": "All constraints removed — optimiser collapsed",
                 "requested": "Multiple",
                 "relaxed_to": "Unconstrained",
-                "message": "Combination of constraints is infeasible for this fund set. All constraints have been removed. Please review your fund selection and constraint settings."
+                "message": (
+                    f"Even after auto-relaxing small cap and volatility constraints, "
+                    f"no feasible portfolios were found. Root cause: {reason_text}. "
+                    f"Results shown are fully unconstrained. "
+                    f"Fix: widen equity/debt allocation ranges, or remove conflicting constraints."
+                )
             })
+
+    # Prepend sc null warning if applicable
+    if sc_null_warning:
+        constraint_warnings.insert(0, sc_null_warning)
 
     if not all_weights:
         return {"error": "Could not generate valid portfolios. Try removing some funds or widening constraints."}
