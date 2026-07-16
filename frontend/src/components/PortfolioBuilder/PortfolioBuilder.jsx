@@ -53,12 +53,17 @@ export default function PortfolioBuilder({ selectedDate }) {
     localStorage.setItem('br_ptf_step', activeStep);
   }, [activeStep]);
 
-  const [completedSteps, setCompletedSteps] = useState(new Set());
+  const [completedSteps, setCompletedSteps] = useState(() => {
+    try {
+      const saved = localStorage.getItem('br_ptf_completed');
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
   const [ips, setIps] = useState(() => load('br_ptf_ips', DEFAULT_IPS));
   const [ipsSaved, setIpsSaved] = useState(false);
   const [funds, setFunds] = useState(() => load('br_ptf_funds', []));
   const [weights, setWeights] = useState(() => load('br_ptf_weights', {}));
-  const [originalWeights, setOriginalWeights] = useState({});
+  const [originalWeights, setOriginalWeights] = useState(() => load('br_ptf_original_weights', {}));
   // Benchmarks now come from ips.benchmarks array (set in ClientIPS)
   const [selectedPortfolio, setSelectedPortfolio] = useState('original');
   const [snapshots, setSnapshots] = useState({});
@@ -78,23 +83,51 @@ export default function PortfolioBuilder({ selectedDate }) {
   }, [fundIsins]);
 
   // Reset originalWeights when RM navigates back to Build Portfolio (step 2)
-  // This means they're changing weights manually
+  // and restore original weights so the portfolio is back to pre-optimisation state
   const prevStep = React.useRef(activeStep);
   React.useEffect(() => {
     if (prevStep.current !== activeStep) {
       if (activeStep === 2 && Object.keys(originalWeights).length > 0) {
+        // Restore original weights when going back to Build Portfolio
+        setWeights(originalWeights);
         setOriginalWeights({});
         setOptimiserResult(null);
+        save('br_ptf_original_weights', {});
       }
       prevStep.current = activeStep;
     }
   }, [activeStep]);
 
+  // Save completedSteps to localStorage whenever it changes
+  useEffect(() => {
+    try { localStorage.setItem('br_ptf_completed', JSON.stringify([...completedSteps])); } catch {}
+  }, [completedSteps]);
 
-
+  // Auto-derive completed steps from existing persisted data on mount
+  useEffect(() => {
+    setCompletedSteps(prev => {
+      const next = new Set(prev);
+      if (load('br_ptf_ips', null)?.riskProfile) next.add(1);
+      if (Object.keys(load('br_ptf_weights', {})).length > 0) next.add(2);
+      return next;
+    });
+  }, []);
   // Sync funds/weights to localStorage
   useEffect(() => { save('br_ptf_funds', funds); }, [funds]);
-  useEffect(() => { save('br_ptf_weights', weights); }, [weights]);
+  useEffect(() => {
+    // Only save weights to localStorage if they haven't been overridden by optimiser
+    // (originalWeights being set means optimiser weights are active — don't overwrite original)
+    if (Object.keys(originalWeights).length === 0) {
+      save('br_ptf_weights', weights);
+    }
+  }, [weights, originalWeights]);
+
+  // Save original weights before optimiser overwrites them
+  useEffect(() => {
+    if (Object.keys(originalWeights).length > 0) {
+      save('br_ptf_original_weights', originalWeights);
+    }
+  }, [originalWeights]);
 
 
   // Derive funds array from weights (keep only funds that have weights)

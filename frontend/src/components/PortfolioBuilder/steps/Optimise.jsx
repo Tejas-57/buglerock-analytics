@@ -7,15 +7,36 @@ const POS = '#1A7A52', NEG = '#B91C1C', WARN = '#D97706';
 const GR10 = '#F8F6FA', GR20 = '#E8E5EC', GR60 = '#A2A0A0', GR80 = '#374151';
 
 const OBJECTIVES = [
-  { id: 'max_sharpe',     label: 'Maximise Sharpe ratio', desc: 'Best return per unit of risk — the classic MVO objective.' },
-  { id: 'max_return',    label: 'Maximise returns',      desc: 'Highest 3Y return, regardless of risk taken.' },
-  { id: 'min_volatility', label: 'Minimise volatility',   desc: 'Lowest portfolio volatility — for conservative mandates.' },
+  { id: 'max_sharpe',     label: 'Max Sharpe ratio', desc: 'Best return per unit of risk — the classic MVO objective.' },
+  { id: 'max_return',    label: 'Max returns',      desc: 'Highest 3Y return, regardless of risk taken.' },
+  { id: 'min_volatility', label: 'Min volatility',   desc: 'Lowest portfolio volatility — for conservative mandates.' },
 ];
 const OBJ_COLOR = { max_sharpe: BERRY, max_return: PLUM, min_volatility: POS };
 
-function NI({ value, onChange, placeholder = '—', min = 0, max = 100, step = 1, width = 58, disabled = false }) {
+function NI({ value, onChange, placeholder = '—', min = 0, max = 100, step = 0.5, width = 70, disabled = false }) {
+  const [local, setLocal] = React.useState(value === '' || value == null ? '' : String(value));
+
+  // Sync local when parent value changes (e.g. IPS auto-fill)
+  React.useEffect(() => {
+    setLocal(value === '' || value == null ? '' : String(value));
+  }, [value]);
+
+  function handleChange(e) {
+    const raw = e.target.value;
+    // Allow empty, digits, single decimal point — no leading zeros except "0."
+    if (raw === '' || raw === '-') { setLocal(raw); return; }
+    if (/^0[0-9]/.test(raw)) { setLocal(raw.replace(/^0+/, '') || '0'); return; }
+    setLocal(raw);
+  }
+
+  function handleBlur() {
+    const n = parseFloat(local);
+    if (local === '' || isNaN(n)) { onChange(''); }
+    else { const clamped = Math.min(max, Math.max(min, n)); onChange(clamped); setLocal(String(clamped)); }
+  }
+
   return (
-    <input type="number" value={value} onChange={e => onChange(e.target.value === '' ? '' : +e.target.value)}
+    <input type="number" value={local} onChange={handleChange} onBlur={handleBlur}
       placeholder={placeholder} min={min} max={max} step={step} disabled={disabled}
       style={{ width, padding: '5px 7px', border: `1.5px solid ${GR20}`, borderRadius: 8, fontFamily: 'var(--font-mono)', fontSize: 12, textAlign: 'center', outline: 'none', background: disabled ? GR10 : '#fff', opacity: disabled ? 0.4 : 1, cursor: disabled ? 'not-allowed' : 'text' }} />
   );
@@ -29,14 +50,41 @@ function MinMax({ label, sub, minVal, maxVal, onMin, onMax, noMin }) {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ fontSize: 10, color: GR60, width: 22, opacity: noMin ? 0.4 : 1 }}>Min</span>
-        <NI value={minVal} onChange={onMin} disabled={noMin} />
+        <NI value={minVal} onChange={onMin} disabled={noMin} width={66} />
         <span style={{ fontSize: 10, color: GR60 }}>%</span>
         <span style={{ fontSize: 10, color: GR60, width: 26, textAlign: 'center' }}>Max</span>
-        <NI value={maxVal} onChange={onMax} />
+        <NI value={maxVal} onChange={onMax} width={66} />
         <span style={{ fontSize: 10, color: GR60 }}>%</span>
       </div>
     </div>
   );
+}
+
+// Compute display metrics for a strategy using Morningstar snapshot data
+// consistent with Compare tab — weighted avg rebased for null funds
+function blendMetricsFromWeights(funds, wtMap, snapshots) {
+  let ret3y = 0, std3y = 0, sharpe = 0;
+  let wRet = 0, wStd = 0, wSh = 0;
+  funds.forEach(f => {
+    const w = (wtMap[f.isin] || 0) / 100;
+    if (w <= 0) return;
+    const s = snapshots[f.isin] || {};
+    const r = s.risk || {};
+    if (s.returns?.['3y'] != null && !isNaN(parseFloat(s.returns['3y']))) {
+      ret3y += parseFloat(s.returns['3y']) * w; wRet += w;
+    }
+    if (r.std_dev_3y != null && !isNaN(parseFloat(r.std_dev_3y))) {
+      std3y += parseFloat(r.std_dev_3y) * w; wStd += w;
+    }
+    if (r.sharpe_ratio_3y != null && !isNaN(parseFloat(r.sharpe_ratio_3y))) {
+      sharpe += parseFloat(r.sharpe_ratio_3y) * w; wSh += w;
+    }
+  });
+  return {
+    ret3y:  wRet  > 0 ? ret3y  / wRet  : null,
+    std3y:  wStd  > 0 ? std3y  / wStd  : null,
+    sharpe: wSh   > 0 ? sharpe / wSh   : null,
+  };
 }
 
 function blendMetrics(funds, weights, snapshots) {
@@ -50,7 +98,8 @@ function blendMetrics(funds, weights, snapshots) {
     if (s.returns?.['3y'] != null) ret3y += parseFloat(s.returns['3y']) * w;
     if (r.sharpe_ratio_3y != null) sharpe += parseFloat(r.sharpe_ratio_3y) * w;
   });
-  return { std3y, ret3y, sharpe };
+  // Rebase std3y by wused so funds with null std_dev don't drag the number down
+  return { std3y: wused > 0 ? std3y / wused : 0, ret3y, sharpe };
 }
 
 export default function Optimise({ funds, weights, snapshots = {}, setSnapshots, setWeights, originalWeights = {}, setOriginalWeights, benchmarks = [], ips = {}, onBack, onCompare, selectedDate, savedResult = null, onSaveResult }) {
@@ -65,7 +114,7 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
   const [nSims, setNSims]                 = useState(5000);
   const [respectIPS, setRespectIPS]       = useState(true);
   const [minW, setMinW]                   = useState(5);
-  const [maxW, setMaxW]                   = useState(40);
+  const [maxW, setMaxW]                   = useState(15);
   const [minEq, setMinEq]                 = useState('');
   const [maxEq, setMaxEq]                 = useState('');
   const [minDebt, setMinDebt]             = useState('');
@@ -158,9 +207,26 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
   function applyStrategy() {
     const strat = result?.strategies?.[selectedStrat];
     if (!strat) return;
+    // Save original weights before overwriting
     setOriginalWeights(prev => Object.keys(prev).length > 0 ? prev : { ...weights });
+    // Build optimised weight map
     const newW = {};
     funds.forEach(f => { newW[f.isin] = strat.weights[f.isin] ?? weights[f.isin] ?? 0; });
+    // Normalize to exactly 100% to avoid floating point drift
+    const total = Object.values(newW).reduce((s, v) => s + v, 0);
+    if (Math.abs(total - 100) > 0.01) {
+      const isins = Object.keys(newW);
+      const scale = 100 / total;
+      let normalized = 0;
+      isins.forEach((isin, i) => {
+        if (i === isins.length - 1) {
+          newW[isin] = parseFloat((100 - normalized).toFixed(2));
+        } else {
+          newW[isin] = parseFloat((newW[isin] * scale).toFixed(2));
+          normalized += newW[isin];
+        }
+      });
+    }
     setWeights(newW);
     onCompare();
   }
@@ -202,8 +268,8 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
               ✓ Last run: {nSims.toLocaleString()} sims · {OBJECTIVES.find(o => o.id === selectedStrat)?.label}
             </span>
           )}
-          <button onClick={runOptimise} disabled={loading || totalWeight !== 100}
-            style={{ padding: '7px 20px', border: 'none', borderRadius: 20, background: loading || totalWeight !== 100 ? GR20 : BERRY, color: loading || totalWeight !== 100 ? GR60 : '#fff', fontSize: 12, fontWeight: 600, cursor: loading || totalWeight !== 100 ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}>
+          <button onClick={runOptimise} disabled={loading || Math.abs(totalWeight - 100) > 0.1}
+            style={{ padding: '7px 20px', border: 'none', borderRadius: 20, background: loading || Math.abs(totalWeight - 100) > 0.1 ? GR20 : BERRY, color: loading || Math.abs(totalWeight - 100) > 0.1 ? GR60 : '#fff', fontSize: 12, fontWeight: 600, cursor: loading || Math.abs(totalWeight - 100) > 0.1 ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}>
             {loading ? '⏳ Running…' : result ? 'Run Optimizer ⚡' : '⚡ Run optimisation'}
           </button>
         </div>
@@ -267,7 +333,7 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
                   <NI value={maxW} onChange={setMaxW} min={5} max={100} step={1} width={66} />
                   <span style={{ fontSize: 11, color: GR60 }}>%</span>
                 </div>
-                <div style={{ fontSize: 10, color: GR60, marginTop: 4, lineHeight: 1.5 }}>Ceiling — prevents single-fund dominance. Typical: 25–40%.</div>
+                <div style={{ fontSize: 10, color: GR60, marginTop: 4, lineHeight: 1.5 }}>Ceiling — prevents single-fund dominance. Typical: 15–25%.</div>
               </div>
             </div>
           </div>
@@ -363,7 +429,7 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
               ? <span><strong style={{ color: POS }}>Ready to optimise</strong> — all constraints are valid. Click <strong>⚡ Run optimisation</strong> above.</span>
               : <span><strong style={{ color: WARN }}>{violations.join(' · ')}</strong> — adjust constraints before running.</span>}
           </div>
-          {totalWeight !== 100 && <span style={{ fontSize: 11, color: WARN, fontWeight: 600 }}>Weights sum to {totalWeight}% — must be 100%</span>}
+          {Math.abs(totalWeight - 100) > 0.1 && <span style={{ fontSize: 11, color: WARN, fontWeight: 600 }}>Weights sum to {totalWeight}% — must be 100%</span>}
         </div>
       </div>
     );
@@ -373,8 +439,8 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
     if (loading) return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 40 }}>
         <div style={{ width: 44, height: 44, borderRadius: '50%', border: `3px solid ${GR20}`, borderTopColor: BERRY, animation: 'spin 0.8s linear infinite' }} />
-        <div style={{ fontSize: 14, fontWeight: 600, color: GR80 }}>Running {nSims.toLocaleString()} Monte Carlo simulations…</div>
-        <div style={{ fontSize: 12, color: GR60 }}>Sampling feasible portfolios · Filtering by constraints · Building efficient frontier</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: GR80 }}>Running Monte Carlo simulations…</div>
+            <div style={{ fontSize: 12, color: GR60 }}>Sampling feasible portfolios · Filtering by constraints · Building efficient frontier</div>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
@@ -405,9 +471,13 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
     const frontier = result.frontier || [];
     const allVols = frontier.map(p => p[0]);
     const allRets = frontier.map(p => p[1]);
+    // Include strategy dot positions in range so they're always inside bounds
+    Object.values(result.strategies || {}).forEach(s => {
+      if (s?.metrics) { allVols.push(s.metrics.volatility); allRets.push(s.metrics.return); }
+    });
     const vMin = Math.min(...allVols), vMax = Math.max(...allVols);
     const rMin = Math.min(...allRets), rMax = Math.max(...allRets);
-    const W = 500, H = 220, PAD = 32;
+    const W = 500, H = 240, PAD = 55;
     const toX = v => PAD + ((v - vMin) / (vMax - vMin || 1)) * (W - PAD * 2);
     const toY = r => H - PAD - ((r - rMin) / (rMax - rMin || 1)) * (H - PAD * 2);
 
@@ -484,11 +554,11 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
+        {result.frontier?.length > 0 && <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
           <div style={{ flex: 7, minWidth: 0 }}>
             <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: GR60, marginBottom: 6 }}>Efficient Frontier</div>
-            <div style={{ border: `1px solid ${GR20}`, borderRadius: 10, background: '#fff', padding: 12 }}>
-              <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
+            <div style={{ border: `1px solid ${GR20}`, borderRadius: 10, background: '#fff', padding: 12, overflow: 'hidden' }}>
+              <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block', overflow: 'hidden' }}>
                 {(() => {
                   const sharpes = frontier.map(x => x[2] ?? 0);
                   const sMin = Math.min(...sharpes), sMax = Math.max(...sharpes);
@@ -501,18 +571,20 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
                 {Object.entries(result.strategies || {}).map(([key, s]) => {
                   if (!s?.metrics) return null;
                   const color = OBJ_COLOR[key] || BERRY;
-                  const label = OBJECTIVES.find(o => o.id === key)?.label?.split(' ').slice(1).join(' ') || key;
+                  const label = OBJECTIVES.find(o => o.id === key)?.label || key;
                   const cx = toX(s.metrics.volatility), cy = toY(s.metrics.return);
+                  const labelY = cy < 30 ? cy + 18 : cy - 12;
+                  const labelX = Math.max(60, Math.min(W - 60, cx));
                   return (
                     <g key={key}>
                       <circle cx={cx} cy={cy} r={9} fill={color} opacity={0.15} />
                       <circle cx={cx} cy={cy} r={5} fill={color} />
-                      <text x={cx} y={cy - 10} textAnchor="middle" fontSize={7} fontWeight="700" fill={color}>{label}</text>
+                      <text x={labelX} y={labelY} textAnchor="middle" fontSize={7.5} fontWeight="700" fill={color}>{label}</text>
                     </g>
                   );
                 })}
-                <text x={W/2} y={H-4} textAnchor="middle" fontSize={8} fill="#bbb">Volatility (3Y std dev %)</text>
-                <text x={10} y={H/2} textAnchor="middle" fontSize={8} fill="#bbb" transform={`rotate(-90,10,${H/2})`}>3Y CAGR %</text>
+                <text x={W/2} y={H-4} textAnchor="middle" fontSize={8} fill="#bbb">Volatility</text>
+                <text x={10} y={H/2} textAnchor="middle" fontSize={8} fill="#bbb" transform={`rotate(-90,10,${H/2})`}>Returns</text>
               </svg>
               <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 6 }}>
                 {OBJECTIVES.map(o => (
@@ -536,23 +608,28 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
                     <div style={{ fontSize: 11, fontWeight: 700, color }}>{opt.label}</div>
                     <div style={{ fontSize: 9, color: GR60 }}>{opt.desc}</div>
                   </div>
-                  {s?.metrics ? (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 4 }}>
-                      {[['Return', `${s.metrics.return >= 0 ? '+' : ''}${s.metrics.return}%`, s.metrics.return >= 0 ? POS : NEG],
-                        ['Vol', `${s.metrics.volatility}%`, GR80],
-                        ['Sharpe', f2(s.metrics.sharpe), s.metrics.sharpe >= 0.5 ? POS : GR60]].map(([lbl, val, clr]) => (
-                        <div key={lbl} style={{ textAlign: 'center', padding: '5px 4px', background: GR10, borderRadius: 6, border: `1px solid ${GR20}` }}>
-                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: clr }}>{val}</div>
-                          <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: GR60 }}>{lbl}</div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : <div style={{ fontSize: 10, color: GR60, fontStyle: 'italic' }}>Not available</div>}
+                  {s?.weights ? (() => {
+                    const m = blendMetricsFromWeights(funds, s.weights, snapshots);
+                    const ret = m.ret3y, vol = m.std3y, sh = m.sharpe;
+                    if (ret == null && vol == null) return <div style={{ fontSize: 10, color: GR60, fontStyle: 'italic' }}>Visit Analyse tab to load fund data</div>;
+                    return (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 4 }}>
+                        {[['Return', ret != null ? `${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%` : '—', ret != null ? (ret >= 0 ? POS : NEG) : GR60],
+                          ['Vol',    vol != null ? `${vol.toFixed(2)}%` : '—', GR80],
+                          ['Sharpe', sh  != null ? f2(sh) : '—', sh != null && sh >= 0.5 ? POS : GR60]].map(([lbl, val, clr]) => (
+                          <div key={lbl} style={{ textAlign: 'center', padding: '5px 4px', background: GR10, borderRadius: 6, border: `1px solid ${GR20}` }}>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: clr }}>{val}</div>
+                            <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: GR60 }}>{lbl}</div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })() : <div style={{ fontSize: 10, color: GR60, fontStyle: 'italic' }}>Not available</div>}
                 </div>
               );
             })}
           </div>
-        </div>
+        </div>}
 
         {/* Asset class & market cap comparison */}
         {strat && (() => {

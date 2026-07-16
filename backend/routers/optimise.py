@@ -49,7 +49,7 @@ class ConfigInput(BaseModel):
     nSims:              Optional[int]   = 5000
     respectIPS:         Optional[bool]  = True
     minW:               Optional[float] = 5.0
-    maxW:               Optional[float] = 40.0
+    maxW:               Optional[float] = 15.0
     maxVol:             Optional[float] = None
     minComm:            Optional[float] = None
     maxComm:            Optional[float] = None
@@ -59,7 +59,6 @@ class ConfigInput(BaseModel):
     capPreciousMetals:  Optional[float] = 10.0
     capPassive:         Optional[float] = 10.0
     capInternational:   Optional[float] = 10.0
-    capThematic:        Optional[float] = 10.0
 
 
 class OptimiseRequest(BaseModel):
@@ -101,7 +100,6 @@ def optimise(request: OptimiseRequest):
             "cap_precious":      cfg.capPreciousMetals / 100 if cfg.capPreciousMetals is not None else 0.10,
             "cap_passive":       cfg.capPassive / 100 if cfg.capPassive is not None else 0.10,
             "cap_international": cfg.capInternational / 100 if cfg.capInternational is not None else 0.10,
-            "cap_thematic":      cfg.capThematic / 100 if cfg.capThematic is not None else 0.10,
         },
         "manual_weights": request.manual_weights or {},
         "date":           request.date,

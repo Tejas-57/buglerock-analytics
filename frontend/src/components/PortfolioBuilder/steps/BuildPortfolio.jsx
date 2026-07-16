@@ -29,9 +29,17 @@ async function fetchSnapshot(isin, dateStr) {
 
 function equaliseWeights(fundList) {
   if (!fundList.length) return {};
-  const eq = Math.floor(100 / fundList.length);
+  const eq = parseFloat((100 / fundList.length).toFixed(2));
   const nw = {};
-  fundList.forEach((f, i) => { nw[f.isin] = i === fundList.length-1 ? 100 - eq*(fundList.length-1) : eq; });
+  let assigned = 0;
+  fundList.forEach((f, i) => {
+    if (i === fundList.length - 1) {
+      nw[f.isin] = parseFloat((100 - assigned).toFixed(2));
+    } else {
+      nw[f.isin] = eq;
+      assigned += eq;
+    }
+  });
   return nw;
 }
 
@@ -96,7 +104,7 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const totalWeight = funds.reduce((s,f) => s+(weights[f.isin]||0), 0);
+  const totalWeight = parseFloat(funds.reduce((s,f) => s+(weights[f.isin]||0), 0).toFixed(2));
 
   async function addFund(fund) {
     if (funds.find(f => f.isin===fund.isin)) return;
@@ -129,8 +137,8 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
   }
 
   function updateWeight(isin, val) {
-    const v = Math.max(0, Math.min(100, parseInt(val)||0));
-    setWeights(prev => ({ ...prev, [isin]: v }));
+    const v = Math.max(0, Math.min(100, parseFloat(val) || 0));
+    setWeights(prev => ({ ...prev, [isin]: parseFloat(v.toFixed(2)) }));
   }
 
   function equalise() { if (funds.length) setWeights(equaliseWeights(funds)); }
@@ -178,7 +186,7 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
     );
   }
 
-  const barColor = totalWeight===100?'var(--pos)':totalWeight>100?'var(--brand-primary)':'var(--text-muted)';
+  const barColor = Math.abs(totalWeight-100)<=0.05?'var(--pos)':totalWeight>100?'var(--brand-primary)':'var(--text-muted)';
   const wlNotAdded = watchlistFunds.filter(f => !funds.find(p => p.isin===f.isin));
 
   return (
@@ -191,7 +199,7 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
           <div style={{ display:'flex', gap:6, alignItems:'center' }}>
             <button onClick={equalise} style={{ padding:'6px 12px', border:'1px solid var(--border)', borderRadius:20, background:'#fff', color:'var(--text-secondary)', fontSize:11, fontWeight:500, cursor:'pointer' }}>⟳ Equalise</button>
             <button onClick={clearAll} style={{ padding:'6px 12px', border:'1px solid rgba(145,47,99,.25)', borderRadius:20, background:'rgba(145,47,99,.04)', color:'var(--brand-primary)', fontSize:11, fontWeight:500, cursor:'pointer' }}>✕ Clear</button>
-            <button onClick={onAnalyse} disabled={!funds.length||totalWeight!==100} style={{ padding:'7px 16px', border:'none', borderRadius:20, background:!funds.length||totalWeight!==100?'var(--border)':'var(--brand-primary)', color:'#fff', fontSize:11, fontWeight:600, cursor:!funds.length||totalWeight!==100?'not-allowed':'pointer' }}>
+            <button onClick={onAnalyse} disabled={!funds.length||Math.abs(totalWeight-100)>0.05} style={{ padding:'7px 16px', border:'none', borderRadius:20, background:!funds.length||Math.abs(totalWeight-100)>0.05?'var(--border)':'var(--brand-primary)', color:'#fff', fontSize:11, fontWeight:600, cursor:!funds.length||Math.abs(totalWeight-100)>0.05?'not-allowed':'pointer' }}>
               Analyse portfolio →
             </button>
           </div>
@@ -358,10 +366,10 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
                 </div>
               </div>
               <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0 }}>
-                <input type="range" min="0" max="100" value={w} onChange={e=>updateWeight(f.isin,e.target.value)}
+                <input type="range" min="0" max="100" step="0.5" value={w} onChange={e=>updateWeight(f.isin,e.target.value)}
                   style={{ WebkitAppearance:'none', width:110, height:4, borderRadius:2, background:'var(--border)', outline:'none', cursor:'pointer' }} />
-                <input type="number" min="0" max="100" value={w} onChange={e=>updateWeight(f.isin,e.target.value)}
-                  style={{ width:44, border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', padding:'3px 5px', font:'11px var(--font-mono)', fontWeight:600, textAlign:'center', outline:'none' }} />
+                <input type="number" min="0" max="100" step="0.5" value={w} onChange={e=>updateWeight(f.isin,e.target.value)}
+                  style={{ width:58, border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', padding:'3px 5px', font:'11px var(--font-mono)', fontWeight:600, textAlign:'center', outline:'none' }} />
                 <span style={{ fontSize:11, color:'var(--text-muted)' }}>%</span>
                 <button onClick={()=>removeFund(f.isin)}
                   style={{ width:17, height:17, borderRadius:'50%', border:'1px solid var(--border)', background:'none', cursor:'pointer', fontSize:9, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)', padding:0 }}>✕</button>
@@ -371,7 +379,7 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
         })}
       </div>
 
-      {totalWeight!==100&&funds.length>0 && (
+      {Math.abs(totalWeight-100)>0.05&&funds.length>0 && (
         <div style={{ padding:'8px 20px', background:totalWeight>100?'rgba(145,47,99,.06)':'var(--bg-secondary)', borderTop:'1px solid var(--border)', fontSize:11, color:totalWeight>100?'var(--brand-primary)':'var(--text-muted)', flexShrink:0 }}>
           {totalWeight>100?`⚠ Total weight ${totalWeight}% — reduce by ${totalWeight-100}%`:`ℹ Total weight ${totalWeight}% — add ${100-totalWeight}% more to analyse`}
         </div>

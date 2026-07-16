@@ -14,6 +14,13 @@ logger = logging.getLogger(__name__)
 WHITELIST = {"R1", "R2"}
 
 # Categories that should be displayed as "Precious Metals" asset class
+
+# Categories to exclude from the fund explorer dropdown
+EXCLUDED_DISPLAY_CATEGORIES = {
+    "India Fund Flexi Cap",  # duplicate of Cat: Flexi Cap Funds
+    "Flexi Cap",             # short alias — use Cat: Flexi Cap Funds instead
+}
+
 PRECIOUS_METALS_CATEGORIES = {
     "Cat: India Fund Sector - Precious Metals-Gold",
     "Cat: India Fund Sector - Precious Metals-Silver",
@@ -172,7 +179,7 @@ def get_categories(data_date: date, asset_class: str) -> list:
                 ~DailyFundData.category.in_(list(PRECIOUS_METALS_CATEGORIES)),
                 (DailyFundData.is_benchmark == 0) | (DailyFundData.is_benchmark == None),
             ).distinct().all()
-        return sorted([r[0] for r in rows if r[0]])
+        return sorted([r[0] for r in rows if r[0] and r[0] not in EXCLUDED_DISPLAY_CATEGORIES])
     finally:
         db.close()
 
