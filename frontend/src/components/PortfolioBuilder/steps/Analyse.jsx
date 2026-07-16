@@ -116,18 +116,19 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
   }
 
   function isActiveEquityFund(f) {
-    // Include all funds except pure debt/liquid/gilt/money market
-    // Backend filters holding_type='E' so only equity holdings are compared
     const snap = snapshots[f.isin];
-    const ac = (snap?.asset_class || f.asset_class || '').toLowerCase();
-    const cat = (snap?.category || f.category || '').toLowerCase();
+    // Use fund's own category/asset_class first, fall back to snapshot
+    const ac  = (f.asset_class || snap?.asset_class || '').toLowerCase();
+    const cat = (f.category || snap?.category || '').toLowerCase();
     return !(ac === 'debt' || ac === 'bond' ||
       cat.includes('liquid') || cat.includes('overnight') ||
       cat.includes('money market') || cat.includes('gilt') ||
       cat.includes('ultra short') || cat.includes('low duration') ||
       cat.includes('corporate bond') || cat.includes('credit risk') ||
       cat.includes('banking and psu') || cat.includes('duration') ||
-      cat.includes('floater') || cat.includes('fixed maturity'));
+      cat.includes('floater') || cat.includes('fixed maturity') ||
+      cat.includes('india oe') || // Morningstar open-end non-equity prefix
+      (ac === '' && cat === '')); // no data at all — exclude to be safe
   }
 
   const equityFundsForOverlap = funds.filter(isActiveEquityFund).map(f => ({
@@ -464,10 +465,10 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
         ))}
         <div className="ptf-tab-actions">
           {activeTab === 'overlap' && overlapData && (
-            <button className="btn btn-ghost" onClick={generateOverlapPDF} style={{ fontSize: 11 }}>⬇ Export Overlap Report</button>
+            <button onClick={generateOverlapPDF} style={{ fontSize: 11, padding: '7px 16px', background: 'var(--brand-primary)', color: '#fff', border: 'none', borderRadius: 20, fontFamily: 'var(--font-body)', fontWeight: 600, cursor: 'pointer' }}>⬇ Export Overlap Report</button>
           )}
-          <button className="btn btn-ghost" onClick={onEdit} style={{ fontSize: 11 }}>← Edit</button>
-          <button className="btn btn-primary" onClick={onOptimise} style={{ fontSize: 11 }}>Optimise →</button>
+          <button className="btn btn-ghost" onClick={onEdit} style={{ fontSize: 11 }}>← Edit portfolio</button>
+          <button className="btn btn-primary" onClick={onOptimise} style={{ fontSize: 11, borderRadius: 20, padding: '7px 16px', letterSpacing: 'normal', textTransform: 'none' }}>Optimise →</button>
         </div>
       </div>
 

@@ -32,8 +32,8 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None):
     isin_list = [i.strip() for i in isins.split(",") if i.strip()]
     if len(isin_list) < 2:
         raise HTTPException(400, "At least 2 ISINs required for overlap")
-    if len(isin_list) > 4:
-        raise HTTPException(400, "Maximum 4 funds for overlap")
+    if len(isin_list) > 8:
+        raise HTTPException(400, "Maximum 8 funds for overlap")
 
     db = SessionLocal()
     try:

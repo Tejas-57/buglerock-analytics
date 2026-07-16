@@ -15,18 +15,20 @@
   border-bottom: 2px solid var(--border);
   background: #fff;
   flex-shrink: 0;
-  overflow-x: auto;
+  overflow: visible;
+  flex-wrap: wrap;
+  padding: 0 16px;
 }
 .ptf-step-btn {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   padding: 11px 16px;
   background: none;
   border: none;
   cursor: pointer;
   color: var(--text-muted);
-  font: 500 11.5px var(--font-body);
+  font: 500 11px var(--font-body);
   transition: all .12s;
   white-space: nowrap;
   position: relative;
@@ -35,8 +37,9 @@
   margin-bottom: -2px;
 }
 .ptf-step-btn:hover { color: var(--text-primary); background: var(--bg-secondary); }
-.ptf-step-btn.active { color: var(--brand-primary); border-bottom-color: var(--brand-primary); }
+.ptf-step-btn.active { color: var(--brand-primary); border-bottom-color: var(--brand-primary); background: rgba(145,47,99,.06); }
 .ptf-step-btn.done { color: #1A7A52; }
+.ptf-step-btn.active.done { color: #1A7A52; border-bottom-color: #1A7A52; background: rgba(26,122,82,.07); }
 .ptf-snum {
   width: 20px; height: 20px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -138,8 +141,8 @@
 .ptf-rm:hover { border-color: var(--brand-primary); color: var(--brand-primary); background: rgba(145,47,99,.06); }
 
 /* ── Analytics (Step 3) ── */
-.ptf-tab-bar { display: flex; align-items: stretch; border-bottom: 1px solid var(--border); background: #fff; flex-shrink: 0; overflow-x: auto; }
-.ptf-tab { padding: 9px 14px; font-size: 11.5px; font-weight: 400; color: var(--text-muted); border: none; background: none; border-bottom: 2px solid transparent; cursor: pointer; transition: all .12s; white-space: nowrap; margin-bottom: -1px; flex-shrink: 0; }
+.ptf-tab-bar { display: flex; align-items: stretch; border-bottom: 1px solid var(--border); background: #fff; flex-shrink: 0; flex-wrap: wrap; padding: 0 16px; }
+.ptf-tab { padding: 9px 14px; font-size: 11px; font-weight: 400; color: var(--text-muted); border: none; background: none; border-bottom: 2px solid transparent; cursor: pointer; transition: all .12s; white-space: nowrap; margin-bottom: -1px; flex-shrink: 0; }
 .ptf-tab:hover { color: var(--text-primary); }
 .ptf-tab.active { color: var(--brand-primary); border-bottom-color: var(--brand-primary); font-weight: 500; }
 .ptf-tab-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-left: 1px solid var(--border); flex-shrink: 0; }
