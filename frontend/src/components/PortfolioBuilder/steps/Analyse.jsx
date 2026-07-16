@@ -116,12 +116,18 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
   }
 
   function isActiveEquityFund(f) {
+    // Include all funds except pure debt/liquid/gilt/money market
+    // Backend filters holding_type='E' so only equity holdings are compared
     const snap = snapshots[f.isin];
-    const ac = (snap?.asset_class || '').toLowerCase();
+    const ac = (snap?.asset_class || f.asset_class || '').toLowerCase();
     const cat = (snap?.category || f.category || '').toLowerCase();
-    const isEquity = ac === 'equity';
-    const isIndex = cat.includes('index') || cat.includes('etf') || (snap?.expense_ratio && snap.expense_ratio < 0.5);
-    return isEquity && !isIndex;
+    return !(ac === 'debt' || ac === 'bond' ||
+      cat.includes('liquid') || cat.includes('overnight') ||
+      cat.includes('money market') || cat.includes('gilt') ||
+      cat.includes('ultra short') || cat.includes('low duration') ||
+      cat.includes('corporate bond') || cat.includes('credit risk') ||
+      cat.includes('banking and psu') || cat.includes('duration') ||
+      cat.includes('floater') || cat.includes('fixed maturity'));
   }
 
   const equityFundsForOverlap = funds.filter(isActiveEquityFund).map(f => ({
@@ -1001,7 +1007,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
             <div style={{ padding: '4px 0' }}>
               {nonEquity.length > 0 && (
                 <div style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(234,179,8,.06)', border: '1px solid rgba(234,179,8,.3)', borderRadius: 8, fontSize: 12, color: '#92700A' }}>
-                  ⚠ Overlap is only for active equity funds. <strong>{nonEquity.map(f => shortFundName(f.name)).join(', ')}</strong> excluded.
+                  ⚠ Overlap is based on equity stock holdings only. <strong>{nonEquity.map(f => shortFundName(f.name)).join(', ')}</strong> {nonEquity.length === 1 ? 'is' : 'are'} a pure debt fund and {nonEquity.length === 1 ? 'holds' : 'hold'} no equity stocks — excluded from overlap.
                 </div>
               )}
               {funds2.length < 2 && <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Add at least 2 active equity funds to see overlap.</div>}

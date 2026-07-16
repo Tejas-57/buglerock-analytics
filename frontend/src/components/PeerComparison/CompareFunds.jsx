@@ -318,9 +318,21 @@ export default function CompareFunds({ selectedDate }) {
   const TH = (extra) => ({ padding: '8px 12px', fontWeight: 600, fontSize: 11, borderBottom: '1px solid var(--border)', ...extra });
   const TD = (extra) => ({ padding: '7px 12px', borderBottom: '1px solid var(--border)', ...extra });
 
-  // Only active equity mutual funds qualify for overlap
-  // All fund types participate in overlap — not restricted to active equity
-  const equityFunds = funds;
+  // Exclude pure debt/liquid/gilt/money market funds — they hold no equity stocks
+  // Overlap is based on equity holdings (holding_type='E') so debt funds timeout waiting for holdings
+  function isPureDebtFund(f) {
+    const ac = (f.asset_class || f.data?.asset_class || '').toLowerCase();
+    const cat = (f.category || f.data?.category || '').toLowerCase();
+    return ac === 'debt' || ac === 'bond' ||
+      cat.includes('liquid') || cat.includes('overnight') ||
+      cat.includes('money market') || cat.includes('gilt') ||
+      cat.includes('ultra short') || cat.includes('low duration') ||
+      cat.includes('corporate bond') || cat.includes('credit risk') ||
+      cat.includes('banking and psu') || cat.includes('duration') ||
+      cat.includes('floater') || cat.includes('fixed maturity');
+  }
+  const equityFunds = funds.filter(f => !isPureDebtFund(f));
+  const excludedDebtFunds = funds.filter(f => isPureDebtFund(f));
 
   async function fetchOverlap() {
     if (equityFunds.length < 2) return;
@@ -382,6 +394,12 @@ export default function CompareFunds({ selectedDate }) {
   function renderOverlap() {
     return (
       <div style={{ padding: '0 2px' }}>
+
+        {excludedDebtFunds.length > 0 && (
+          <div style={{ padding: '10px 14px', background: 'rgba(180,107,16,.06)', border: '1px solid rgba(180,107,16,.25)', borderRadius: 8, fontSize: 11, color: '#92650a', marginBottom: 12 }}>
+            ⚠ Overlap is based on equity stock holdings only. <strong>{excludedDebtFunds.map(f => f.name).join(', ')}</strong> {excludedDebtFunds.length === 1 ? 'is' : 'are'} a pure debt fund and {excludedDebtFunds.length === 1 ? 'holds' : 'hold'} no equity stocks — excluded from overlap.
+          </div>
+        )}
 
         {equityFunds.length < 2 && (
           <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
