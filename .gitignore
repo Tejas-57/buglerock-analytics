@@ -31,3 +31,4 @@ Thumbs.db"backend/test_*.py"
 "backend/find_*.py" 
 "backend/fund_info.py" 
 "backend/analyse_*.py" 
+backend/node_modules/

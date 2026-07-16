@@ -68,6 +68,7 @@ export default function PortfolioBuilder({ selectedDate }) {
   const [selectedPortfolio, setSelectedPortfolio] = useState('original');
   const [snapshots, setSnapshots] = useState({});
   const [optimiserResult, setOptimiserResult] = useState(null);
+  const [analyseData, setAnalyseData] = useState({ stressData: null, overlapData: null, corrData: null });
 
   // Reset originalWeights and optimiserResult when fund composition changes
   const fundIsins = funds.map(f => f.isin).sort().join(',');
@@ -226,6 +227,7 @@ export default function PortfolioBuilder({ selectedDate }) {
               ips={ips}
               onEdit={() => setActiveStep(2)}
               onOptimise={() => { markDone(3); setActiveStep(4); }}
+              onDataUpdate={setAnalyseData}
             />
           )}
           {activeStep === 4 && (
@@ -273,6 +275,7 @@ export default function PortfolioBuilder({ selectedDate }) {
               setSelectedPortfolio={setSelectedPortfolio}
               onEditPortfolio={() => setActiveStep(2)}
               onCompare={() => setActiveStep(5)}
+              analyseData={analyseData}
             />
           )}
         </div>

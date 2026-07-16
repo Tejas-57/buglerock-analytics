@@ -8,7 +8,7 @@ from datetime import date
 
 load_dotenv()
 
-from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, benchmarks, optimise, holdings
+from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, benchmarks, optimise, holdings, proposal
 from models.database import init_db
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ app.include_router(nav.router,         prefix="/api/nav")
 app.include_router(benchmarks.router,  prefix="/api")
 app.include_router(optimise.router,    prefix="/api")
 app.include_router(holdings.router,    prefix="/api/holdings")
+app.include_router(proposal.router,    prefix="/api/proposal")
 
 
 async def gmail_poll_loop():

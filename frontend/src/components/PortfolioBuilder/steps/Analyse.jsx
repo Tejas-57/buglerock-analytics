@@ -94,7 +94,7 @@ function corrColor(v) {
 
 function fmtL(v) { return v >= 100000 ? '₹' + (v / 100000).toFixed(2) + 'L' : '₹' + (v / 1000).toFixed(1) + 'K'; }
 
-export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], ips, onEdit, onOptimise }) {
+export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], ips, onEdit, onOptimise, onDataUpdate }) {
   const [activeTab, setActiveTab] = useState('overview');
 
   // ── Overlap state & helpers ─────────────────────────────────────────────
@@ -265,6 +265,11 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
   // Correlation matrix — fetched from backend using 3Y daily NAV returns
   const [corrData, setCorrData] = React.useState(null);
   const [corrLoading, setCorrLoading] = React.useState(false);
+
+  // Lift computed data up to PortfolioBuilder for PDF export
+  React.useEffect(() => {
+    if (onDataUpdate) onDataUpdate({ stressData, overlapData, corrData });
+  }, [stressData, overlapData, corrData]);
 
   React.useEffect(() => {
     if (activeTab !== 'correlation' || funds.length < 2) return;
