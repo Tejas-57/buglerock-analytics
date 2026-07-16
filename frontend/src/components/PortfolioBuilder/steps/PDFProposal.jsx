@@ -688,8 +688,12 @@ html,body{width:297mm}
         <strong style="color:${PLUM}">Downside protection:</strong> Down capture of ${nb(B.dncap)}% means the portfolio ${(B.dncap||100)<=90?'falls significantly less than the benchmark in drawdowns — strong capital protection.':(B.dncap||100)<=100?'falls broadly in line with the market in corrections.':'amplifies drawdowns — consider adding defensive holdings.'}
       </div>`)}
   </div>
+</section>
+
+<!-- ═══ PAGE 6b: STRESS TEST ═══ -->
+<section class="pg">
+  ${sectionHd('05a','Crash scenario stress test','Portfolio drawdown in historical market crashes — based on actual NAV returns.')}
   ${(()=>{
-    // Real stress test from fresh fetch (based on selected portfolio weights)
     const scenarios = resolvedStress?.scenarios?.filter(s => s.has_data && s.portfolio_return != null) || [];
     if (!scenarios.length) return callout('Stress test data not available. Visit the Stress test tab in Analyse to load scenario data before generating the proposal.','info');
     const stressRows = scenarios.map(sc => {
@@ -710,8 +714,13 @@ html,body{width:297mm}
       `<table><thead><tr>${TH('Scenario','left')}${TH('Portfolio return')}${TH('Benchmark')}${TH('Cushion vs market')}</tr></thead><tbody>${stressRows}</tbody></table>`,
       'Returns calculated from actual NAV history in the database for the exact funds and weights in this portfolio.');
   })()}
+</section>
+
+<!-- ═══ PAGE 6c: OVERLAP ═══ -->
+<section class="pg">
+  ${sectionHd('05b','Portfolio overlap matrix','Shared stock holdings between active equity funds in the portfolio.')}
   ${(()=>{
-    if (!resolvedOverlap?.pairwise_matrix) return '';
+    if (!resolvedOverlap?.pairwise_matrix) return callout('No overlap data — only debt/liquid funds in portfolio or data unavailable.','info');
     const funds2 = funds.filter(f => {
       const ac = (f.asset_class || snapshots[f.isin]?.asset_class || '').toLowerCase();
       const cat = (f.category || snapshots[f.isin]?.category || '').toLowerCase();
@@ -754,8 +763,13 @@ html,body{width:297mm}
       </div>`;
     return tblBox('Portfolio overlap matrix',`<div style="padding:14px 16px;overflow-x:auto">${matrixHtml}</div>`,'Active equity funds only. Overlap >25% may indicate concentration risk.');
   })()}
+</section>
+
+<!-- ═══ PAGE 6d: CORRELATION ═══ -->
+<section class="pg">
+  ${sectionHd('05c','Return correlation matrix','3-year daily NAV return correlation between all portfolio funds.')}
   ${(()=>{
-    if (!resolvedCorr?.matrix || !resolvedCorr?.included || resolvedCorr.included.length < 2) return '';
+    if (!resolvedCorr?.matrix || !resolvedCorr?.included || resolvedCorr.included.length < 2) return callout('Insufficient NAV history to compute correlation — funds may be too new.','info');
     const inc = resolvedCorr.included;
     // Build fund list in same order as included ISINs
     const corrFunds = inc.map(isin => funds.find(f => f.isin === isin)).filter(Boolean);
