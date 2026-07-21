@@ -1296,9 +1296,9 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
         const domPct = domStyle && styleTotal > 0 ? (styleWts[domStyle] / styleTotal * 100) : 0;
 
         // Blended cap tier
-        const blendedLc  = funds.reduce((s, f) => s + ((snapshots[f.isin]?.large_cap || 0) * (weights[f.isin] || 0) / 100), 0);
-        const blendedMc  = funds.reduce((s, f) => s + ((snapshots[f.isin]?.mid_cap   || 0) * (weights[f.isin] || 0) / 100), 0);
-        const blendedSc  = funds.reduce((s, f) => s + ((snapshots[f.isin]?.small_cap || 0) * (weights[f.isin] || 0) / 100), 0);
+        const blendedLc = (() => { let v=0,w=0; funds.forEach(f=>{ const s=snapshots[f.isin]; if(s?.large_cap==null) return; v+=(s.large_cap)*(weights[f.isin]||0); w+=(weights[f.isin]||0); }); return w>0?v/w:0; })();
+        const blendedMc = (() => { let v=0,w=0; funds.forEach(f=>{ const s=snapshots[f.isin]; if(s?.mid_cap==null) return; v+=(s.mid_cap)*(weights[f.isin]||0); w+=(weights[f.isin]||0); }); return w>0?v/w:0; })();
+        const blendedSc = (() => { let v=0,w=0; funds.forEach(f=>{ const s=snapshots[f.isin]; if(s?.small_cap==null) return; v+=(s.small_cap)*(weights[f.isin]||0); w+=(weights[f.isin]||0); }); return w>0?v/w:0; })();
         const lcDrift = blendedLc - 60, mcDrift = blendedMc - 25, scDrift = blendedSc - 15;
 
         // Factor exposure blended

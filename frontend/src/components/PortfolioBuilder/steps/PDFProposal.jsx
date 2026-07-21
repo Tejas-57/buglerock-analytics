@@ -761,7 +761,7 @@ html,body{width:297mm}
         <span><span style="color:#E67E22">●</span> 25–35% High</span>
         <span><span style="color:#C0392B">●</span> &gt;35% Very high</span>
       </div>`;
-    return tblBox('Portfolio overlap matrix',`<div style="padding:14px 16px;overflow-x:auto">${matrixHtml}</div>`,'Active equity funds only. Overlap >25% may indicate concentration risk.');
+    return tblBox('Portfolio overlap matrix',`<div style="padding:14px 16px;overflow-x:auto;display:flex;flex-direction:column;align-items:center">${matrixHtml}</div>`,'Active equity funds only. Overlap >25% may indicate concentration risk.');
   })()}
 </section>
 
@@ -810,7 +810,7 @@ html,body{width:297mm}
         ${drStr?`<span style="margin-left:auto;font-style:italic">${drStr}</span>`:''}
       </div>
       ${resolvedCorr.excluded?.length?`<div style="margin-top:8px;font-size:9px;color:#92700A;background:#FEF9EC;padding:7px 12px;border-radius:6px;border:1px solid rgba(234,179,8,.3)">Excluded (insufficient data): ${resolvedCorr.excluded.map(e=>{const f=funds.find(f=>f.isin===e.isin);return f?f.name:e.isin}).join(', ')}</div>`:''}`;
-    return tblBox('Return correlation matrix',`<div style="padding:14px 16px;overflow-x:auto">${corrMatrixHtml}</div>`,'Based on 3-year daily NAV returns. ≥0.85 = high correlation — funds move together, reducing diversification benefit.');
+    return tblBox('Return correlation matrix',`<div style="padding:14px 16px;overflow-x:auto;display:flex;flex-direction:column;align-items:center">${corrMatrixHtml}</div>`,'Based on 3-year daily NAV returns. ≥0.85 = high correlation — funds move together, reducing diversification benefit.');
   })()}
 </section>
 

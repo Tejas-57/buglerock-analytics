@@ -659,19 +659,15 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
               cash += normCash * w;
               totalW += w;
 
-              // Step 2: Market cap — normalize L+M+S to 100% at fund level first
-              // This removes cash/debt/other drag before portfolio-level aggregation
-              const rawLc = parseFloat(s.large_cap) || 0;
-              const rawMc = parseFloat(s.mid_cap)   || 0;
+              // Step 2: Market cap — raw values, weight rebasing only
+              const rawLc = parseFloat(s.large_cap);
+              const rawMc = parseFloat(s.mid_cap);
               const rawSc = parseFloat(s.small_cap);
-              if (rawSc != null && !isNaN(rawSc)) {
-                const lmsSum = rawLc + rawMc + rawSc;
-                if (lmsSum > 0) {
-                  lc += (rawLc / lmsSum * 100) * w;
-                  mc += (rawMc / lmsSum * 100) * w;
-                  sc += (rawSc / lmsSum * 100) * w;
-                  capW += w;
-                }
+              if (!isNaN(rawLc) && !isNaN(rawMc) && !isNaN(rawSc)) {
+                lc += rawLc * w;
+                mc += rawMc * w;
+                sc += rawSc * w;
+                capW += w;
               }
             });
             // Normalize portfolio-level asset class
