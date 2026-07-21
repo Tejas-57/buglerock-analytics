@@ -210,15 +210,71 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
   // Compute blended benchmark from benchmarks array (manual weights)
   const totalBmW = benchmarks.reduce((s, b) => s + (b.weight || 0), 0) || 1;
-  function blendBm(getter) {
+  // Returns { value, partial, missing[] } for a given getter across all benchmarks
+  function blendBmMeta(getter) {
     let val = 0, cov = 0;
+    const missing = [];
     benchmarks.forEach(b => {
       const v = getter(b);
-      if (v == null || isNaN(parseFloat(v))) return;
+      if (v == null || isNaN(parseFloat(v))) { missing.push(b.display_name); return; }
       val += parseFloat(v) * (b.weight || 0);
       cov += (b.weight || 0);
     });
-    return cov > 0 ? val / cov : null;
+    return {
+      value:   cov > 0 ? val / cov : null,
+      partial: missing.length > 0 && missing.length < benchmarks.length,
+      missing,
+    };
+  }
+  function blendBm(getter) { return blendBmMeta(getter).value; }
+
+  // Collect all missing-data notes across all periods
+  const BM_PERIOD_MAP = [
+    ['1M',    b => b.return_1m],
+    ['3M',    b => b.return_3m],
+    ['6M',    b => b.return_6m],
+    ['YTD',   b => b.return_ytd],
+    ['1Y',    b => b.return_1y],
+    ['3Y',    b => b.return_3y],
+    ['5Y',    b => b.return_5y],
+    ['CY2025',b => b.return_cy2025],
+    ['CY2024',b => b.return_cy2024],
+    ['CY2023',b => b.return_cy2023],
+    ['CY2022',b => b.return_cy2022],
+    ['CY2021',b => b.return_cy2021],
+  ];
+  // Build per-period meta
+  const bmMeta = {};
+  BM_PERIOD_MAP.forEach(([k, g]) => { bmMeta[k] = blendBmMeta(g); });
+
+  // Collect unique missing notes: "Nifty Midcap 150 missing: 1M, 3M"
+  const bmMissingNotes = (() => {
+    const byBm = {};
+    BM_PERIOD_MAP.forEach(([k, _]) => {
+      bmMeta[k].missing.forEach(name => {
+        if (!byBm[name]) byBm[name] = [];
+        byBm[name].push(k);
+      });
+    });
+    return Object.entries(byBm).map(([name, periods]) =>
+      `${name}: missing ${periods.join(', ')}`
+    );
+  })();
+
+  const isMultiBm = benchmarks.length > 1;
+  const bmDisplayName = isMultiBm
+    ? 'Blended BM'
+    : (benchmarks[0]?.display_name || 'Benchmark');
+  const bmComposition = isMultiBm
+    ? benchmarks.map(b => `${b.display_name} ${b.weight}%`).join(' + ')
+    : null;
+
+  // fp with ~ prefix for partial data
+  function fpBm(key, getter) {
+    const meta = blendBmMeta(getter);
+    if (meta.value == null) return '—';
+    const s = (parseFloat(meta.value) >= 0 ? '+' : '') + parseFloat(meta.value).toFixed(2) + '%';
+    return meta.partial ? '~' + s : s;
   }
 
   const bm = benchmarks.length > 0 ? {
@@ -226,6 +282,10 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
       ? benchmarks[0].display_name
       : benchmarks.map(b => `${b.display_name} (${b.weight}%)`).join(' + '),
     rets: {
+      r1m:  blendBm(b => b.return_1m),
+      r3m:  blendBm(b => b.return_3m),
+      r6m:  blendBm(b => b.return_6m),
+      ytd:  blendBm(b => b.return_ytd),
       r1y:  blendBm(b => b.return_1y),
       r3y:  blendBm(b => b.return_3y),
       r5y:  blendBm(b => b.return_5y),
@@ -234,13 +294,10 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
       cy23: blendBm(b => b.return_cy2023),
       cy22: blendBm(b => b.return_cy2022),
       cy21: blendBm(b => b.return_cy2021),
-      r1m:  blendBm(b => b.return_1m),
-      r3m:  blendBm(b => b.return_3m),
-      ytd:  blendBm(b => b.return_ytd),
     }
   } : {
     name: 'No benchmark selected',
-    rets: { r1y: null, r3y: null, r5y: null, cy25: null, cy24: null, cy23: null, cy22: null, cy21: null, r1m: null, r3m: null, ytd: null }
+    rets: { r1m: null, r3m: null, r6m: null, r1y: null, r3y: null, r5y: null, ytd: null, cy25: null, cy24: null, cy23: null, cy22: null, cy21: null }
   };
   const B = blendFromSnaps(funds, weights, snapshots);
   const total = funds.reduce((s, f) => s + (weights[f.isin] || 0), 0);
@@ -559,7 +616,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
             {/* Calendar year chart */}
             <div className="ptf-card">
-              <div className="ptf-card-hd">Calendar year performance vs {bm.name}</div>
+              <div className="ptf-card-hd">Calendar year performance vs {bmDisplayName}</div>
               <div style={{ padding: '14px 16px', overflowX: 'auto' }}>
                 <svg width="100%" height="110" viewBox="0 0 500 110" preserveAspectRatio="xMidYMid meet">
                   {(() => {
@@ -587,7 +644,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                 </svg>
                 <div style={{ display: 'flex', gap: 14, marginTop: 8, fontSize: 9, color: 'var(--text-muted)' }}>
                   <span><span style={{ display: 'inline-block', width: 10, height: 10, background: 'var(--brand-primary)', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }}></span>Portfolio</span>
-                  <span><span style={{ display: 'inline-block', width: 10, height: 10, background: 'var(--lav-grey,#A795AE)', borderRadius: 2, marginRight: 4, verticalAlign: 'middle', opacity: .8 }}></span>{bm.name}</span>
+                  <span><span style={{ display: 'inline-block', width: 10, height: 10, background: 'var(--lav-grey,#A795AE)', borderRadius: 2, marginRight: 4, verticalAlign: 'middle', opacity: .8 }}></span>{bmDisplayName}</span>
                   <span style={{ fontStyle: 'italic' }}>Δ above bars = outperformance</span>
                 </div>
               </div>
@@ -623,18 +680,20 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                 <div className="ptf-card-hd">Lump sum projection — {fmtL(investAmt)}</div>
                 <div style={{ padding: '10px 14px', overflowX: 'auto' }}>
                   <table className="ptf-analytics-tbl">
-                    <thead><tr><th style={{ textAlign: 'left' }}>Horizon</th><th>Portfolio</th><th>{bm.name.split(' ').slice(0, 2).join(' ')}</th><th>Gain</th></tr></thead>
+                    <thead><tr><th style={{ textAlign: 'left' }}>Horizon</th><th>Portfolio</th><th>{bmDisplayName}</th><th>Gain</th></tr></thead>
                     <tbody>
                       {[3, 5, 10].map(y => {
-                        const ptfV = investAmt * Math.pow(1 + (B.return_3y || 0) / 100, y);
-                        const bmV = investAmt * Math.pow(1 + ((bm.rets.r3y || 13)) / 100, y);
+                        const ptfR = y === 3 ? (B.return_3y || 0) : (B.return_5y || B.return_3y || 0);
+                        const bmR  = y === 3 ? bm.rets.r3y : (bm.rets.r5y || bm.rets.r3y);
+                        const ptfV = investAmt * Math.pow(1 + ptfR / 100, y);
+                        const bmV  = bmR != null ? investAmt * Math.pow(1 + bmR / 100, y) : null;
                         return (
                           <tr key={y}>
-                            <td>{y} yrs</td>
+                            <td>{y} yrs <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>@ {ptfR.toFixed(1)}%</span></td>
                             <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--brand-primary)' }}>{fmtL(ptfV)}</td>
-                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{fmtL(bmV)}</td>
-                            <td style={{ fontFamily: 'var(--font-mono)', color: ptfV >= bmV ? 'var(--pos)' : 'var(--brand-primary)' }}>
-                              {ptfV >= bmV ? '+' : '-'}{fmtL(Math.abs(ptfV - bmV))}
+                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{bmV != null ? fmtL(bmV) : '—'}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)', color: bmV != null ? (ptfV >= bmV ? 'var(--pos)' : 'var(--brand-primary)') : 'var(--text-muted)' }}>
+                              {bmV != null ? (ptfV >= bmV ? '+' : '-') + fmtL(Math.abs(ptfV - bmV)) : '—'}
                             </td>
                           </tr>
                         );
@@ -650,23 +709,29 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                     <thead><tr><th style={{ textAlign: 'left' }}>Horizon</th><th>Invested</th><th>Portfolio</th><th>vs BM</th></tr></thead>
                     <tbody>
                       {[5, 10].map(y => {
-                        const ptfV = sipFV(sipAmt, B.return_3y || 0, y);
-                        const bmV = sipFV(sipAmt, bm.rets.r3y || 13, y);
+                        const ptfR = B.return_5y || B.return_3y || 0;
+                        const bmR  = bm.rets.r5y || bm.rets.r3y;
+                        const ptfV = sipFV(sipAmt, ptfR, y);
+                        const bmV  = bmR != null ? sipFV(sipAmt, bmR, y) : null;
                         const invested = sipAmt * 12 * y;
                         return (
                           <tr key={y}>
-                            <td>{y} yrs</td>
+                            <td>{y} yrs <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>@ {ptfR.toFixed(1)}%</span></td>
                             <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{fmtL(invested)}</td>
                             <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--brand-primary)' }}>{fmtL(ptfV)}</td>
-                            <td style={{ fontFamily: 'var(--font-mono)', color: ptfV >= bmV ? 'var(--pos)' : 'var(--brand-primary)' }}>
-                              {ptfV >= bmV ? '+' : ''}{(((ptfV - bmV) / bmV) * 100).toFixed(1)}%
+                            <td style={{ fontFamily: 'var(--font-mono)', color: bmV != null ? (ptfV >= bmV ? 'var(--pos)' : 'var(--brand-primary)') : 'var(--text-muted)' }}>
+                              {bmV != null ? (ptfV >= bmV ? '+' : '') + (((ptfV - bmV) / bmV) * 100).toFixed(1) + '%' : '—'}
                             </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>Based on blended 3Y CAGR ({(B.return_3y || 0).toFixed(2)}% p.a.) vs {bm.name} ({(bm.rets.r3y || 0).toFixed(2)}% p.a.). Illustrative only — not a guarantee of future returns.</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+                    Based on blended 5Y CAGR ({(B.return_5y || B.return_3y || 0).toFixed(2)}% p.a.) vs {bmDisplayName} ({(bm.rets.r5y || bm.rets.r3y || 0).toFixed(2)}% p.a.). Lump sum uses 3Y CAGR for 3yr horizon, 5Y CAGR for 5yr and 10yr. Illustrative only — not a guarantee of future returns.
+                    {bmComposition && <><br/><strong>Benchmark:</strong> {bmComposition}</>}
+                    {bmMissingNotes.length > 0 && <><br/><span style={{ color: 'var(--warn, #D97706)' }}>~ Partial data — {bmMissingNotes.join('; ')}</span></>}
+                  </div>
                 </div>
               </div>
             </div>
@@ -715,18 +780,28 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                       <td>—</td>
                     </tr>
                     <tr style={{ background: 'var(--brand-dark)' }}>
-                      <td style={{ fontWeight: 600, color: '#fff' }}>{bm.name || 'Benchmark'}</td>
+                      <td style={{ fontWeight: 600, color: '#fff' }}>{bmDisplayName}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>BM</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>—</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>—</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#fff' }}>{fp(bm.rets.r1y)}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#fff' }}>{fp(bm.rets.r3y)}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#fff' }}>{fp(bm.rets.r5y)}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>—</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>{bmMeta['1M'].partial ? '~' : ''}{fp(bm.rets.r1m)}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>{bmMeta['3M'].partial ? '~' : ''}{fp(bm.rets.r3m)}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#fff' }}>{bmMeta['1Y'].partial ? '~' : ''}{fp(bm.rets.r1y)}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#fff' }}>{bmMeta['3Y'].partial ? '~' : ''}{fp(bm.rets.r3y)}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#fff' }}>{bmMeta['5Y'].partial ? '~' : ''}{fp(bm.rets.r5y)}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>{bmMeta['YTD'].partial ? '~' : ''}{fp(bm.rets.ytd)}</td>
                       <td style={{ color: '#fff' }}>—</td>
                     </tr>
                   </tfoot>
                 </table>
+                {/* Benchmark footnote */}
+                <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6, border: '1px solid var(--border)', fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+                  <strong style={{ color: 'var(--text-primary)' }}>Benchmark:</strong>{' '}
+                  {isMultiBm
+                    ? <>{bmComposition} · Blended returns weighted by IPS allocation</>
+                    : benchmarks[0]?.display_name}
+                  {bmMissingNotes.length > 0 && (
+                    <><br/><span style={{ color: 'var(--warn, #D97706)' }}>~ Partial data — {bmMissingNotes.join('; ')}</span></>
+                  )}
+                </div>
               </div>
             </div>
           </div>

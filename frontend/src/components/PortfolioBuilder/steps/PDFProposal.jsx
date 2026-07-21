@@ -34,6 +34,7 @@ function blendPtf(funds, wtMap, snapshots) {
     ret5y:  wblend(s => s.returns?.['5y']),
     ret1m:  wblend(s => s.returns?.['1m']),
     ret3m:  wblend(s => s.returns?.['3m']),
+    ret6m:  wblend(s => s.returns?.['6m']),
     ytd:    wblend(s => s.returns?.['ytd']),
     cy25:   wblend(s => s.returns?.['cy2025']),
     cy24:   wblend(s => s.returns?.['cy2024']),
@@ -89,9 +90,54 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
     return cov > 0 ? val/cov : null;
   }
 
+  function blendBmMeta(getter) {
+    let val = 0, cov = 0;
+    const missing = [];
+    benchmarks.forEach(b => {
+      const v = getter(b);
+      if (v == null || isNaN(parseFloat(v))) { missing.push(b.display_name); return; }
+      val += parseFloat(v) * (b.weight || 0);
+      cov += (b.weight || 0);
+    });
+    return { value: cov > 0 ? val/cov : null, partial: missing.length > 0 && missing.length < benchmarks.length, missing };
+  }
+
+  const isMultiBm = benchmarks.length > 1;
+  const bmDisplayName = isMultiBm ? 'Blended BM' : (benchmarks[0]?.display_name || 'Benchmark');
+  const bmComposition = isMultiBm ? benchmarks.map(b => `${b.display_name} ${b.weight}%`).join(' + ') : null;
+
+  const BM_PERIOD_MAP_PDF = [
+    ['1M', b=>b.return_1m],['3M',b=>b.return_3m],['6M',b=>b.return_6m],
+    ['YTD',b=>b.return_ytd],['1Y',b=>b.return_1y],['3Y',b=>b.return_3y],
+    ['5Y',b=>b.return_5y],['CY2025',b=>b.return_cy2025],['CY2024',b=>b.return_cy2024],
+    ['CY2023',b=>b.return_cy2023],['CY2022',b=>b.return_cy2022],['CY2021',b=>b.return_cy2021],
+  ];
+  const bmMetaPDF = {};
+  BM_PERIOD_MAP_PDF.forEach(([k,g]) => { bmMetaPDF[k] = blendBmMeta(g); });
+  const bmMissingNotesPDF = (() => {
+    const byBm = {};
+    BM_PERIOD_MAP_PDF.forEach(([k]) => {
+      bmMetaPDF[k].missing.forEach(name => { if(!byBm[name]) byBm[name]=[]; byBm[name].push(k); });
+    });
+    return Object.entries(byBm).map(([name,periods])=>`${name}: missing ${periods.join(', ')}`);
+  })();
+  const bmFootnotePDF = [
+    bmComposition ? `Benchmark: ${bmComposition}. Blended using IPS weights.` : `Benchmark: ${benchmarks[0]?.display_name || '—'}.`,
+    bmMissingNotesPDF.length > 0 ? `~ Partial data — ${bmMissingNotesPDF.join('; ')}` : '',
+  ].filter(Boolean).join(' ');
+
+  // HTML snippet for IPS page — uses hardcoded colors (cannot reference buildAndOpen vars)
+  const bmFootnoteHTML = bmFootnotePDF
+    ? `<div style="margin-top:10px;padding:9px 14px;background:#F9F8F9;border:1px solid #F2F0F3;border-left:3px solid #A795AE;border-radius:4px;font-size:10px;color:#A2A0A0;line-height:1.7">${bmFootnotePDF}</div>`
+    : '';
+
   const bm = benchmarks.length > 0 ? {
     name: benchmarks.length === 1 ? benchmarks[0].display_name : benchmarks.map(b => `${b.display_name} (${b.weight}%)`).join(' + '),
     rets: {
+      r1m:  blendBmVal(b => b.return_1m),
+      r3m:  blendBmVal(b => b.return_3m),
+      r6m:  blendBmVal(b => b.return_6m),
+      ytd:  blendBmVal(b => b.return_ytd),
       r1y:  blendBmVal(b => b.return_1y),
       r3y:  blendBmVal(b => b.return_3y),
       r5y:  blendBmVal(b => b.return_5y),
@@ -112,6 +158,7 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
   const [generating, setGenerating] = useState(false);
 
   async function generatePDF() {
+    if (generating) return;
     const API = process.env.REACT_APP_API_URL || '';
     setGenerating(true);
 
@@ -124,9 +171,27 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
       const isins = allFundsForFetch.map(f => f.isin).join(',');
       const wts   = allFundsForFetch.map(f => activeWeights[f.isin]).join(',');
 
+      // Filter debt/liquid funds for overlap — same logic as Analyse tab
+      function isPureDebt(f) {
+        const ac  = (f.asset_class || snapshots[f.isin]?.asset_class || '').toLowerCase();
+        const cat = (f.category    || snapshots[f.isin]?.category    || '').toLowerCase();
+        return ac === 'debt' || ac === 'bond' ||
+          cat.includes('liquid') || cat.includes('overnight') ||
+          cat.includes('money market') || cat.includes('gilt') ||
+          cat.includes('ultra short') || cat.includes('low duration') ||
+          cat.includes('corporate bond') || cat.includes('credit risk') ||
+          cat.includes('banking and psu') || cat.includes('duration') ||
+          cat.includes('floater') || cat.includes('fixed maturity') ||
+          cat.includes('india oe');
+      }
+      const equityFunds = allFundsForFetch.filter(f => !isPureDebt(f));
+      const overlapIsins = equityFunds.map(f => f.isin).join(',');
+
       const [freshStress, freshOverlap, freshCorr] = await Promise.allSettled([
         fetch(`${API}/api/nav/stress-test?isins=${isins}&weights=${wts}`).then(r => r.ok ? r.json() : null),
-        fetch(`${API}/api/holdings/overlap?isins=${isins}`).then(r => r.ok ? r.json() : null),
+        overlapIsins.split(',').length >= 2
+          ? fetch(`${API}/api/holdings/overlap?isins=${overlapIsins}`).then(r => r.ok ? r.json() : null)
+          : Promise.resolve(null),
         fetch(`${API}/api/nav/correlation?isins=${isins}`).then(r => r.ok ? r.json() : null),
       ]);
 
@@ -342,7 +407,7 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
     const CYK=['cy21','cy22','cy23','cy24','cy25'];
     const CYL=['2021','2022','2023','2024','2025'];
     const cyV=CYK.map(k=>B[k]);
-    const bmV=CYK.map(k=>bm.rets['r'+k.slice(2)]);
+    const bmV=CYK.map(k=>bm.rets[k]);
     const mxCY=Math.max(...cyV.concat(bmV).filter(v=>v!=null).map(Math.abs).concat([10]));
     const SW=420,SH=150,TPAD=20,BPAD=30,CH=SH-TPAD-BPAD,ZY=TPAD+CH;
     let cySvg=`<svg width="100%" height="${SH}" viewBox="0 0 ${SW} ${SH}" preserveAspectRatio="xMidYMid meet">`;
@@ -361,7 +426,7 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
     cySvg+=`<rect x="0" y="${SH-12}" width="10" height="10" fill="${BERRY}" rx="2"/>`;
     cySvg+=`<text x="14" y="${SH-4}" font-size="8" fill="${GR60}" font-family="DM Sans,sans-serif">Portfolio</text>`;
     cySvg+=`<rect x="72" y="${SH-12}" width="10" height="10" fill="${LAV}" rx="2" opacity=".8"/>`;
-    cySvg+=`<text x="86" y="${SH-4}" font-size="8" fill="${GR60}" font-family="DM Sans,sans-serif">${bm.name}</text>`;
+    cySvg+=`<text x="86" y="${SH-4}" font-size="8" fill="${GR60}" font-family="DM Sans,sans-serif">${bmDisplayName}</text>`;
     cySvg+='</svg>';
 
     /* ── SVG: Growth projection ─────────────────────────────────── */
@@ -404,15 +469,17 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
     }).join('');
 
     const trailingRows = [
-      ['1 month', B.ret1m, bm.rets.r1m],
-      ['3 months', B.ret3m, bm.rets.r3m],
-      ['Year to date', B.ytd, bm.rets.ytd],
-      ['1 year', B.ret1y, bm.rets.r1y],
-      ['3 years (CAGR)', B.ret3y, bm.rets.r3y],
-      ['5 years (CAGR)', B.ret5y, bm.rets.r5y],
-    ].map(([lbl,pv,bv]) => {
+      ['1 month',       B.ret1m,  bm.rets.r1m,  bmMetaPDF['1M']],
+      ['3 months',      B.ret3m,  bm.rets.r3m,  bmMetaPDF['3M']],
+      ['6 months',      B.ret6m,  bm.rets.r6m,  bmMetaPDF['6M']],
+      ['1 year',        B.ret1y,  bm.rets.r1y,  bmMetaPDF['1Y']],
+      ['3 years (CAGR)',B.ret3y,  bm.rets.r3y,  bmMetaPDF['3Y']],
+      ['5 years (CAGR)',B.ret5y,  bm.rets.r5y,  bmMetaPDF['5Y']],
+    ].map(([lbl,pv,bv,meta]) => {
       const d = pv!=null&&bv!=null ? pv-bv : null;
-      return `<tr>${TDL(lbl)}${TD(pc(pv),rc(parseFloat(pv),0,-5),'1')}${TD(pc(bv),rc(parseFloat(bv),0,-5))}${TD(d!=null?pc(d):'—',d!=null?(d>=0?POS:NEG):GR60,'1')}</tr>`;
+      const bmStr = bv!=null ? (meta?.partial?'~ ':'')+pc(bv) : '—';
+      const bmClr = meta?.partial ? WARN : rc(parseFloat(bv),0,-5);
+      return `<tr>${TDL(lbl)}${TD(pc(pv),rc(parseFloat(pv),0,-5),'1')}${TD(bmStr,bmClr)}${TD(d!=null?pc(d):'—',d!=null?(d>=0?POS:NEG):GR60,'1')}</tr>`;
     }).join('');
 
     const riskRows = [
@@ -467,8 +534,8 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
     }).join('');
 
     const surplus = TOTAL_FV-BM_FV;
-    const CYdataAbv = CYK.filter((_,i)=>B['cy'+CYL[i].slice(2)]!=null&&bm.rets['r'+CYL[i].slice(2)]!=null&&(B['cy'+CYL[i].slice(2)]||0)>(bm.rets['r'+CYL[i].slice(2)]||0)).length;
-    const CYdataTot = CYK.filter((_,i)=>B['cy'+CYL[i].slice(2)]!=null&&bm.rets['r'+CYL[i].slice(2)]!=null).length;
+    const CYdataAbv = CYK.filter((_,i)=>B['cy'+CYL[i].slice(2)]!=null&&bm.rets[CYK[i]]!=null&&(B['cy'+CYL[i].slice(2)]||0)>(bm.rets[CYK[i]]||0)).length;
+    const CYdataTot = CYK.filter((_,i)=>B['cy'+CYL[i].slice(2)]!=null&&bm.rets[CYK[i]]!=null).length;
     const spreadGap = (B.ret3y||0)-(bm.rets.r3y||0);
 
     /* ════════════════════════════════════════════
@@ -546,15 +613,16 @@ html,body{width:297mm}
     ${infoCell('Deployment mode',DEPLOY)}
     ${infoCell('Monthly SIP',sipAmt>0?'₹'+sipAmt.toLocaleString('en-IN'):'—')}
     ${infoCell('Review frequency',REVFREQ)}
-    ${infoCell('Benchmark',bm.name)}
+    ${infoCell('Benchmark', isMultiBm ? bm.name : (benchmarks[0]?.display_name || '—'))}
   </div>
   ${CONSTRAIN?tblBox('Investment constraints &amp; exclusions',`<div style="padding:11px 16px;font-size:12px;line-height:1.8;color:${GR80}">${CONSTRAIN}</div>`):''}
   ${NOTES?tblBox('Adviser notes &amp; special instructions',`<div style="padding:11px 16px;font-size:12px;line-height:1.8;color:${GR80}">${NOTES}</div>`):''}
+  ${bmFootnoteHTML}
 </section>
 
 <!-- ═══ PAGE 3: PORTFOLIO OVERVIEW ═══ -->
 <section class="pg">
-  ${sectionHd('02','Portfolio overview',`Blended analytics for the recommended ${SF.length}-fund portfolio vs ${bm.name}.`)}
+  ${sectionHd('02','Portfolio overview',`Blended analytics for the recommended ${SF.length}-fund portfolio vs ${bmDisplayName}.`)}
   <div style="display:flex;align-items:stretch;gap:16px;margin-bottom:18px">
     <div style="background:${SC_BG};border:2px solid ${SC_CLR};border-radius:12px;padding:20px 24px;text-align:center;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:120px">
       <div style="font-family:'Cormorant Garamond',serif;font-size:56px;font-weight:700;color:${SC_CLR};line-height:1">${OVERALL}</div>
@@ -566,7 +634,7 @@ html,body{width:297mm}
       ${kpiCell(pc(B.ret3y),'3Y CAGR',pc(bm.rets.r3y)+' benchmark',rc(B.ret3y,0,-5))}
       ${kpiCell(pc(B.ret5y),'5Y CAGR',pc(bm.rets.r5y)+' benchmark',rc(B.ret5y,0,-5))}
       ${kpiCell(nb(B.sharpe),'Sharpe (3Y)',nb(B.sortino)+' Sortino',rc(B.sharpe,0.5,0.3))}
-      ${kpiCell(pc(B.alpha),'Alpha (3Y)','vs '+bm.name,rc(B.alpha,0,-2))}
+      ${kpiCell(pc(B.alpha),'Alpha (3Y)','vs '+bmDisplayName,rc(B.alpha,0,-2))}
       ${kpiCell(nb(B.dncap)+'%','Down capture','≤100% = protective',rcL(B.dncap,95,105))}
       ${kpiCell(nb(B.er)+'%','Blended ER','Expense ratio',rcL(B.er,1.0,1.8))}
       ${kpiCell(nb(B.std3y)+'%','Std deviation (3Y)','Annualised vol',rcL(B.std3y,14,20))}
@@ -578,7 +646,7 @@ html,body{width:297mm}
   </div>
   ${(()=>{
     const scorecardRows=[
-      ['Return quality',    B.alpha,  [2,0],   false, ['Outperforming','Neutral','Lagging'],    'Alpha of '+pc(B.alpha)+' vs '+bm.name+'. '+((B.alpha||0)>=2?'Fund managers are consistently adding value above market exposure.':(B.alpha||0)>=0?'Positive but modest — watch for persistence over next reporting periods.':'Negative alpha after fees questions the value of active management in the current mix.')],
+      ['Return quality',    B.alpha,  [2,0],   false, ['Outperforming','Neutral','Lagging'],    'Alpha of '+pc(B.alpha)+' vs '+bmDisplayName+'. '+((B.alpha||0)>=2?'Fund managers are consistently adding value above market exposure.':(B.alpha||0)>=0?'Positive but modest — watch for persistence over next reporting periods.':'Negative alpha after fees questions the value of active management in the current mix.')],
       ['Risk efficiency',   B.sharpe, [0.7,0.4],false,['Strong','Adequate','Weak'],             'Sharpe '+nb(B.sharpe)+'. '+((B.sharpe||0)>=0.7?'Excellent — portfolio delivers strong returns relative to the risk taken.':(B.sharpe||0)>=0.4?'Adequate risk-adjusted returns — there is room to improve by replacing low-Sharpe holdings.':'Below acceptable threshold — the portfolio is taking on more risk than its returns justify.')],
       ['Downside shield',   B.dncap,  [90,100], true,  ['Protected','On par','Exposed'],        'Down capture '+nb(B.dncap)+'%. '+((B.dncap||100)<=90?'In falling markets, portfolio loses less than the benchmark — strong capital protection.':(B.dncap||100)<=100?'Portfolio falls broadly in line with the market in corrections.':'Portfolio amplifies drawdowns — consider adding defensive or low-beta funds.')],
       ['Cost efficiency',   B.er,     [1.0,1.5],true,  ['Low cost','Reasonable','Review costs'],'Blended ER '+nb(B.er)+'%. '+((B.er||0)<=1.0?'Highly cost-efficient construction. Maximum net return accrues to the client.':(B.er||0)<=1.5?'Reasonable expense ratio for active management.':'Above-average cost drag — switching to Direct plans could significantly improve net returns.')],
@@ -599,19 +667,20 @@ html,body{width:297mm}
 
 <!-- ═══ PAGE 4: PERFORMANCE ═══ -->
 <section class="pg">
-  ${sectionHd('03','Performance analysis',`Returns across all periods and calendar years vs ${bm.name}.`)}
+  ${sectionHd('03','Performance analysis',`Returns across all periods and calendar years vs ${bmDisplayName}.`)}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-    ${tblBox(`Trailing returns vs ${bm.name}`,
-      `<table><thead><tr>${TH('Period','left')}${TH('Portfolio')}${TH('Benchmark')}${TH('Difference')}</tr></thead><tbody>${trailingRows}</tbody></table>`)}
-    ${tblBox(`Calendar year performance vs ${bm.name}`,
+    ${tblBox(`Trailing returns vs ${bmDisplayName}`,
+      `<table><thead><tr>${TH('Period','left')}${TH('Portfolio')}${TH(bmDisplayName)}${TH('Difference')}</tr></thead><tbody>${trailingRows}</tbody></table>`,
+      bmFootnotePDF)}
+    ${tblBox(`Calendar year performance vs ${bmDisplayName}`,
       `<div style="padding:14px 18px">${cySvg}
       <div style="display:flex;gap:14px;font-size:10px;color:${GR60};margin-top:10px;align-items:center">
         <span><span style="display:inline-block;width:10px;height:10px;background:${BERRY};border-radius:2px;margin-right:4px;vertical-align:middle"></span>Portfolio</span>
-        <span><span style="display:inline-block;width:10px;height:10px;background:${LAV};border-radius:2px;margin-right:4px;vertical-align:middle;opacity:.75"></span>${bm.name}</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:${LAV};border-radius:2px;margin-right:4px;vertical-align:middle;opacity:.75"></span>${bmDisplayName}</span>
         <span style="margin-left:auto">▲▼ = outperformance / lag</span>
       </div></div>`)}
   </div>
-  ${callout(`Portfolio has outperformed ${bm.name} in <strong>${CYdataAbv} of ${CYdataTot} calendar years</strong>. Blended 3Y CAGR of <strong>${pc(B.ret3y)}</strong> compares to benchmark's <strong>${pc(bm.rets.r3y)}</strong> — a spread of <strong>${spreadGap>=0?'+':''}${spreadGap.toFixed(2)}%</strong>. ${spreadGap>0?'Consistent positive alpha demonstrates active fund selection skill over the measurement period.':'The portfolio has lagged the benchmark over 3 years. Review fund selection or consider increasing passive exposure.'}`,spreadGap>=0?'pos':'warn')}
+  ${callout(`Portfolio has outperformed ${bmDisplayName} in <strong>${CYdataAbv} of ${CYdataTot} calendar years</strong>. Blended 3Y CAGR of <strong>${pc(B.ret3y)}</strong> compares to benchmark's <strong>${pc(bm.rets.r3y)}</strong> — a spread of <strong>${spreadGap>=0?'+':''}${spreadGap.toFixed(2)}%</strong>. ${spreadGap>0?'Consistent positive alpha demonstrates active fund selection skill over the measurement period.':'The portfolio has lagged the benchmark over 3 years. Review fund selection or consider increasing passive exposure.'}`,spreadGap>=0?'pos':'warn')}
 </section>
 
 <!-- ═══ PAGE 5: WEALTH CREATION ═══ -->
@@ -647,7 +716,7 @@ html,body{width:297mm}
         <div>
           <div style="font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:${GR60};margin-bottom:4px">Projected wealth after 10 years (${fmtL(investAmt)} invested)</div>
           <div style="font-family:'Cormorant Garamond',serif;font-size:34px;font-weight:700;color:${BERRY}">${fmtL(ptf10)}</div>
-          <div style="font-size:12px;color:${GR60};margin-top:2px">${bmCAGR10b>0?'vs '+fmtL(bm10v)+' ('+bm.name+')':bm.name}</div>
+          <div style="font-size:12px;color:${GR60};margin-top:2px">${bmCAGR10b>0?'vs '+fmtL(bm10v)+' ('+bmDisplayName+')':bm.name}</div>
           ${extra10!=null?`<div style="font-size:13px;font-weight:600;color:${extra10>=0?POS:BERRY};margin-top:4px">${extra10>=0?'+':''}${fmtL(extra10)} extra wealth created</div>`:''}
           <div style="font-size:9px;color:${GR60};margin-top:6px">Portfolio: 5Y CAGR ${pc(B.ret5y||B.ret3y)} · Benchmark: ${pc(bm.rets.r5y||bm.rets.r3y)} · Illustrative only.</div>
         </div>
@@ -655,7 +724,7 @@ html,body{width:297mm}
       ${growSvg2}
       <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:12px">
         <thead><tr style="background:${GR10}">
-          ${TH('Horizon','left')}${TH('Portfolio')}${TH(bm.name)}${TH('Extra wealth')}
+          ${TH('Horizon','left')}${TH('Portfolio')}${TH(bmDisplayName)}${TH('Extra wealth')}
         </tr></thead>
         <tbody>${[3,5,10].map(y=>{
           const pc2=ptfCAGR[y]||(B.ret3y||0)/100;
@@ -761,7 +830,7 @@ html,body{width:297mm}
         <span><span style="color:#E67E22">●</span> 25–35% High</span>
         <span><span style="color:#C0392B">●</span> &gt;35% Very high</span>
       </div>`;
-    return tblBox('Portfolio overlap matrix',`<div style="padding:14px 16px;overflow-x:auto;display:flex;flex-direction:column;align-items:center">${matrixHtml}</div>`,'Active equity funds only. Overlap >25% may indicate concentration risk.');
+    return tblBox('Portfolio overlap matrix',`<div style="padding:14px 16px;overflow-x:auto">${matrixHtml}</div>`,'Active equity funds only. Overlap >25% may indicate concentration risk.');
   })()}
 </section>
 
@@ -810,7 +879,7 @@ html,body{width:297mm}
         ${drStr?`<span style="margin-left:auto;font-style:italic">${drStr}</span>`:''}
       </div>
       ${resolvedCorr.excluded?.length?`<div style="margin-top:8px;font-size:9px;color:#92700A;background:#FEF9EC;padding:7px 12px;border-radius:6px;border:1px solid rgba(234,179,8,.3)">Excluded (insufficient data): ${resolvedCorr.excluded.map(e=>{const f=funds.find(f=>f.isin===e.isin);return f?f.name:e.isin}).join(', ')}</div>`:''}`;
-    return tblBox('Return correlation matrix',`<div style="padding:14px 16px;overflow-x:auto;display:flex;flex-direction:column;align-items:center">${corrMatrixHtml}</div>`,'Based on 3-year daily NAV returns. ≥0.85 = high correlation — funds move together, reducing diversification benefit.');
+    return tblBox('Return correlation matrix',`<div style="padding:14px 16px;overflow-x:auto">${corrMatrixHtml}</div>`,'Based on 3-year daily NAV returns. ≥0.85 = high correlation — funds move together, reducing diversification benefit.');
   })()}
 </section>
 
@@ -861,7 +930,7 @@ html,body{width:297mm}
       <td style="padding:8px 12px;background:${PLUM};color:#fff;font-family:'DM Mono',monospace;font-weight:700;text-align:right">${B.dncap!=null?nb(B.dncap)+'%':'—'}</td>
     </tr></tfoot></table></div>`,
     `Sharpe ≥ 0.5 = strong · Alpha ≥ 0 = outperforming · Down capture ≤ 100% = portfolio loses less than market in drawdowns · ER < 1.0% = low cost`)}
-  ${callout(`The ${SF.length}-fund portfolio achieves a blended 3Y CAGR of ${pc(B.ret3y)} with a Sharpe ratio of ${nb(B.sharpe)} and alpha of ${pc(B.alpha)} vs ${bm.name}. The blended ER of ${nb(B.er)}% ${(B.er||0)<=1.2?'reflects an efficient, cost-conscious construction.':'should be reviewed — migrating to Direct plans could reduce costs significantly.'}`,(B.sharpe||0)>=0.5&&(B.alpha||0)>=0?'pos':'warn')}
+  ${callout(`The ${SF.length}-fund portfolio achieves a blended 3Y CAGR of ${pc(B.ret3y)} with a Sharpe ratio of ${nb(B.sharpe)} and alpha of ${pc(B.alpha)} vs ${bmDisplayName}. The blended ER of ${nb(B.er)}% ${(B.er||0)<=1.2?'reflects an efficient, cost-conscious construction.':'should be reviewed — migrating to Direct plans could reduce costs significantly.'}`,(B.sharpe||0)>=0.5&&(B.alpha||0)>=0?'pos':'warn')}
 </section>
 
 <!-- ═══ ANNEXURE: FUND SNAPSHOTS ═══ -->
