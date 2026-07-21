@@ -163,8 +163,17 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
     setGenerating(true);
 
     // Open window BEFORE any async work — browsers block popups after await
+    const fetchingItems = [
+      selectedSections.has('stress') && 'stress test',
+      selectedSections.has('overlap') && 'overlap',
+      selectedSections.has('correlation') && 'correlation',
+    ].filter(Boolean);
+    const fetchingMsg = fetchingItems.length > 0
+      ? `Fetching ${fetchingItems.join(', ')} data. This will take a few seconds.`
+      : 'Generating proposal…';
+
     const w = window.open('', '_blank');
-    if (w) w.document.write('<html><body style="font-family:sans-serif;padding:40px;color:#3E3452"><h2>⏳ Generating proposal…</h2><p>Fetching stress test, overlap and correlation data. This will take a few seconds.</p></body></html>');
+    if (w) w.document.write(`<html><body style="font-family:sans-serif;padding:40px;color:#3E3452"><h2>⏳ Generating proposal…</h2><p>${fetchingMsg}</p></body></html>`);
 
     try {
       const allFundsForFetch = funds.filter(f => activeWeights[f.isin] != null);
@@ -188,20 +197,24 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
       const overlapIsins = equityFunds.map(f => f.isin).join(',');
 
       const [freshStress, freshOverlap, freshCorr] = await Promise.allSettled([
-        fetch(`${API}/api/nav/stress-test?isins=${isins}&weights=${wts}`).then(r => r.ok ? r.json() : null),
-        overlapIsins.split(',').length >= 2
+        selectedSections.has('stress')
+          ? fetch(`${API}/api/nav/stress-test?isins=${isins}&weights=${wts}`).then(r => r.ok ? r.json() : null)
+          : Promise.resolve(null),
+        selectedSections.has('overlap') && overlapIsins.split(',').length >= 2
           ? fetch(`${API}/api/holdings/overlap?isins=${overlapIsins}`).then(r => r.ok ? r.json() : null)
           : Promise.resolve(null),
-        fetch(`${API}/api/nav/correlation?isins=${isins}`).then(r => r.ok ? r.json() : null),
+        selectedSections.has('correlation')
+          ? fetch(`${API}/api/nav/correlation?isins=${isins}`).then(r => r.ok ? r.json() : null)
+          : Promise.resolve(null),
       ]);
 
       const resolvedStress  = freshStress.status  === 'fulfilled' ? freshStress.value  : (stressData  || null);
       const resolvedOverlap = freshOverlap.status === 'fulfilled' ? freshOverlap.value : (overlapData || null);
       const resolvedCorr    = freshCorr.status    === 'fulfilled' ? freshCorr.value    : (corrData    || null);
 
-      buildAndOpen(resolvedStress, resolvedOverlap, resolvedCorr, w);
+      buildAndOpen(resolvedStress, resolvedOverlap, resolvedCorr, w, selectedSections);
     } catch(e) {
-      buildAndOpen(stressData || null, overlapData || null, corrData || null, w);
+      buildAndOpen(stressData || null, overlapData || null, corrData || null, w, selectedSections);
     } finally {
       setGenerating(false);
     }
@@ -250,6 +263,7 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
       sipAmt,
       investAmt,
       tenureYrs,
+      sections: [...selectedSections],
     };
 
     fetch(`${API}/api/proposal/pptx`, {
@@ -273,7 +287,8 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
       .catch(err => alert('PPT generation failed: ' + err.message));
   }
 
-  function buildAndOpen(resolvedStress, resolvedOverlap, resolvedCorr, w) {
+  function buildAndOpen(resolvedStress, resolvedOverlap, resolvedCorr, w, secs) {
+    const sec = id => secs ? secs.has(id) : true; // section enabled?
     const CLIENT   = ips?.name || 'Client';
     const RM       = ips?.rm   || 'BugleRock Capital';
     const INVEST   = ips?.amount ? '₹'+ips.amount : '—';
@@ -566,7 +581,7 @@ html,body{width:297mm}
 
 <div class="page">
 
-<!-- ═══ COVER PAGE ═══ -->
+${sec("cover") ? `<!-- ═══ COVER PAGE ═══ -->
 <section style="min-height:260px;position:relative">
   <div style="height:5px;background:linear-gradient(90deg,${BERRY},${MUT},${LAV});border-radius:3px;margin-bottom:36px"></div>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px">
@@ -598,7 +613,8 @@ html,body{width:297mm}
   </div>
 </section>
 
-<!-- ═══ PAGE 2: IPS ═══ -->
+` : ""}
+${sec("ips") ? `<!-- ═══ PAGE 2: IPS ═══ -->
 <section class="pg">
   ${sectionHd('01','Investment Policy Statement','Defines the client\'s objectives, constraints and guidelines governing this portfolio.')}
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
@@ -620,7 +636,8 @@ html,body{width:297mm}
   ${bmFootnoteHTML}
 </section>
 
-<!-- ═══ PAGE 3: PORTFOLIO OVERVIEW ═══ -->
+` : ""}
+${sec("overview") ? `<!-- ═══ PAGE 3: PORTFOLIO OVERVIEW ═══ -->
 <section class="pg">
   ${sectionHd('02','Portfolio overview',`Blended analytics for the recommended ${SF.length}-fund portfolio vs ${bmDisplayName}.`)}
   <div style="display:flex;align-items:stretch;gap:16px;margin-bottom:18px">
@@ -665,7 +682,8 @@ html,body{width:297mm}
   })()}
 </section>
 
-<!-- ═══ PAGE 4: PERFORMANCE ═══ -->
+` : ""}
+${sec("performance") ? `<!-- ═══ PAGE 4: PERFORMANCE ═══ -->
 <section class="pg">
   ${sectionHd('03','Performance analysis',`Returns across all periods and calendar years vs ${bmDisplayName}.`)}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
@@ -683,7 +701,8 @@ html,body{width:297mm}
   ${callout(`Portfolio has outperformed ${bmDisplayName} in <strong>${CYdataAbv} of ${CYdataTot} calendar years</strong>. Blended 3Y CAGR of <strong>${pc(B.ret3y)}</strong> compares to benchmark's <strong>${pc(bm.rets.r3y)}</strong> — a spread of <strong>${spreadGap>=0?'+':''}${spreadGap.toFixed(2)}%</strong>. ${spreadGap>0?'Consistent positive alpha demonstrates active fund selection skill over the measurement period.':'The portfolio has lagged the benchmark over 3 years. Review fund selection or consider increasing passive exposure.'}`,spreadGap>=0?'pos':'warn')}
 </section>
 
-<!-- ═══ PAGE 5: WEALTH CREATION ═══ -->
+` : ""}
+${sec("wealth") ? `<!-- ═══ PAGE 5: WEALTH CREATION ═══ -->
 <section class="pg">
   ${sectionHd('04','Wealth creation — Growth projection',`Based on blended 3Y CAGR of ${pc(B.ret3y)} over 10 years.`)}
   ${(()=>{
@@ -744,7 +763,8 @@ html,body{width:297mm}
   })()}
 </section>
 
-<!-- ═══ PAGE 6: RISK ═══ -->
+` : ""}
+${sec("risk") ? `<!-- ═══ PAGE 6: RISK ═══ -->
 <section class="pg">
   ${sectionHd('05','Risk profile &amp; quality','Comprehensive risk metrics with market-context interpretation.')}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
@@ -759,7 +779,8 @@ html,body{width:297mm}
   </div>
 </section>
 
-<!-- ═══ PAGE 6b: STRESS TEST ═══ -->
+` : ""}
+${sec("stress") ? `<!-- ═══ PAGE 6b: STRESS TEST ═══ -->
 <section class="pg">
   ${sectionHd('05a','Crash scenario stress test','Portfolio drawdown in historical market crashes — based on actual NAV returns.')}
   ${(()=>{
@@ -785,7 +806,8 @@ html,body{width:297mm}
   })()}
 </section>
 
-<!-- ═══ PAGE 6c: OVERLAP ═══ -->
+` : ""}
+${sec("overlap") ? `<!-- ═══ PAGE 6c: OVERLAP ═══ -->
 <section class="pg">
   ${sectionHd('05b','Portfolio overlap matrix','Shared stock holdings between active equity funds in the portfolio.')}
   ${(()=>{
@@ -834,7 +856,8 @@ html,body{width:297mm}
   })()}
 </section>
 
-<!-- ═══ PAGE 6d: CORRELATION ═══ -->
+` : ""}
+${sec("correlation") ? `<!-- ═══ PAGE 6d: CORRELATION ═══ -->
 <section class="pg">
   ${sectionHd('05c','Return correlation matrix','3-year daily NAV return correlation between all portfolio funds.')}
   ${(()=>{
@@ -883,7 +906,8 @@ html,body{width:297mm}
   })()}
 </section>
 
-<!-- ═══ PAGE 7: EXPOSURE & STYLE ═══ -->
+` : ""}
+${sec("exposure") ? `<!-- ═══ PAGE 7: EXPOSURE & STYLE ═══ -->
 <section class="pg">
   ${sectionHd('06','Portfolio exposure &amp; style','Market cap, asset class, valuation and growth/value characteristics.')}
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">
@@ -911,7 +935,8 @@ html,body{width:297mm}
   </div>
 </section>
 
-<!-- ═══ PAGE 8: FUND TABLE ═══ -->
+` : ""}
+${sec("fundtable") ? `<!-- ═══ PAGE 8: FUND TABLE ═══ -->
 <section class="pg">
   ${sectionHd('07','Fund details',`Complete data for all ${SF.length} holdings in the recommended portfolio.`)}
   ${tblBox('Portfolio holdings — all metrics',
@@ -933,12 +958,14 @@ html,body{width:297mm}
   ${callout(`The ${SF.length}-fund portfolio achieves a blended 3Y CAGR of ${pc(B.ret3y)} with a Sharpe ratio of ${nb(B.sharpe)} and alpha of ${pc(B.alpha)} vs ${bmDisplayName}. The blended ER of ${nb(B.er)}% ${(B.er||0)<=1.2?'reflects an efficient, cost-conscious construction.':'should be reviewed — migrating to Direct plans could reduce costs significantly.'}`,(B.sharpe||0)>=0.5&&(B.alpha||0)>=0?'pos':'warn')}
 </section>
 
-<!-- ═══ ANNEXURE: FUND SNAPSHOTS ═══ -->
+` : ""}
+${sec("annexure") ? `<!-- ═══ ANNEXURE: FUND SNAPSHOTS ═══ -->
 <section class="pg">
   ${sectionHd('A','Annexure — Individual fund snapshots','Performance, risk metrics and calendar year returns for each holding.')}
   ${annexCards}
 </section>
 
+` : ""}
 <!-- DISCLAIMER -->
 <div style="border:1px solid ${GR20};border-radius:10px;padding:16px 20px;background:${GR10};margin-top:8px">
   <div style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:${LAV};margin-bottom:8px">Important disclosures &amp; risk warnings</div>
@@ -956,6 +983,35 @@ html,body{width:297mm}
     w.document.open();
     w.document.write(html);
     w.document.close();
+  }
+
+  const SECTIONS = [
+    { id:'cover',       label:'Cover page',              desc:'Client name, KPIs, BugleRock branding' },
+    { id:'ips',         label:'Investment Policy Statement', desc:'Objectives, constraints, adviser notes' },
+    { id:'overview',    label:'Portfolio overview',       desc:'Score, KPI grid, donut chart, cap mix' },
+    { id:'performance', label:'Performance analysis',     desc:'Trailing returns & calendar year chart' },
+    { id:'wealth',      label:'Wealth projection',        desc:'Growth chart, 3/5/10 year corpus table' },
+    { id:'risk',        label:'Risk profile & quality',   desc:'Risk metrics, style narrative' },
+    { id:'stress',      label:'Crash scenario stress test',desc:'Historical drawdown analysis' },
+    { id:'overlap',     label:'Portfolio overlap matrix', desc:'Shared stock holdings between funds' },
+    { id:'correlation', label:'Return correlation matrix',desc:'NAV-based fund correlation heatmap' },
+    { id:'exposure',    label:'Exposure & style',         desc:'Cap bars, valuation, style narrative' },
+    { id:'fundtable',   label:'Fund details table',       desc:'All funds — weights, returns, risk metrics' },
+    { id:'annexure',    label:'Per-fund annexure',        desc:'Individual fund snapshot cards' },
+  ];
+
+  const [selectedSections, setSelectedSections] = useState(() => new Set(SECTIONS.map(s => s.id)));
+  const allSelected = selectedSections.size === SECTIONS.length;
+
+  function toggleAll() {
+    if (allSelected) setSelectedSections(new Set());
+    else setSelectedSections(new Set(SECTIONS.map(s => s.id)));
+  }
+
+  function toggleSection(id) {
+    const next = new Set(selectedSections);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelectedSections(next);
   }
 
   /* ── PREVIEW UI ─────────────────────────────────────────────── */
@@ -995,9 +1051,41 @@ html,body{width:297mm}
             ))}
           </div>
           <div style={{ marginTop:12,paddingTop:10,borderTop:'1px solid var(--border)',fontSize:11,color:'var(--text-muted)',lineHeight:1.7 }}>
-            <strong>Proposal includes:</strong> Cover · IPS · Portfolio overview · Performance · Wealth projection · Risk & stress test · Overlap matrix · Exposure & style · Fund table · Per-fund annexure<br/>
-            Stress test and overlap data are fetched fresh on download — no need to visit those tabs first.
+            <strong>Selected sections:</strong> {selectedSections.size === SECTIONS.length ? 'All sections' : selectedSections.size === 0 ? 'None selected' : `${selectedSections.size} of ${SECTIONS.length} sections`} · Stress test and overlap data fetched fresh on download.
           </div>
+        </div>
+
+        {/* Section selector */}
+        <div style={{ background:'#fff',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',padding:'16px 18px',marginBottom:20 }}>
+          <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14 }}>
+            <div>
+              <div style={{ fontSize:12,fontWeight:700,color:'var(--brand-dark)' }}>Customise proposal sections</div>
+              <div style={{ fontSize:11,color:'var(--text-muted)',marginTop:2 }}>Choose which sections to include in the generated PDF / PPT</div>
+            </div>
+            <label style={{ display:'flex',alignItems:'center',gap:7,cursor:'pointer',padding:'6px 12px',border:`1.5px solid ${allSelected?'var(--pos)':'var(--border)'}`,borderRadius:20,background:allSelected?'rgba(26,122,82,.06)':'var(--bg-secondary)',transition:'all .15s' }}>
+              <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ accentColor:'var(--pos)',width:14,height:14 }} />
+              <span style={{ fontSize:11,fontWeight:600,color:allSelected?'var(--pos)':'var(--text-muted)' }}>All sections</span>
+            </label>
+          </div>
+          <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:8 }}>
+            {SECTIONS.map(s => {
+              const checked = selectedSections.has(s.id);
+              return (
+                <label key={s.id} onClick={() => toggleSection(s.id)} style={{ display:'flex',alignItems:'flex-start',gap:10,padding:'10px 12px',border:`1px solid ${checked?'var(--brand-primary)':'var(--border)'}`,borderRadius:8,cursor:'pointer',background:checked?'rgba(145,47,99,.04)':'#fff',transition:'all .12s' }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggleSection(s.id)} onClick={e=>e.stopPropagation()} style={{ accentColor:'var(--brand-primary)',width:14,height:14,marginTop:2,flexShrink:0 }} />
+                  <div>
+                    <div style={{ fontSize:12,fontWeight:600,color:checked?'var(--brand-primary)':'var(--text-primary)',lineHeight:1.3 }}>{s.label}</div>
+                    <div style={{ fontSize:10,color:'var(--text-muted)',marginTop:2,lineHeight:1.4 }}>{s.desc}</div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+          {selectedSections.size === 0 && (
+            <div style={{ marginTop:10,padding:'8px 12px',background:'#FEF9EC',border:'1px solid rgba(217,119,6,.3)',borderRadius:6,fontSize:11,color:'#92650a' }}>
+              ⚠ No sections selected — the proposal will only contain the cover page and disclaimer.
+            </div>
+          )}
         </div>
 
         {/* Portfolio selector */}

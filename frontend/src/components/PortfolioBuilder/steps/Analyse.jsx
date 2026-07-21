@@ -1371,9 +1371,9 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
         const domPct = domStyle && styleTotal > 0 ? (styleWts[domStyle] / styleTotal * 100) : 0;
 
         // Blended cap tier
-        const blendedLc = (() => { let v=0,w=0; funds.forEach(f=>{ const s=snapshots[f.isin]; if(s?.large_cap==null) return; v+=(s.large_cap)*(weights[f.isin]||0); w+=(weights[f.isin]||0); }); return w>0?v/w:0; })();
-        const blendedMc = (() => { let v=0,w=0; funds.forEach(f=>{ const s=snapshots[f.isin]; if(s?.mid_cap==null) return; v+=(s.mid_cap)*(weights[f.isin]||0); w+=(weights[f.isin]||0); }); return w>0?v/w:0; })();
-        const blendedSc = (() => { let v=0,w=0; funds.forEach(f=>{ const s=snapshots[f.isin]; if(s?.small_cap==null) return; v+=(s.small_cap)*(weights[f.isin]||0); w+=(weights[f.isin]||0); }); return w>0?v/w:0; })();
+        const blendedLc = (() => { let v=0,w=0; funds.forEach(f=>{ const s=snapshots[f.isin]; const lc=parseFloat(s?.large_cap); if(isNaN(lc)) return; v+=lc*(weights[f.isin]||0); w+=(weights[f.isin]||0); }); return w>0?v/w:0; })();
+        const blendedMc = (() => { let v=0,w=0; funds.forEach(f=>{ const s=snapshots[f.isin]; const mc=parseFloat(s?.mid_cap);   if(isNaN(mc)) return; v+=mc*(weights[f.isin]||0); w+=(weights[f.isin]||0); }); return w>0?v/w:0; })();
+        const blendedSc = (() => { let v=0,w=0; funds.forEach(f=>{ const s=snapshots[f.isin]; const sc=parseFloat(s?.small_cap); if(isNaN(sc)) return; v+=sc*(weights[f.isin]||0); w+=(weights[f.isin]||0); }); return w>0?v/w:0; })();
         const lcDrift = blendedLc - 60, mcDrift = blendedMc - 25, scDrift = blendedSc - 15;
 
         // Factor exposure blended
@@ -1533,6 +1533,8 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
             return {
               f,
               w: weights[f.isin] || 0,
+              r3m: d.rolling_3m_avg_1y != null ? d.rolling_3m_avg_1y : null,
+              r3mN: d.rolling_3m_window_count || 0,
               r1y: d.rolling_1y_avg_3y != null ? d.rolling_1y_avg_3y : null,
               r1yN: d.rolling_1y_window_count || 0,
               r3y: d.rolling_3y_cagr_avg_5y != null ? d.rolling_3y_cagr_avg_5y : null,
@@ -1550,15 +1552,17 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
             });
             return wTotal > 0 ? wSum / wTotal : null;
           }
+          const port3m = weightedAvg(r => r.r3m);
           const port1y = weightedAvg(r => r.r1y);
           const port3y = weightedAvg(r => r.r3y);
 
           const colorFor = (v) => v == null ? 'var(--text-muted)' : v >= 12 ? 'var(--pos)' : v >= 6 ? '#D97706' : 'var(--neg)';
+          const colorFor3m = (v) => v == null ? 'var(--text-muted)' : v >= 4 ? 'var(--pos)' : v >= 0 ? '#D97706' : 'var(--neg)';
 
           return (
             <div>
               <div style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-muted)' }}>
-                Computed from each fund's daily NAV history. <strong>1Y rolling return</strong> is the average of all overlapping 1-year (252 trading-day) return windows over the trailing 3 years (756 trading days). <strong>3Y rolling CAGR</strong> is the average of all overlapping 3-year (756 trading-day) CAGR windows over the trailing 5 years (1,260 trading days). Funds with less history than the lookback required show "—".
+                Computed from each fund's daily NAV history. <strong>3M rolling return</strong> is the average of all overlapping 3-month (63 trading-day) return windows over the trailing 1 year. <strong>1Y rolling return</strong> is the average of all overlapping 1-year (252 trading-day) return windows over the trailing 3 years. <strong>3Y rolling CAGR</strong> is the average of all overlapping 3-year CAGR windows over the trailing 5 years. Funds with less history than required show "—".
               </div>
               <div className="ptf-card">
                 <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Rolling return consistency by fund</div>
@@ -1568,6 +1572,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                       <tr>
                         <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>Fund</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>Weight</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>3M Rolling Return — Avg (1Y)</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>1Y Rolling Return — Avg (3Y)</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>3Y Rolling CAGR — Avg (5Y)</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>NAV History</th>
@@ -1581,6 +1586,9 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                             {row.f.name}
                           </td>
                           <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{f2(row.w)}%</td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: colorFor3m(row.r3m) }}>
+                            {row.r3m != null ? (row.r3m >= 0 ? '+' : '') + row.r3m.toFixed(1) + '%' : '—'}
+                          </td>
                           <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: colorFor(row.r1y) }}>
                             {row.r1y != null ? (row.r1y >= 0 ? '+' : '') + row.r1y.toFixed(1) + '%' : '—'}
                           </td>
@@ -1593,6 +1601,9 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                       <tr style={{ borderTop: '2px solid var(--border)', background: 'rgba(145,47,99,.06)' }}>
                         <td style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)', textAlign: 'left' }}>Blended portfolio</td>
                         <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{f2(rows.reduce((s, r) => s + r.w, 0))}%</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)' }}>
+                          {port3m != null ? (port3m >= 0 ? '+' : '') + port3m.toFixed(1) + '%' : '—'}
+                        </td>
                         <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)' }}>
                           {port1y != null ? (port1y >= 0 ? '+' : '') + port1y.toFixed(1) + '%' : '—'}
                         </td>

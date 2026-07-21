@@ -122,6 +122,7 @@ def get_rolling_metrics(isins: str):
 
     WINDOW_1Y, LOOKBACK_1Y = 252, 252 * 3   # 1Y rolling return, avg over last 3Y
     WINDOW_3Y, LOOKBACK_3Y = 252 * 3, 252 * 5  # 3Y rolling CAGR, avg over last 5Y
+    WINDOW_3M, LOOKBACK_3M = 63, 252           # 3M rolling return, avg over last 1Y
 
     def rolling_avg(navs, window, lookback):
         """navs: oldest→newest nav floats. Returns (avg_pct, window_count, is_cagr_len)."""
@@ -163,12 +164,15 @@ def get_rolling_metrics(isins: str):
             n = len(navs)
             r1y_avg, r1y_n = rolling_avg(navs, WINDOW_1Y, LOOKBACK_1Y)
             r3y_avg, r3y_n = rolling_avg(navs, WINDOW_3Y, LOOKBACK_3Y)
+            r3m_avg, r3m_n = rolling_avg(navs, WINDOW_3M, LOOKBACK_3M)
             results[isin] = {
                 "isin": isin,
                 "rolling_1y_avg_3y": r1y_avg,
                 "rolling_1y_window_count": r1y_n,
                 "rolling_3y_cagr_avg_5y": r3y_avg,
                 "rolling_3y_window_count": r3y_n,
+                "rolling_3m_avg_1y": r3m_avg,
+                "rolling_3m_window_count": r3m_n,
                 "days_available": n,
                 "years_available": round(n / 252, 1) if n else 0,
             }
