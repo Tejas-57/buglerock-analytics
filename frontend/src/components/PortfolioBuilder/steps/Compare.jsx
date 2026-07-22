@@ -51,6 +51,28 @@ function blendFromSnaps(funds, wtMap, snapshots) {
   };
 }
 
+function blendAssetClass(funds, weights, snapshots) {
+  let equity=0, debt=0, cash=0, commodity=0, other=0, totalW=0;
+  funds.forEach(f => {
+    const w = weights[f.isin] || 0; if (!w) return;
+    const s = snapshots[f.isin] || {};
+    const ac = (s.asset_class || f.asset_class || '').toLowerCase();
+    const isPM = ac === 'precious metals';
+    const isDebt = ac === 'debt' || ac === 'bond';
+    const isHybrid = ac === 'hybrid' || ac === 'allocation' || ac === 'multi-asset';
+    const eqPct=parseFloat(s.equity_pct)||0, bdPct=parseFloat(s.bond_pct)||0;
+    const cashPct=parseFloat(s.cash_pct)||0, otherPct=parseFloat(s.other_pct)||0;
+    const tot = eqPct+bdPct+cashPct+otherPct||100;
+    if (isPM) { commodity += w; }
+    else if (isDebt) { debt += (bdPct/tot*100)*w/100; cash += (cashPct/tot*100)*w/100; debt += (1-(bdPct+cashPct+otherPct)/tot)*w; }
+    else if (isHybrid) { equity += (eqPct/tot*100)*w/100; debt += (bdPct/tot*100)*w/100; cash += (cashPct/tot*100)*w/100; other += (otherPct/tot*100)*w/100; }
+    else { equity += (eqPct>0?eqPct/tot*100:100)*w/100; debt += (bdPct/tot*100)*w/100; cash += (cashPct/tot*100)*w/100; other += (otherPct/tot*100)*w/100; }
+    totalW += w;
+  });
+  if (!totalW) return { equity:0, debt:0, cash:0, commodity:0, other:0 };
+  return { equity:equity/totalW*100, debt:debt/totalW*100, cash:cash/totalW*100, commodity:commodity/totalW*100, other:other/totalW*100 };
+}
+
 function delta(nv, ov, lowerBetter) {
   if (nv == null || ov == null) return <span style={{ color: 'var(--text-muted)' }}>—</span>;
   const d = nv - ov;
@@ -94,6 +116,8 @@ export default function Compare({ funds, weights, originalWeights, snapshots={},
   // Always compute original portfolio metrics
   const OB = blendFromSnaps(funds, hasOpt ? originalWeights : weights, snapshots);
   const NB = hasOpt ? blendFromSnaps(funds, weights, snapshots) : OB;
+  const OAC = blendAssetClass(funds, hasOpt ? originalWeights : weights, snapshots);
+  const NAC = hasOpt ? blendAssetClass(funds, weights, snapshots) : OAC;
 
   const kpiCards = [
     { l: '1Y Return',   o: fp2(OB.ret1y),  n: fp2(NB.ret1y),  dv: deltaPct(NB.ret1y, OB.ret1y, false) },
@@ -122,9 +146,10 @@ export default function Compare({ funds, weights, originalWeights, snapshots={},
     { l: 'Std dev (3Y)', o: OB.std3y != null ? f2(OB.std3y)+'%' : '—', n: NB.std3y != null ? f2(NB.std3y)+'%' : '—', dv: delta(NB.std3y, OB.std3y, true) },
     { l: 'Blended ER',   o: OB.er != null ? f2(OB.er)+'%' : '—', n: NB.er != null ? f2(NB.er)+'%' : '—', dv: delta(NB.er, OB.er, true) },
     { section: 'Exposure' },
-    { l: 'Equity',     o: OB.eq != null ? f2(OB.eq)+'%' : '—',   n: NB.eq != null ? f2(NB.eq)+'%' : '—',   dv: delta(NB.eq, OB.eq, false) },
-    { l: 'Debt',       o: OB.debt != null ? f2(OB.debt)+'%' : '—', n: NB.debt != null ? f2(NB.debt)+'%' : '—', dv: delta(NB.debt, OB.debt, false) },
-    { l: 'Cash',       o: OB.cash != null ? f2(OB.cash)+'%' : '—', n: NB.cash != null ? f2(NB.cash)+'%' : '—', dv: delta(NB.cash, OB.cash, false) },
+    { l: 'Equity',     o: OAC.equity != null ? f2(OAC.equity)+'%' : '—',       n: NAC.equity != null ? f2(NAC.equity)+'%' : '—',       dv: delta(NAC.equity, OAC.equity, false) },
+    { l: 'Debt',       o: OAC.debt != null ? f2(OAC.debt)+'%' : '—',           n: NAC.debt != null ? f2(NAC.debt)+'%' : '—',           dv: delta(NAC.debt, OAC.debt, false) },
+    { l: 'Cash',       o: OAC.cash != null ? f2(OAC.cash)+'%' : '—',           n: NAC.cash != null ? f2(NAC.cash)+'%' : '—',           dv: delta(NAC.cash, OAC.cash, false) },
+    { l: 'Commodities',o: OAC.commodity > 0.5 ? f2(OAC.commodity)+'%' : '—',  n: NAC.commodity > 0.5 ? f2(NAC.commodity)+'%' : '—',  dv: delta(NAC.commodity, OAC.commodity, false) },
     { l: 'Large cap',  o: OB.lc != null ? f2(OB.lc)+'%' : '—',   n: NB.lc != null ? f2(NB.lc)+'%' : '—',   dv: delta(NB.lc, OB.lc, false) },
     { l: 'Mid cap',    o: OB.mc != null ? f2(OB.mc)+'%' : '—',   n: NB.mc != null ? f2(NB.mc)+'%' : '—',   dv: delta(NB.mc, OB.mc, false) },
     { l: 'Small cap',  o: OB.sc != null ? f2(OB.sc)+'%' : '—',   n: NB.sc != null ? f2(NB.sc)+'%' : '—',   dv: delta(NB.sc, OB.sc, false) },

@@ -6,17 +6,19 @@ from services.db_service import (
     has_data_for_date, get_latest_data_date
 )
 from services.gmail_watcher import fetch_and_store, fetch_latest, get_gmail_service, GMAIL_SENDER, SUBJECT_KEYWORD
-from utils.trading_calendar import resolve_user_date
 
 router = APIRouter()
 
 
 def resolve_date(date_str: str = None) -> date_type:
+    # Always use latest data date — ignore user-supplied date if no data exists for it
+    latest = get_latest_data_date()
     if date_str:
         d = date_type.fromisoformat(date_str)
-    else:
-        d = date_type.today()
-    return resolve_user_date(d, check_db=True)
+        from services.db_service import has_data_for_date
+        if has_data_for_date(d):
+            return d
+    return latest if latest else date_type.today()
 
 
 def ensure_todays_data(d=None):

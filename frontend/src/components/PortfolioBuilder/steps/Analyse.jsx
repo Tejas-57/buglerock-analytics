@@ -67,6 +67,62 @@ function blendFromSnaps(funds, weights, snapshots) {
 }
 function blend(funds, weights, keys) { return {}; } // legacy stub
 
+/**
+ * blendAssetClass — computes asset class exposure by fund asset_class field.
+ * Gold/silver ETFs (Precious Metals) are separated from Equity.
+ * Hybrid funds are split by their equity_pct/bond_pct breakdown.
+ * Returns: { equity, debt, cash, commodity, other } — all as portfolio-level % (0-100).
+ */
+function blendAssetClass(funds, weights, snapshots) {
+  let equity=0, debt=0, cash=0, commodity=0, other=0, totalW=0;
+  funds.forEach(f => {
+    const w = weights[f.isin] || 0;
+    if (!w) return;
+    const s = snapshots[f.isin] || {};
+    const ac = (s.asset_class || f.asset_class || '').toLowerCase();
+    const isPM = ac === 'precious metals';
+    const isDebt = ac === 'debt' || ac === 'bond';
+    const isHybrid = ac === 'hybrid' || ac === 'allocation' || ac === 'multi-asset';
+
+    const eqPct   = parseFloat(s.equity_pct)  || 0;
+    const bdPct   = parseFloat(s.bond_pct)    || 0;
+    const cashPct = parseFloat(s.cash_pct)    || 0;
+    const otherPct= parseFloat(s.other_pct)   || 0;
+    const tot = eqPct + bdPct + cashPct + otherPct || 100;
+
+    if (isPM) {
+      commodity += w;
+    } else if (isDebt) {
+      debt   += (bdPct/tot*100) * w / 100;
+      cash   += (cashPct/tot*100) * w / 100;
+      other  += (otherPct/tot*100) * w / 100;
+      // remaining as debt
+      const rem = 1 - (bdPct+cashPct+otherPct)/tot;
+      debt += rem * w;
+    } else if (isHybrid) {
+      equity += (eqPct/tot*100) * w / 100;
+      debt   += (bdPct/tot*100) * w / 100;
+      cash   += (cashPct/tot*100) * w / 100;
+      other  += (otherPct/tot*100) * w / 100;
+    } else {
+      // Pure equity — use equity_pct if available, else 100% equity
+      equity += (eqPct > 0 ? eqPct/tot*100 : 100) * w / 100;
+      debt   += (bdPct/tot*100) * w / 100;
+      cash   += (cashPct/tot*100) * w / 100;
+      other  += (otherPct/tot*100) * w / 100;
+    }
+    totalW += w;
+  });
+  if (!totalW) return { equity:0, debt:0, cash:0, commodity:0, other:0 };
+  return {
+    equity:    equity    / totalW * 100,
+    debt:      debt      / totalW * 100,
+    cash:      cash      / totalW * 100,
+    commodity: commodity / totalW * 100,
+    other:     other     / totalW * 100,
+  };
+}
+
 
 const CY_KEYS = ['cy2021','cy2022','cy2023','cy2024','cy2025'];
 const CY_LBL  = ['2021','2022','2023','2024','2025'];
@@ -300,6 +356,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
     rets: { r1m: null, r3m: null, r6m: null, r1y: null, r3y: null, r5y: null, ytd: null, cy25: null, cy24: null, cy23: null, cy22: null, cy21: null }
   };
   const B = blendFromSnaps(funds, weights, snapshots);
+  const AC = blendAssetClass(funds, weights, snapshots);
   const total = funds.reduce((s, f) => s + (weights[f.isin] || 0), 0);
 
   const investAmt = ips?.amount ? parseFloat(ips.amount.replace(/[^0-9.]/g, '')) : 1000000;
@@ -581,17 +638,35 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                 </div>
               </div>
               <div className="ptf-card">
-                <div className="ptf-card-hd">Market cap & asset mix</div>
+                <div className="ptf-card-hd">Asset class exposure</div>
+                <div style={{ padding: '12px 14px' }}>
+                  {[
+                    [AC.equity,    'Equity',       'var(--brand-primary)'],
+                    [AC.debt,      'Bonds/Debt',   'var(--lav-grey,#A795AE)'],
+                    [AC.cash,      'Cash/Liquid',  'var(--text-muted)'],
+                    [AC.commodity, 'Commodities',  '#D97706'],
+                    [AC.other,     'REITs/Other',        '#6D5479'],
+                  ].filter(r => (r[0] || 0) > 0.5).map(([v, lbl, clr], i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', width: 80, textAlign: 'right', flexShrink: 0 }}>{lbl}</div>
+                      <div style={{ flex: 1, height: 7, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{ width: Math.min(v || 0, 100).toFixed(1) + '%', height: '100%', background: clr, borderRadius: 4 }} />
+                      </div>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: clr, minWidth: 36, textAlign: 'right' }}>{(v || 0).toFixed(1)}%</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="ptf-card">
+                <div className="ptf-card-hd">Market cap mix</div>
                 <div style={{ padding: '12px 14px' }}>
                   {[
                     [B.large_cap, 'Large cap', 'var(--brand-primary)'],
-                    [B.mid_cap, 'Mid cap', 'var(--muted-pur,#6D5479)'],
+                    [B.mid_cap,   'Mid cap',   'var(--muted-pur,#6D5479)'],
                     [B.small_cap, 'Small cap', '#C46985'],
-                    [B.bond_pct, 'Bonds/Debt', 'var(--lav-grey,#A795AE)'],
-                    [B.cash_pct, 'Cash/Liquid', 'var(--text-muted)'],
                   ].filter(r => (r[0] || 0) > 0.1).map(([v, lbl, clr], i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', width: 68, textAlign: 'right', flexShrink: 0 }}>{lbl}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', width: 80, textAlign: 'right', flexShrink: 0 }}>{lbl}</div>
                       <div style={{ flex: 1, height: 7, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
                         <div style={{ width: Math.min(v || 0, 100).toFixed(1) + '%', height: '100%', background: clr, borderRadius: 4 }} />
                       </div>
@@ -922,9 +997,11 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <div className="ptf-card" style={{ padding: '14px 16px' }}>
                   <div className="ptf-card-hd">{ips?.alloc ? 'Asset allocation vs IPS targets' : 'Asset allocation'}</div>
-                  <AllocRow label="Equity" value={B.equity_pct} color="#912F63" target={ips?.alloc ? [+(ips.alloc.eqMin||0), +(ips.alloc.eqMax||100)] : null} />
-                  <AllocRow label="Bonds / Debt" value={B.bond_pct||0} color="#3E3452" target={ips?.alloc ? [+(ips.alloc.debtMin||0), +(ips.alloc.debtMax||100)] : null} />
-                  <AllocRow label="Cash / Liquid" value={B.cash_pct||0} color="#A795AE" />
+                  <AllocRow label="Equity"       value={AC.equity}    color="#912F63" target={ips?.alloc ? [+(ips.alloc.eqMin||0), +(ips.alloc.eqMax||100)] : null} />
+                  <AllocRow label="Bonds / Debt" value={AC.debt}      color="#3E3452" target={ips?.alloc ? [+(ips.alloc.debtMin||0), +(ips.alloc.debtMax||100)] : null} />
+                  <AllocRow label="Cash / Liquid" value={AC.cash}     color="#A795AE" />
+                  {AC.commodity > 0.5 && <AllocRow label="Commodities" value={AC.commodity} color="#D97706" />}
+                  {AC.other     > 0.5 && <AllocRow label="REITs/Other"       value={AC.other}     color="#6D5479" />}
                 </div>
                 <div className="ptf-card" style={{ padding: '14px 16px' }}>
                   <div className="ptf-card-hd">{ips?.alloc ? 'Market cap split vs IPS targets' : 'Market cap split'}</div>

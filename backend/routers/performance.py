@@ -4,14 +4,17 @@ from datetime import date as date_type
 from services.db_service import get_fund_snapshot, get_benchmark_for_category, get_peer_avg
 from services.mfapi import fetch_nav_history, build_chart_data
 from services.gmail_watcher import fetch_and_store
-from utils.trading_calendar import resolve_user_date
 
 router = APIRouter()
 
 
 def _resolve(date_str):
-    d = date_type.fromisoformat(date_str) if date_str else date_type.today()
-    return resolve_user_date(d)
+    from services.db_service import get_latest_data_date, has_data_for_date
+    if date_str:
+        d = date_type.fromisoformat(date_str)
+        if has_data_for_date(d):
+            return d
+    return get_latest_data_date() or date_type.today()
 
 
 @router.get("/metrics")
@@ -65,7 +68,7 @@ async def nav_chart(
     data_source    = None
 
     if asset_class in BENCHMARK_ENABLED_ASSET_CLASSES and category:
-        d = resolve_user_date(
+        d = (
             date_type.fromisoformat(date) if date else date_type.today()
         )
         bm = get_benchmark_for_category(category, d)

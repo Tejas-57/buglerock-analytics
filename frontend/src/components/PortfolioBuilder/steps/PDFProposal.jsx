@@ -58,6 +58,28 @@ function blendPtf(funds, wtMap, snapshots) {
   };
 }
 
+function blendAssetClass(funds, wtMap, snapshots) {
+  let equity=0,debt=0,cash=0,commodity=0,other=0,totalW=0;
+  funds.forEach(f=>{
+    const w=wtMap[f.isin]||0; if(!w) return;
+    const s=snapshots[f.isin]||{};
+    const ac=(s.asset_class||f.asset_class||'').toLowerCase();
+    const isPM=ac==='precious metals';
+    const isDebt=ac==='debt'||ac==='bond';
+    const isHybrid=ac==='hybrid'||ac==='allocation'||ac==='multi-asset';
+    const eqPct=parseFloat(s.equity_pct)||0,bdPct=parseFloat(s.bond_pct)||0;
+    const cashPct=parseFloat(s.cash_pct)||0,otherPct=parseFloat(s.other_pct)||0;
+    const tot=eqPct+bdPct+cashPct+otherPct||100;
+    if(isPM){commodity+=w;}
+    else if(isDebt){debt+=(bdPct/tot*100)*w/100;cash+=(cashPct/tot*100)*w/100;debt+=(1-(bdPct+cashPct+otherPct)/tot)*w;}
+    else if(isHybrid){equity+=(eqPct/tot*100)*w/100;debt+=(bdPct/tot*100)*w/100;cash+=(cashPct/tot*100)*w/100;other+=(otherPct/tot*100)*w/100;}
+    else{equity+=(eqPct>0?eqPct/tot*100:100)*w/100;debt+=(bdPct/tot*100)*w/100;cash+=(cashPct/tot*100)*w/100;other+=(otherPct/tot*100)*w/100;}
+    totalW+=w;
+  });
+  if(!totalW) return {equity:0,debt:0,cash:0,commodity:0,other:0};
+  return{equity:equity/totalW*100,debt:debt/totalW*100,cash:cash/totalW*100,commodity:commodity/totalW*100,other:other/totalW*100};
+}
+
 function fmtL(v) {
   if (v == null || isNaN(v)) return '—';
   const abs = Math.abs(v);
@@ -314,6 +336,7 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
     const TOT      = allFunds.reduce((s,f) => s+(activeWeights[f.isin]||0), 0) || 100;
     const SF       = allFunds.slice().sort((a,b) => (activeWeights[b.isin]||0)-(activeWeights[a.isin]||0));
     SF.forEach(f => { f._w = activeWeights[f.isin]||0; f._wPct = f._w/TOT*100; });
+    const AC = blendAssetClass(allFunds, activeWeights, snapshots);
 
     const INVESTL  = investAmt/100000;
     const TYR      = tenureYrs;
@@ -378,42 +401,61 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
     const TD = (v,c,b) => `<td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-size:11px;${b?'font-weight:700;':''}${c?'color:'+c+';':''}">${v}</td>`;
     const TDL = (v,b,sub) => `<td style="padding:7px 12px;border-bottom:1px solid ${GR20};font-family:'DM Sans',sans-serif;font-size:12px;${b?'font-weight:600;':''}">${v}${sub?`<div style="font-size:9px;color:${GR60}">${sub}</div>`:''}</td>`;
 
-    /* ── SVG: Donut chart ─────────────────────────────────────── */
-    const donutSvg = (() => {
-      const r=60,cx=75,cy=75,tau=2*Math.PI;
-      let start=-Math.PI/2;
-      let svg = `<svg viewBox="0 0 240 150" width="240" height="150" style="display:block">`;
-      SF.forEach(f => {
-        const angle=tau*f._wPct/100;
-        const x1=cx+r*Math.cos(start),y1=cy+r*Math.sin(start);
-        const end=start+angle;
-        const x2=cx+r*Math.cos(end),y2=cy+r*Math.sin(end);
-        svg+=`<path d="M${cx},${cy} L${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 ${angle>Math.PI?1:0},1 ${x2.toFixed(1)},${y2.toFixed(1)} Z" fill="${f.color}"/>`;
-        start=end;
+    /* ── Fund allocation table (replaces donut) ────────────────── */
+    const fundListHtml = `<table style="width:100%;border-collapse:collapse">
+      <thead><tr>
+        <th style="padding:7px 12px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Fund</th>
+        <th style="padding:7px 12px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Category</th>
+        <th style="padding:7px 12px;text-align:right;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Weight</th>
+        <th style="padding:7px 12px;text-align:right;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Amount</th>
+      </tr></thead>
+      <tbody>${SF.map((f,i)=>`<tr style="background:${i%2===0?'#fff':GR10}">
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20}">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="width:4px;height:28px;border-radius:2px;background:${f.color};flex-shrink:0"></div>
+            <div style="font-size:11px;font-weight:600;color:${GR80}">${f.name}</div>
+          </div>
+        </td>
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};font-size:10px;color:${GR60}">${(snapshots[f.isin]?.category||f.category||'').replace(/^(India Fund|India OE|Cat:)\s*/i,'')}</td>
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-weight:700;font-size:12px;color:${PLUM}">${f._wPct.toFixed(1)}%</td>
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-size:11px;color:${GR80}">${fmtL(f._wPct/100*investAmt)}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+
+    /* ── SVG: Asset class bars ──────────────────────────────────── */
+    const assetData = [
+      [AC.equity,    'Equity',       BERRY],
+      [AC.debt,      'Bonds/Debt',   LAV],
+      [AC.cash,      'Cash/Liquid',  GR60],
+      [AC.commodity, 'Commodities',  WARN],
+      [AC.other,     'REITs/Other',        MUT],
+    ].filter(r => (r[0]||0) > 0.5);
+    const assetSvg = (() => {
+      const W=240, h=20;
+      let svg=`<svg viewBox="0 0 ${W} ${assetData.length*32+10}" width="${W}" style="display:block">`;
+      assetData.forEach((r,i) => {
+        const bw=Math.max(2,(r[0]||0)/100*150), y=i*32+4;
+        svg+=`<text x="0" y="${y+14}" font-size="11" fill="${GR80}" font-family="DM Sans,sans-serif">${r[1]}</text>`;
+        svg+=`<rect x="90" y="${y}" width="${bw.toFixed(1)}" height="${h}" fill="${r[2]}" rx="3"/>`;
+        svg+=`<text x="${(95+bw).toFixed(1)}" y="${y+14}" font-size="11" font-weight="700" fill="${r[2]}" font-family="DM Mono,monospace">${nb(r[0],1)}%</text>`;
       });
-      svg+=`<circle cx="${cx}" cy="${cy}" r="36" fill="#fff"/>`;
-      svg+=`<text x="${cx}" y="${cy-4}" text-anchor="middle" font-size="9" fill="${GR60}" font-family="DM Sans,sans-serif">Funds</text>`;
-      svg+=`<text x="${cx}" y="${cy+10}" text-anchor="middle" font-size="16" font-weight="700" fill="${PLUM}" font-family="DM Mono,monospace">${SF.length}</text>`;
-      let ly=12;
-      SF.slice(0,7).forEach(f => {
-        svg+=`<circle cx="152" cy="${ly}" r="5" fill="${f.color}"/>`;
-        svg+=`<text x="162" y="${ly+4}" font-size="9.5" fill="${GR80}" font-family="DM Sans,sans-serif">${f.name.split(' ').slice(0,3).join(' ')}</text>`;
-        svg+=`<text x="234" y="${ly+4}" text-anchor="end" font-size="9.5" font-weight="700" fill="${PLUM}" font-family="DM Mono,monospace">${f._wPct.toFixed(0)}%</text>`;
-        ly+=18;
-      });
-      if(SF.length>7) svg+=`<text x="162" y="${ly+4}" font-size="9" fill="${GR60}" font-family="DM Sans,sans-serif">+${SF.length-7} more funds</text>`;
       return svg+'</svg>';
     })();
 
-    /* ── SVG: Cap bars ──────────────────────────────────────────── */
-    const capData = [[B.lc,'Large cap',BERRY],[B.mc,'Mid cap',MUT],[B.sc,'Small cap',SPINK],[B.bond_pct,'Bonds/Debt',LAV],[B.cash_pct,'Cash/Liquid',GR60]].filter(r => (r[0]||0)>0.5);
+    /* ── SVG: Market cap bars ───────────────────────────────────── */
+    const capData = [
+      [B.lc,'Large cap',BERRY],
+      [B.mc,'Mid cap',MUT],
+      [B.sc,'Small cap',SPINK],
+    ].filter(r => (r[0]||0) > 0.5);
     const capSvg = (() => {
-      let svg=`<svg viewBox="0 0 280 ${capData.length*28+10}" width="280" style="display:block">`;
+      const W=240, h=20;
+      let svg=`<svg viewBox="0 0 ${W} ${capData.length*32+10}" width="${W}" style="display:block">`;
       capData.forEach((r,i) => {
-        const bw=Math.max(2,(r[0]||0)/100*180), y=i*28+4;
-        svg+=`<text x="0" y="${y+12}" font-size="10.5" fill="${GR80}" font-family="DM Sans,sans-serif">${r[1]}</text>`;
-        svg+=`<rect x="82" y="${y}" width="${bw.toFixed(1)}" height="16" fill="${r[2]}" rx="3"/>`;
-        svg+=`<text x="${(85+bw).toFixed(1)}" y="${y+12}" font-size="10.5" font-weight="700" fill="${r[2]}" font-family="DM Mono,monospace">${nb(r[0],1)}%</text>`;
+        const bw=Math.max(2,(r[0]||0)/100*150), y=i*32+4;
+        svg+=`<text x="0" y="${y+14}" font-size="11" fill="${GR80}" font-family="DM Sans,sans-serif">${r[1]}</text>`;
+        svg+=`<rect x="90" y="${y}" width="${bw.toFixed(1)}" height="${h}" fill="${r[2]}" rx="3"/>`;
+        svg+=`<text x="${(95+bw).toFixed(1)}" y="${y+14}" font-size="11" font-weight="700" fill="${r[2]}" font-family="DM Mono,monospace">${nb(r[0],1)}%</text>`;
       });
       return svg+'</svg>';
     })();
@@ -657,9 +699,83 @@ ${sec("overview") ? `<!-- ═══ PAGE 3: PORTFOLIO OVERVIEW ═══ -->
       ${kpiCell(nb(B.std3y)+'%','Std deviation (3Y)','Annualised vol',rcL(B.std3y,14,20))}
     </div>
   </div>
+  ${(()=>{
+    // First page: show first 6 funds if >9 total, else all
+    const firstBatch = SF.length > 9 ? SF.slice(0, 6) : SF;
+    const fundListFirst = `<table style="width:100%;border-collapse:collapse">
+      <thead><tr>
+        <th style="padding:7px 12px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Fund</th>
+        <th style="padding:7px 12px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Category</th>
+        <th style="padding:7px 12px;text-align:right;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Weight</th>
+        <th style="padding:7px 12px;text-align:right;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Amount</th>
+      </tr></thead>
+      <tbody>${firstBatch.map((f,i)=>`<tr style="background:${i%2===0?'#fff':GR10}">
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20}">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="width:4px;height:28px;border-radius:2px;background:${f.color};flex-shrink:0"></div>
+            <div style="font-size:11px;font-weight:600;color:${GR80}">${f.name}</div>
+          </div>
+        </td>
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};font-size:10px;color:${GR60}">${(snapshots[f.isin]?.category||f.category||'').replace(/^(India Fund|India OE|India ETF|Cat:)\s*/i,'')}</td>
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-weight:700;font-size:12px;color:${PLUM}">${f._wPct.toFixed(1)}%</td>
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-size:11px;color:${GR80}">${fmtL(f._wPct/100*investAmt)}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+    return `<div style="margin-bottom:16px">${tblBox('Fund allocation' + (SF.length > 9 ? ` — funds 1–6 of ${SF.length}` : ''), fundListFirst)}</div>`;
+  })()}
+  ${SF.length <= 9 ? `
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-    ${tblBox('Fund allocation','<div style="padding:14px 18px;display:flex;align-items:center;gap:16px">'+donutSvg+'</div>')}
-    ${tblBox('Market cap &amp; asset mix','<div style="padding:14px 20px">'+capSvg+'</div>')}
+    ${tblBox('Asset class exposure','<div style="padding:14px 20px">'+assetSvg+'</div>')}
+    ${tblBox('Market cap mix','<div style="padding:14px 20px">'+capSvg+'</div>')}
+  </div>
+  ${(()=>{
+    const scorecardRows=[
+      ['Return quality',    B.alpha,  [2,0],   false, ['Outperforming','Neutral','Lagging'],    'Alpha of '+pc(B.alpha)+' vs '+bmDisplayName+'. '+((B.alpha||0)>=2?'Fund managers are consistently adding value above market exposure.':(B.alpha||0)>=0?'Positive but modest — watch for persistence over next reporting periods.':'Negative alpha after fees questions the value of active management in the current mix.')],
+      ['Risk efficiency',   B.sharpe, [0.7,0.4],false,['Strong','Adequate','Weak'],             'Sharpe '+nb(B.sharpe)+'. '+((B.sharpe||0)>=0.7?'Excellent — portfolio delivers strong returns relative to the risk taken.':(B.sharpe||0)>=0.4?'Adequate risk-adjusted returns — there is room to improve by replacing low-Sharpe holdings.':'Below acceptable threshold — the portfolio is taking on more risk than its returns justify.')],
+      ['Downside shield',   B.dncap,  [90,100], true,  ['Protected','On par','Exposed'],        'Down capture '+nb(B.dncap)+'%. '+((B.dncap||100)<=90?'In falling markets, portfolio loses less than the benchmark — strong capital protection.':(B.dncap||100)<=100?'Portfolio falls broadly in line with the market in corrections.':'Portfolio amplifies drawdowns — consider adding defensive or low-beta funds.')],
+      ['Cost efficiency',   B.er,     [1.0,1.5],true,  ['Low cost','Reasonable','Review costs'],'Blended ER '+nb(B.er)+'%. '+((B.er||0)<=1.0?'Highly cost-efficient construction. Maximum net return accrues to the client.':(B.er||0)<=1.5?'Reasonable expense ratio for active management.':'Above-average cost drag — switching to Direct plans could significantly improve net returns.')],
+    ];
+    const rows=scorecardRows.map(([m,v,thrs,lb,labs,interp])=>{
+      const ok=lb?(v||0)<=thrs[0]:(v||0)>=thrs[0];
+      const warn2=lb?((v||0)<=thrs[1]&&(v||0)>thrs[0]):(v||0)>=thrs[1]&&(v||0)<thrs[0];
+      const c=v==null?GR60:ok?POS:warn2?WARN:NEG;
+      const bg=ok?'#E6F4ED':warn2?'#FEF9EC':'#FEE2E2';
+      const lbl=ok?labs[0]:warn2?labs[1]:labs[2];
+      return `<tr>${TDL(m,'1')}${TD(v!=null?(lb?nb(v)+'%':pc(v)):'—',c,'1')}
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right"><span style="font-size:9px;font-weight:700;padding:2px 9px;border-radius:20px;background:${bg};color:${c}">${lbl}</span></td>
+        <td style="padding:7px 13px;border-bottom:1px solid ${GR20};font-size:11px;color:${GR60};line-height:1.55;max-width:360px">${interp}</td></tr>`;
+    }).join('');
+    return tblBox('Portfolio health scorecard',`<table><thead><tr>${TH('Dimension','left')}${TH('Value')}${TH('Rating')}${TH('Interpretation','left')}</tr></thead><tbody>${rows}</tbody></table>`);
+  })()} ` : ''}
+</section>
+
+${SF.length > 9 ? `<!-- ═══ PAGE 3b: PORTFOLIO OVERVIEW CONTINUED ═══ -->
+<section class="pg">
+  ${sectionHd('02b','Portfolio overview — continued',`Funds ${7}–${SF.length}, asset class exposure and health scorecard.`)}
+  <div style="margin-bottom:16px">
+    ${tblBox(`Fund allocation — funds 7–${SF.length} of ${SF.length}`, `<table style="width:100%;border-collapse:collapse">
+      <thead><tr>
+        <th style="padding:7px 12px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Fund</th>
+        <th style="padding:7px 12px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Category</th>
+        <th style="padding:7px 12px;text-align:right;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Weight</th>
+        <th style="padding:7px 12px;text-align:right;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Amount</th>
+      </tr></thead>
+      <tbody>${SF.slice(6).map((f,i)=>`<tr style="background:${i%2===0?'#fff':GR10}">
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20}">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="width:4px;height:28px;border-radius:2px;background:${f.color};flex-shrink:0"></div>
+            <div style="font-size:11px;font-weight:600;color:${GR80}">${f.name}</div>
+          </div>
+        </td>
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};font-size:10px;color:${GR60}">${(snapshots[f.isin]?.category||f.category||'').replace(/^(India Fund|India OE|India ETF|Cat:)\s*/i,'')}</td>
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-weight:700;font-size:12px;color:${PLUM}">${f._wPct.toFixed(1)}%</td>
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-size:11px;color:${GR80}">${fmtL(f._wPct/100*investAmt)}</td>
+      </tr>`).join('')}</tbody>
+    </table>`)}
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    ${tblBox('Asset class exposure','<div style="padding:14px 20px">'+assetSvg+'</div>')}
+    ${tblBox('Market cap mix','<div style="padding:14px 20px">'+capSvg+'</div>')}
   </div>
   ${(()=>{
     const scorecardRows=[
@@ -680,7 +796,7 @@ ${sec("overview") ? `<!-- ═══ PAGE 3: PORTFOLIO OVERVIEW ═══ -->
     }).join('');
     return tblBox('Portfolio health scorecard',`<table><thead><tr>${TH('Dimension','left')}${TH('Value')}${TH('Rating')}${TH('Interpretation','left')}</tr></thead><tbody>${rows}</tbody></table>`);
   })()}
-</section>
+</section>` : ''}
 
 ` : ""}
 ${sec("performance") ? `<!-- ═══ PAGE 4: PERFORMANCE ═══ -->
@@ -911,7 +1027,8 @@ ${sec("exposure") ? `<!-- ═══ PAGE 7: EXPOSURE & STYLE ═══ -->
 <section class="pg">
   ${sectionHd('06','Portfolio exposure &amp; style','Market cap, asset class, valuation and growth/value characteristics.')}
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">
-    ${tblBox('Market cap allocation','<div style="padding:14px 18px">'+capSvg+'</div>')}
+    ${tblBox('Asset class exposure','<div style="padding:14px 18px">'+assetSvg+'</div>')}
+    ${tblBox('Market cap mix','<div style="padding:14px 18px">'+capSvg+'</div>')}
     ${tblBox('Valuation &amp; cost metrics',
       `<table><tbody>
         ${[[nb(B.std3y)+'%','Std deviation (3Y)','Annualised vol',rcL(B.std3y,14,20)],
@@ -1109,10 +1226,10 @@ ${sec("annexure") ? `<!-- ═══ ANNEXURE: FUND SNAPSHOTS ═══ -->
 
         {/* Action buttons */}
         <div style={{ display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap' }}>
-          <button className="btn btn-ghost" onClick={onEditPortfolio} style={{ fontSize:12 }}>← Edit portfolio</button>
-          <button className="btn btn-ghost" onClick={onCompare} style={{ fontSize:12 }}>Compare portfolios</button>
+          <button className="btn btn-ghost" onClick={onEditPortfolio} style={{ fontSize:12, padding:'8px 18px', borderRadius:20 }}>← Edit portfolio</button>
+          <button className="btn btn-ghost" onClick={onCompare} style={{ fontSize:12, padding:'8px 18px', borderRadius:20 }}>Compare portfolios</button>
           <button className="btn btn-primary" onClick={generatePDF} disabled={generating} style={{ fontSize:13,padding:'11px 28px',borderRadius:20,letterSpacing:'normal',textTransform:'none',opacity:generating?0.7:1 }}>{generating ? '⏳ Generating…' : '⬇ Download PDF'}</button>
-          <button onClick={generatePPT} style={{ fontSize:13,padding:'11px 28px',borderRadius:20,background:'var(--brand-dark)',color:'#fff',border:'none',fontFamily:'var(--font-body)',fontWeight:600,cursor:'pointer' }}>⬇ Download PPT</button>
+          <button onClick={generatePPT} style={{ display:'none', fontSize:13,padding:'11px 28px',borderRadius:20,background:'var(--brand-dark)',color:'#fff',border:'none',fontFamily:'var(--font-body)',fontWeight:600,cursor:'pointer' }}>⬇ Download PPT</button>
         </div>
         <div style={{ textAlign:'center',marginTop:10,fontSize:11,color:'var(--text-muted)' }}>PDF opens in a new tab — use browser print to save as PDF.</div>
 

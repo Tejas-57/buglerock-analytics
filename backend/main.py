@@ -152,6 +152,19 @@ async def startup():
     await check_parser_version()
     from services.morningstar_service import seed_accesscode_from_env
     seed_accesscode_from_env()
+    # Force-fetch today's email on startup so localhost is always up to date
+    async def startup_fetch():
+        try:
+            from services.gmail_watcher import fetch_latest
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, lambda: fetch_latest(check_days=3, force=False))
+            if result:
+                logger.info("Startup fetch: new data loaded")
+            else:
+                logger.info("Startup fetch: already up to date")
+        except Exception as e:
+            logger.warning(f"Startup fetch failed: {e}")
+    asyncio.create_task(startup_fetch())
     asyncio.create_task(gmail_poll_loop())
     asyncio.create_task(nav_daily_cron())
     asyncio.create_task(holdings_monthly_cron())

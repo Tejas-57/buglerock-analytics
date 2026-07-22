@@ -28,8 +28,10 @@ const ASSET_STRUCTURE = [
         { label:'Sectoral', cats:['Cat: Index MF - Bank','Cat: Index MF - IT','Cat: Healthcare funds','Cat: Thematic - Manufacturing','Cat: Thematic Funds','Cat: Thematic - PSU','Cat: Thematic - Commodities'] },
       ]},
       { id:'passive_etf', label:'Passive - ETF', asset_classes:['ETF - Equity'], groups:[
-        { label:'Broad Market', cats:['India ETF Large-Cap','India ETF Multi-Cap','India ETF Mid-Cap','India ETF Small-Cap','India ETF Value','India ETF Dividend Yield','India ETF Index Funds'] },
-        { label:'Sectoral', cats:['India ETF Sector - Financial Services','India ETF Sector - Technology','India ETF Sector - Healthcare','India ETF Sector - Energy','India ETF Equity - Infrastructure','India ETF Equity - Consumption','India ETF Equity - ESG','India ETF Equity - Other'] },
+        { label:'Broad Market', cats:['India ETF Nifty 50','India ETF Nifty Next 50','India ETF Sensex','India ETF Nifty 100','India ETF Nifty 200','India ETF Nifty 500','India ETF Others'] },
+        { label:'Mid & Small Cap', cats:['India ETF Midcap','India ETF Smallcap'] },
+        { label:'Factor Based', cats:['India ETF Value','India ETF Alpha','India ETF Low Vol','India ETF Momentum','India ETF Quality','India ETF Divided Yield'] },
+        { label:'Sectoral', cats:['India ETF Technology','India ETF Financial Services','India ETF Defence','India ETF Metals & Commodities','India ETF Energy','India ETF Healthcare','India ETF Consumption','India ETF Infrastructure'] },
       ]},
       { id:'global', label:'Global Funds', asset_classes:['International'], groups:[
         { label:'Global', cats:['India Fund Global - Other','Cat: Global - Other Funds','Cat: Global - Innovation Funds','Cat: Emerging Market Funds','Cat: China & Asia based Funds','Cat: US based Funds','Cat: Europe based Funds'] },
@@ -49,7 +51,7 @@ const ASSET_STRUCTURE = [
     subtypes:[{ id:'pm_all', label:'All', asset_classes:['Precious Metals'], groups:[
       { label:'Gold', cats:['Cat: India Fund Sector - Precious Metals-Gold','India Fund Sector - Precious Metals'] },
       { label:'Silver', cats:['Cat: India Fund Sector - Precious Metals-Silver'] },
-      { label:'ETF', cats:['India ETF Sector - Precious Metals'] },
+      { label:'ETF', cats:['India ETF Sector - Precious Metals','India ETF Gold','India ETF Silver'] },
     ]}],
   },
   {

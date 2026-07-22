@@ -638,47 +638,36 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
           funds.forEach(f => { optW[f.isin] = strat.weights[f.isin] ?? baseW[f.isin] ?? 0; });
 
           function blend(wts) {
-            let eq = 0, debt = 0, cash = 0, lc = 0, mc = 0, sc = 0;
-            let totalW = 0, capW = 0;
+            // Asset class via fund asset_class field (gold → Commodities, not Equity)
+            const wtMap = {};
+            funds.forEach(f => { wtMap[f.isin] = (wts[f.isin] || 0); });
+            let equity=0, debt=0, cash=0, commodity=0, totalW=0, capW=0;
+            let lc=0, mc=0, sc=0;
             funds.forEach(f => {
               const w = (wts[f.isin] || 0) / 100;
               if (w <= 0) return;
               const s = snapshots[f.isin] || {};
-
-              // Step 1: Normalize fund-level asset class to 100%
-              const rawEq   = parseFloat(s.equity_pct) || 0;
-              const rawDebt = parseFloat(s.bond_pct)   || 0;
-              const rawCash = parseFloat(s.cash_pct)   || 0;
-              const acSum   = rawEq + rawDebt + rawCash;
-              const normEq   = acSum > 0 ? rawEq   / acSum * 100 : rawEq;
-              const normDebt = acSum > 0 ? rawDebt / acSum * 100 : rawDebt;
-              const normCash = acSum > 0 ? rawCash / acSum * 100 : rawCash;
-
-              eq   += normEq   * w;
-              debt += normDebt * w;
-              cash += normCash * w;
+              const ac = (s.asset_class || f.asset_class || '').toLowerCase();
+              const isPM = ac === 'precious metals';
+              const isDebt = ac === 'debt' || ac === 'bond';
+              const isHybrid = ac === 'hybrid' || ac === 'allocation' || ac === 'multi-asset';
+              const eqPct=parseFloat(s.equity_pct)||0, bdPct=parseFloat(s.bond_pct)||0;
+              const cashPct=parseFloat(s.cash_pct)||0, otherPct=parseFloat(s.other_pct)||0;
+              const tot=eqPct+bdPct+cashPct+otherPct||100;
+              if (isPM) { commodity += w * 100; }
+              else if (isDebt) { debt += (bdPct/tot*100)*w; cash += (cashPct/tot*100)*w; debt += (1-(bdPct+cashPct+otherPct)/tot)*w*100; }
+              else if (isHybrid) { equity += (eqPct/tot*100)*w; debt += (bdPct/tot*100)*w; cash += (cashPct/tot*100)*w; }
+              else { equity += (eqPct>0?eqPct/tot*100:100)*w; debt += (bdPct/tot*100)*w; cash += (cashPct/tot*100)*w; }
               totalW += w;
-
-              // Step 2: Market cap — raw values, weight rebasing only
-              const rawLc = parseFloat(s.large_cap);
-              const rawMc = parseFloat(s.mid_cap);
-              const rawSc = parseFloat(s.small_cap);
-              if (!isNaN(rawLc) && !isNaN(rawMc) && !isNaN(rawSc)) {
-                lc += rawLc * w;
-                mc += rawMc * w;
-                sc += rawSc * w;
-                capW += w;
-              }
+              // Market cap
+              const rawLc=parseFloat(s.large_cap), rawMc=parseFloat(s.mid_cap), rawSc=parseFloat(s.small_cap);
+              if (!isNaN(rawLc) && !isNaN(rawMc) && !isNaN(rawSc)) { lc+=rawLc*w; mc+=rawMc*w; sc+=rawSc*w; capW+=w; }
             });
-            // Normalize portfolio-level asset class
-            const acTot = eq + debt + cash;
-            const norm = v => acTot > 0 ? v / acTot * 100 : v;
-            // Normalize market cap by weight of funds that had cap data
             const capNorm = v => capW > 0 ? v / capW : 0;
             return {
-              eq: norm(eq), debt: norm(debt), cash: norm(cash),
-              lc: capNorm(lc), mc: capNorm(mc), sc: capNorm(sc),
-              hasCapData: capW > 0,
+              eq: totalW>0?equity/totalW:0, debt: totalW>0?debt/totalW:0,
+              cash: totalW>0?cash/totalW:0, commodity: totalW>0?commodity/totalW:0,
+              lc: capNorm(lc), mc: capNorm(mc), sc: capNorm(sc), hasCapData: capW > 0,
             };
           }
 
@@ -687,9 +676,10 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
 
           const rows = [
             { section: 'Asset class', items: [
-              { label: 'Equity',        origV: orig.eq,   optV: opt.eq,   color: BERRY },
-              { label: 'Bonds / Debt',  origV: orig.debt, optV: opt.debt, color: PLUM  },
-              { label: 'Cash / Liquid', origV: orig.cash, optV: opt.cash, color: GR60  },
+              { label: 'Equity',        origV: orig.eq,        optV: opt.eq,        color: BERRY },
+              { label: 'Bonds / Debt',  origV: orig.debt,      optV: opt.debt,      color: PLUM  },
+              { label: 'Cash / Liquid', origV: orig.cash,      optV: opt.cash,      color: GR60  },
+              ...(Math.max(orig.commodity||0, opt.commodity||0) > 0.5 ? [{ label: 'Commodities', origV: orig.commodity, optV: opt.commodity, color: '#D97706' }] : []),
             ]},
             { section: 'Market cap (equity portion)', items: orig.hasCapData ? [
               { label: 'Large cap',  origV: orig.lc, optV: opt.lc, color: BERRY },
