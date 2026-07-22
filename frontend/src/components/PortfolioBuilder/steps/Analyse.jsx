@@ -173,18 +173,18 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
   function isActiveEquityFund(f) {
     const snap = snapshots[f.isin];
-    // Use fund's own category/asset_class first, fall back to snapshot
     const ac  = (f.asset_class || snap?.asset_class || '').toLowerCase();
     const cat = (f.category || snap?.category || '').toLowerCase();
-    return !(ac === 'debt' || ac === 'bond' ||
+    return !(ac === 'debt' || ac === 'bond' || ac === 'precious metals' ||
       cat.includes('liquid') || cat.includes('overnight') ||
       cat.includes('money market') || cat.includes('gilt') ||
       cat.includes('ultra short') || cat.includes('low duration') ||
       cat.includes('corporate bond') || cat.includes('credit risk') ||
       cat.includes('banking and psu') || cat.includes('duration') ||
       cat.includes('floater') || cat.includes('fixed maturity') ||
-      cat.includes('india oe') || // Morningstar open-end non-equity prefix
-      (ac === '' && cat === '')); // no data at all — exclude to be safe
+      cat.includes('india oe') || cat.includes('gold') || cat.includes('silver') ||
+      cat.includes('precious metal') ||
+      (ac === '' && cat === ''));
   }
 
   const equityFundsForOverlap = funds.filter(isActiveEquityFund).map(f => ({

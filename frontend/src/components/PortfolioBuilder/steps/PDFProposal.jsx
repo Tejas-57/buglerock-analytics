@@ -206,14 +206,15 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
       function isPureDebt(f) {
         const ac  = (f.asset_class || snapshots[f.isin]?.asset_class || '').toLowerCase();
         const cat = (f.category    || snapshots[f.isin]?.category    || '').toLowerCase();
-        return ac === 'debt' || ac === 'bond' ||
+        return ac === 'debt' || ac === 'bond' || ac === 'precious metals' ||
           cat.includes('liquid') || cat.includes('overnight') ||
           cat.includes('money market') || cat.includes('gilt') ||
           cat.includes('ultra short') || cat.includes('low duration') ||
           cat.includes('corporate bond') || cat.includes('credit risk') ||
           cat.includes('banking and psu') || cat.includes('duration') ||
           cat.includes('floater') || cat.includes('fixed maturity') ||
-          cat.includes('india oe');
+          cat.includes('india oe') || cat.includes('gold') || cat.includes('silver') ||
+          cat.includes('precious metal');
       }
       const equityFunds = allFundsForFetch.filter(f => !isPureDebt(f));
       const overlapIsins = equityFunds.map(f => f.isin).join(',');
@@ -385,7 +386,7 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
       </div>`;
 
     const tblBox = (title,inner,note) =>
-      `<div style="border:1px solid ${GR20};border-radius:10px;overflow:hidden;margin-bottom:16px">
+      `<div style="border:1px solid ${GR20};border-radius:10px;overflow:hidden;margin-bottom:16px;page-break-inside:avoid;break-inside:avoid;break-before:auto">
         <div style="padding:9px 16px;background:${PLUM};color:#fff;font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">${title}</div>
         ${inner}
         ${note?`<div style="padding:8px 14px;font-size:10px;color:${GR60};background:${GR10};border-top:1px solid ${GR20};line-height:1.65">${note}</div>`:''}
@@ -596,6 +597,116 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
     const spreadGap = (B.ret3y||0)-(bm.rets.r3y||0);
 
     /* ════════════════════════════════════════════
+       LAYOUT ENGINE — Option B height pre-calculation
+       A4 landscape: 297×210mm. @page margin 8mm top/bottom.
+       Usable height per page ≈ 580px (at 96dpi equivalent).
+       Each section gets padding-top:48px = 48px overhead.
+    ════════════════════════════════════════════ */
+    const PAGE_H = 580; // usable px per page after margins+padding
+    const SEC_OH = 52;  // section header height (sectionHd)
+    const ROW_H  = 34;  // table row height
+    const TBLHD  = 36;  // table header height
+    const TBLFT  = 26;  // tblBox title bar height
+    const TBLNT  = 22;  // tblBox note height
+    const GAP    = 18;  // margin-bottom between cards
+
+    // Estimate height of a tblBox with N data rows
+    function tblH(rows, hasnote=false) {
+      return TBLFT + TBLHD + rows*ROW_H + (hasnote?TBLNT:0) + GAP;
+    }
+
+    // Split an array of HTML row strings into pages given a section title and available height on first page
+    function paginateRows(sectionTitle, sectionNum, colHeaders, rows, rowH, firstPageAvail, noteHtml='') {
+      const pages = [];
+      const hdrH = TBLFT + TBLHD;
+      const noteH = noteHtml ? TBLNT : 0;
+      let avail = firstPageAvail - hdrH;
+      let batch = [];
+      rows.forEach((row, i) => {
+        if (avail - rowH < (i===rows.length-1?noteH:0)) {
+          // flush current batch
+          pages.push(batch);
+          batch = [row];
+          avail = PAGE_H - SEC_OH - hdrH - rowH;
+        } else {
+          batch.push(row);
+          avail -= rowH;
+        }
+      });
+      if (batch.length) pages.push(batch);
+
+      return pages.map((batch, pi) => {
+        const isCont = pi > 0;
+        const hd = isCont ? sectionHd(sectionNum, sectionTitle+' — continued', '') : '';
+        const tbl = `<table><thead><tr>${colHeaders}</tr></thead><tbody>${batch.join('')}</tbody></table>`;
+        const note = pi===pages.length-1 && noteHtml ? noteHtml : '';
+        return `<section class="${isCont?'pg':''}">
+          ${hd}
+          ${tblBox(sectionTitle+(isCont?` (continued, part ${pi+1})`:''), tbl, note)}
+        </section>`;
+      }).join('\n');
+    }
+
+    // Scale matrix to always fit on one slide
+    function matrixScale(n) {
+      if (n <= 5)  return { cell: 74, font: 14, spacing: 5, labelW: 130 };
+      if (n <= 7)  return { cell: 60, font: 12, spacing: 4, labelW: 120 };
+      if (n <= 9)  return { cell: 50, font: 11, spacing: 3, labelW: 110 };
+      if (n <= 11) return { cell: 42, font: 10, spacing: 3, labelW: 100 };
+      if (n <= 13) return { cell: 36, font: 9,  spacing: 2, labelW: 90  };
+      return             { cell: 30, font: 8,  spacing: 2, labelW: 80  };
+    }
+
+    /* ════════════════════════════════════════════
+       BUILD SECTIONS as HTML strings
+    ════════════════════════════════════════════ */
+
+    // Scorecard rows builder (reused)
+    function buildScorecardRows() {
+      const scorecardRows=[
+        ['Return quality',    B.alpha,  [2,0],   false, ['Outperforming','Neutral','Lagging'],    'Alpha of '+pc(B.alpha)+' vs '+bmDisplayName+'. '+((B.alpha||0)>=2?'Fund managers are consistently adding value above market exposure.':(B.alpha||0)>=0?'Positive but modest — watch for persistence over next reporting periods.':'Negative alpha after fees questions the value of active management in the current mix.')],
+        ['Risk efficiency',   B.sharpe, [0.7,0.4],false,['Strong','Adequate','Weak'],             'Sharpe '+nb(B.sharpe)+'. '+((B.sharpe||0)>=0.7?'Excellent — portfolio delivers strong returns relative to the risk taken.':(B.sharpe||0)>=0.4?'Adequate risk-adjusted returns — there is room to improve by replacing low-Sharpe holdings.':'Below acceptable threshold — the portfolio is taking on more risk than its returns justify.')],
+        ['Downside shield',   B.dncap,  [90,100], true,  ['Protected','On par','Exposed'],        'Down capture '+nb(B.dncap)+'%. '+((B.dncap||100)<=90?'In falling markets, portfolio loses less than the benchmark — strong capital protection.':(B.dncap||100)<=100?'Portfolio falls broadly in line with the market in corrections.':'Portfolio amplifies drawdowns — consider adding defensive or low-beta funds.')],
+        ['Cost efficiency',   B.er,     [1.0,1.5],true,  ['Low cost','Reasonable','Review costs'],'Blended ER '+nb(B.er)+'%. '+((B.er||0)<=1.0?'Highly cost-efficient construction. Maximum net return accrues to the client.':(B.er||0)<=1.5?'Reasonable expense ratio for active management.':'Above-average cost drag — switching to Direct plans could significantly improve net returns.')],
+      ];
+      return scorecardRows.map(([m,v,thrs,lb,labs,interp])=>{
+        const ok=lb?(v||0)<=thrs[0]:(v||0)>=thrs[0];
+        const warn2=lb?((v||0)<=thrs[1]&&(v||0)>thrs[0]):(v||0)>=thrs[1]&&(v||0)<thrs[0];
+        const c=v==null?GR60:ok?POS:warn2?WARN:NEG;
+        const bg=ok?'#E6F4ED':warn2?'#FEF9EC':'#FEE2E2';
+        const lbl=ok?labs[0]:warn2?labs[1]:labs[2];
+        return `<tr>${TDL(m,'1')}${TD(v!=null?(lb?nb(v)+'%':pc(v)):'—',c,'1')}
+          <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right"><span style="font-size:9px;font-weight:700;padding:2px 9px;border-radius:20px;background:${bg};color:${c}">${lbl}</span></td>
+          <td style="padding:7px 13px;border-bottom:1px solid ${GR20};font-size:11px;color:${GR60};line-height:1.55;max-width:360px">${interp}</td></tr>`;
+      });
+    }
+
+    // Fund table row builder
+    function fundTableRow(f, i) {
+      return `<tr style="background:${i%2===0?'#fff':GR10}">
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20}">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="width:4px;height:28px;border-radius:2px;background:${f.color};flex-shrink:0"></div>
+            <div style="font-size:11px;font-weight:600;color:${GR80}">${f.name}</div>
+          </div>
+        </td>
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};font-size:10px;color:${GR60}">${(snapshots[f.isin]?.category||f.category||'').replace(/^(India Fund|India OE|India ETF|Cat:)\s*/i,'')}</td>
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-weight:700;font-size:12px;color:${PLUM}">${f._wPct.toFixed(1)}%</td>
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-size:11px;color:${GR80}">${fmtL(f._wPct/100*investAmt)}</td>
+      </tr>`;
+    }
+
+    const fundColHdrs = `${TH('Fund','left')}${TH('Category','left')}${TH('Weight')}${TH('Amount')}`;
+    const fundRowsArr = SF.map((f,i) => fundTableRow(f,i));
+
+    // KPI strip height
+    const KPI_H = 120;
+    // Fund overview page: KPI strip + section header
+    const overviewOH = SEC_OH + KPI_H + 16; // overhead before fund list
+    const fundAvail = PAGE_H - overviewOH - TBLFT - TBLHD; // available for fund rows on page 3
+    const fundRowsPerFirstPage = Math.max(3, Math.floor(fundAvail / ROW_H));
+
+    /* ════════════════════════════════════════════
        WRITE HTML DOCUMENT
     ════════════════════════════════════════════ */
     const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
@@ -608,9 +719,9 @@ html{font-size:13px}
 body{font-family:'DM Sans',sans-serif;background:#fff;color:${GR80};line-height:1.55;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .page{max-width:1200px;margin:0 auto;padding:32px 48px}
 section{margin-bottom:32px}
-.pg{page-break-before:always;padding-top:36px}
+.pg{page-break-before:always;break-before:page;padding-top:48px}
 table{border-collapse:collapse;width:100%}
-@media print{@page{margin:8mm 12mm;size:297mm 210mm}.no-print{display:none!important}}
+@media print{@page{margin:8mm 12mm;size:297mm 210mm}.no-print{display:none!important}tr{page-break-inside:avoid;break-inside:avoid}}
 html,body{width:297mm}
 </style></head><body>
 
@@ -679,10 +790,9 @@ ${sec("ips") ? `<!-- ═══ PAGE 2: IPS ═══ -->
 </section>
 
 ` : ""}
-${sec("overview") ? `<!-- ═══ PAGE 3: PORTFOLIO OVERVIEW ═══ -->
-<section class="pg">
-  ${sectionHd('02','Portfolio overview',`Blended analytics for the recommended ${SF.length}-fund portfolio vs ${bmDisplayName}.`)}
-  <div style="display:flex;align-items:stretch;gap:16px;margin-bottom:18px">
+${sec("overview") ? (()=>{
+  // KPI strip
+  const kpiStrip = `<div style="display:flex;align-items:stretch;gap:16px;margin-bottom:18px">
     <div style="background:${SC_BG};border:2px solid ${SC_CLR};border-radius:12px;padding:20px 24px;text-align:center;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:120px">
       <div style="font-family:'Cormorant Garamond',serif;font-size:56px;font-weight:700;color:${SC_CLR};line-height:1">${OVERALL}</div>
       <div style="font-size:9px;font-weight:700;letter-spacing:.07em;color:${SC_CLR}">/ 100</div>
@@ -698,107 +808,56 @@ ${sec("overview") ? `<!-- ═══ PAGE 3: PORTFOLIO OVERVIEW ═══ -->
       ${kpiCell(nb(B.er)+'%','Blended ER','Expense ratio',rcL(B.er,1.0,1.8))}
       ${kpiCell(nb(B.std3y)+'%','Std deviation (3Y)','Annualised vol',rcL(B.std3y,14,20))}
     </div>
-  </div>
-  ${(()=>{
-    // First page: show first 6 funds if >9 total, else all
-    const firstBatch = SF.length > 9 ? SF.slice(0, 6) : SF;
-    const fundListFirst = `<table style="width:100%;border-collapse:collapse">
-      <thead><tr>
-        <th style="padding:7px 12px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Fund</th>
-        <th style="padding:7px 12px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Category</th>
-        <th style="padding:7px 12px;text-align:right;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Weight</th>
-        <th style="padding:7px 12px;text-align:right;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Amount</th>
-      </tr></thead>
-      <tbody>${firstBatch.map((f,i)=>`<tr style="background:${i%2===0?'#fff':GR10}">
-        <td style="padding:7px 12px;border-bottom:1px solid ${GR20}">
-          <div style="display:flex;align-items:center;gap:8px">
-            <div style="width:4px;height:28px;border-radius:2px;background:${f.color};flex-shrink:0"></div>
-            <div style="font-size:11px;font-weight:600;color:${GR80}">${f.name}</div>
-          </div>
-        </td>
-        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};font-size:10px;color:${GR60}">${(snapshots[f.isin]?.category||f.category||'').replace(/^(India Fund|India OE|India ETF|Cat:)\s*/i,'')}</td>
-        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-weight:700;font-size:12px;color:${PLUM}">${f._wPct.toFixed(1)}%</td>
-        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-size:11px;color:${GR80}">${fmtL(f._wPct/100*investAmt)}</td>
-      </tr>`).join('')}</tbody>
-    </table>`;
-    return `<div style="margin-bottom:16px">${tblBox('Fund allocation' + (SF.length > 9 ? ` — funds 1–6 of ${SF.length}` : ''), fundListFirst)}</div>`;
-  })()}
-  ${SF.length <= 9 ? `
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+  </div>`;
+
+  // Calculate rows per page dynamically
+  const firstPageAvailForFunds = PAGE_H - SEC_OH - KPI_H - TBLFT - TBLHD - GAP;
+  const rpfp = Math.max(3, Math.floor(firstPageAvailForFunds / ROW_H));
+  const contPageAvailForFunds = PAGE_H - SEC_OH - TBLFT - TBLHD - GAP;
+  const rpcp = Math.max(3, Math.floor(contPageAvailForFunds / ROW_H));
+
+  // Split fund rows into pages
+  const pages = [];
+  let remaining = [...fundRowsArr];
+  let isFirst = true;
+  while (remaining.length > 0) {
+    const take = isFirst ? rpfp : rpcp;
+    pages.push({ rows: remaining.slice(0, take), isFirst });
+    remaining = remaining.slice(take);
+    isFirst = false;
+  }
+
+  // Asset class + cap mix (fixed height ~180px)
+  const assetCapBlock = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
     ${tblBox('Asset class exposure','<div style="padding:14px 20px">'+assetSvg+'</div>')}
     ${tblBox('Market cap mix','<div style="padding:14px 20px">'+capSvg+'</div>')}
-  </div>
-  ${(()=>{
-    const scorecardRows=[
-      ['Return quality',    B.alpha,  [2,0],   false, ['Outperforming','Neutral','Lagging'],    'Alpha of '+pc(B.alpha)+' vs '+bmDisplayName+'. '+((B.alpha||0)>=2?'Fund managers are consistently adding value above market exposure.':(B.alpha||0)>=0?'Positive but modest — watch for persistence over next reporting periods.':'Negative alpha after fees questions the value of active management in the current mix.')],
-      ['Risk efficiency',   B.sharpe, [0.7,0.4],false,['Strong','Adequate','Weak'],             'Sharpe '+nb(B.sharpe)+'. '+((B.sharpe||0)>=0.7?'Excellent — portfolio delivers strong returns relative to the risk taken.':(B.sharpe||0)>=0.4?'Adequate risk-adjusted returns — there is room to improve by replacing low-Sharpe holdings.':'Below acceptable threshold — the portfolio is taking on more risk than its returns justify.')],
-      ['Downside shield',   B.dncap,  [90,100], true,  ['Protected','On par','Exposed'],        'Down capture '+nb(B.dncap)+'%. '+((B.dncap||100)<=90?'In falling markets, portfolio loses less than the benchmark — strong capital protection.':(B.dncap||100)<=100?'Portfolio falls broadly in line with the market in corrections.':'Portfolio amplifies drawdowns — consider adding defensive or low-beta funds.')],
-      ['Cost efficiency',   B.er,     [1.0,1.5],true,  ['Low cost','Reasonable','Review costs'],'Blended ER '+nb(B.er)+'%. '+((B.er||0)<=1.0?'Highly cost-efficient construction. Maximum net return accrues to the client.':(B.er||0)<=1.5?'Reasonable expense ratio for active management.':'Above-average cost drag — switching to Direct plans could significantly improve net returns.')],
-    ];
-    const rows=scorecardRows.map(([m,v,thrs,lb,labs,interp])=>{
-      const ok=lb?(v||0)<=thrs[0]:(v||0)>=thrs[0];
-      const warn2=lb?((v||0)<=thrs[1]&&(v||0)>thrs[0]):(v||0)>=thrs[1]&&(v||0)<thrs[0];
-      const c=v==null?GR60:ok?POS:warn2?WARN:NEG;
-      const bg=ok?'#E6F4ED':warn2?'#FEF9EC':'#FEE2E2';
-      const lbl=ok?labs[0]:warn2?labs[1]:labs[2];
-      return `<tr>${TDL(m,'1')}${TD(v!=null?(lb?nb(v)+'%':pc(v)):'—',c,'1')}
-        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right"><span style="font-size:9px;font-weight:700;padding:2px 9px;border-radius:20px;background:${bg};color:${c}">${lbl}</span></td>
-        <td style="padding:7px 13px;border-bottom:1px solid ${GR20};font-size:11px;color:${GR60};line-height:1.55;max-width:360px">${interp}</td></tr>`;
-    }).join('');
-    return tblBox('Portfolio health scorecard',`<table><thead><tr>${TH('Dimension','left')}${TH('Value')}${TH('Rating')}${TH('Interpretation','left')}</tr></thead><tbody>${rows}</tbody></table>`);
-  })()} ` : ''}
-</section>
+  </div>`;
 
-${SF.length > 9 ? `<!-- ═══ PAGE 3b: PORTFOLIO OVERVIEW CONTINUED ═══ -->
-<section class="pg">
-  ${sectionHd('02b','Portfolio overview — continued',`Funds ${7}–${SF.length}, asset class exposure and health scorecard.`)}
-  <div style="margin-bottom:16px">
-    ${tblBox(`Fund allocation — funds 7–${SF.length} of ${SF.length}`, `<table style="width:100%;border-collapse:collapse">
-      <thead><tr>
-        <th style="padding:7px 12px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Fund</th>
-        <th style="padding:7px 12px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Category</th>
-        <th style="padding:7px 12px;text-align:right;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Weight</th>
-        <th style="padding:7px 12px;text-align:right;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};background:${GR10}">Amount</th>
-      </tr></thead>
-      <tbody>${SF.slice(6).map((f,i)=>`<tr style="background:${i%2===0?'#fff':GR10}">
-        <td style="padding:7px 12px;border-bottom:1px solid ${GR20}">
-          <div style="display:flex;align-items:center;gap:8px">
-            <div style="width:4px;height:28px;border-radius:2px;background:${f.color};flex-shrink:0"></div>
-            <div style="font-size:11px;font-weight:600;color:${GR80}">${f.name}</div>
-          </div>
-        </td>
-        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};font-size:10px;color:${GR60}">${(snapshots[f.isin]?.category||f.category||'').replace(/^(India Fund|India OE|India ETF|Cat:)\s*/i,'')}</td>
-        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-weight:700;font-size:12px;color:${PLUM}">${f._wPct.toFixed(1)}%</td>
-        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right;font-family:'DM Mono',monospace;font-size:11px;color:${GR80}">${fmtL(f._wPct/100*investAmt)}</td>
-      </tr>`).join('')}</tbody>
-    </table>`)}
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-    ${tblBox('Asset class exposure','<div style="padding:14px 20px">'+assetSvg+'</div>')}
-    ${tblBox('Market cap mix','<div style="padding:14px 20px">'+capSvg+'</div>')}
-  </div>
-  ${(()=>{
-    const scorecardRows=[
-      ['Return quality',    B.alpha,  [2,0],   false, ['Outperforming','Neutral','Lagging'],    'Alpha of '+pc(B.alpha)+' vs '+bmDisplayName+'. '+((B.alpha||0)>=2?'Fund managers are consistently adding value above market exposure.':(B.alpha||0)>=0?'Positive but modest — watch for persistence over next reporting periods.':'Negative alpha after fees questions the value of active management in the current mix.')],
-      ['Risk efficiency',   B.sharpe, [0.7,0.4],false,['Strong','Adequate','Weak'],             'Sharpe '+nb(B.sharpe)+'. '+((B.sharpe||0)>=0.7?'Excellent — portfolio delivers strong returns relative to the risk taken.':(B.sharpe||0)>=0.4?'Adequate risk-adjusted returns — there is room to improve by replacing low-Sharpe holdings.':'Below acceptable threshold — the portfolio is taking on more risk than its returns justify.')],
-      ['Downside shield',   B.dncap,  [90,100], true,  ['Protected','On par','Exposed'],        'Down capture '+nb(B.dncap)+'%. '+((B.dncap||100)<=90?'In falling markets, portfolio loses less than the benchmark — strong capital protection.':(B.dncap||100)<=100?'Portfolio falls broadly in line with the market in corrections.':'Portfolio amplifies drawdowns — consider adding defensive or low-beta funds.')],
-      ['Cost efficiency',   B.er,     [1.0,1.5],true,  ['Low cost','Reasonable','Review costs'],'Blended ER '+nb(B.er)+'%. '+((B.er||0)<=1.0?'Highly cost-efficient construction. Maximum net return accrues to the client.':(B.er||0)<=1.5?'Reasonable expense ratio for active management.':'Above-average cost drag — switching to Direct plans could significantly improve net returns.')],
-    ];
-    const rows=scorecardRows.map(([m,v,thrs,lb,labs,interp])=>{
-      const ok=lb?(v||0)<=thrs[0]:(v||0)>=thrs[0];
-      const warn2=lb?((v||0)<=thrs[1]&&(v||0)>thrs[0]):(v||0)>=thrs[1]&&(v||0)<thrs[0];
-      const c=v==null?GR60:ok?POS:warn2?WARN:NEG;
-      const bg=ok?'#E6F4ED':warn2?'#FEF9EC':'#FEE2E2';
-      const lbl=ok?labs[0]:warn2?labs[1]:labs[2];
-      return `<tr>${TDL(m,'1')}${TD(v!=null?(lb?nb(v)+'%':pc(v)):'—',c,'1')}
-        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right"><span style="font-size:9px;font-weight:700;padding:2px 9px;border-radius:20px;background:${bg};color:${c}">${lbl}</span></td>
-        <td style="padding:7px 13px;border-bottom:1px solid ${GR20};font-size:11px;color:${GR60};line-height:1.55;max-width:360px">${interp}</td></tr>`;
-    }).join('');
-    return tblBox('Portfolio health scorecard',`<table><thead><tr>${TH('Dimension','left')}${TH('Value')}${TH('Rating')}${TH('Interpretation','left')}</tr></thead><tbody>${rows}</tbody></table>`);
-  })()}
-</section>` : ''}
+  // Scorecard rows
+  const scRows = buildScorecardRows();
+  const scorecardHtml = tblBox('Portfolio health scorecard',`<table><thead><tr>${TH('Dimension','left')}${TH('Value')}${TH('Rating')}${TH('Interpretation','left')}</tr></thead><tbody>${scRows.join('')}</tbody></table>`);
 
-` : ""}
+  // Build pages HTML
+  const pagesHtml = pages.map((p, pi) => {
+    const isCont = pi > 0;
+    const hd = sectionHd('02'+(isCont?String.fromCharCode(97+pi):''), 'Portfolio overview'+(isCont?' — continued':''), isCont?'':'Blended analytics for the recommended '+SF.length+'-fund portfolio vs '+bmDisplayName+'.');
+    const tbl = tblBox('Fund allocation'+(pages.length>1?` — part ${pi+1} of ${pages.length}`:''), `<table><thead><tr>${fundColHdrs}</tr></thead><tbody>${p.rows.join('')}</tbody></table>`);
+    return `<section class="${isCont?'pg':'pg'}">
+      ${hd}
+      ${p.isFirst ? kpiStrip : ''}
+      <div style="margin-bottom:16px">${tbl}</div>
+    </section>`;
+  }).join('\n');
+
+  // Asset class + scorecard always on their own section
+  const assetSection = `<section class="pg">
+    ${sectionHd('02'+String.fromCharCode(97+pages.length), 'Portfolio overview — continued', 'Asset class exposure, market cap mix and portfolio health scorecard.')}
+    ${assetCapBlock}
+    ${scorecardHtml}
+  </section>`;
+
+  return pagesHtml + '\n' + assetSection;
+})() : ""}
 ${sec("performance") ? `<!-- ═══ PAGE 4: PERFORMANCE ═══ -->
 <section class="pg">
   ${sectionHd('03','Performance analysis',`Returns across all periods and calendar years vs ${bmDisplayName}.`)}
@@ -925,38 +984,43 @@ ${sec("stress") ? `<!-- ═══ PAGE 6b: STRESS TEST ═══ -->
 ` : ""}
 ${sec("overlap") ? `<!-- ═══ PAGE 6c: OVERLAP ═══ -->
 <section class="pg">
+  <div style="page-break-inside:avoid;break-inside:avoid">
   ${sectionHd('05b','Portfolio overlap matrix','Shared stock holdings between active equity funds in the portfolio.')}
   ${(()=>{
     if (!resolvedOverlap?.pairwise_matrix) return callout('No overlap data — only debt/liquid funds in portfolio or data unavailable.','info');
     const funds2 = funds.filter(f => {
       const ac = (f.asset_class || snapshots[f.isin]?.asset_class || '').toLowerCase();
       const cat = (f.category || snapshots[f.isin]?.category || '').toLowerCase();
-      return !(ac==='debt'||ac==='bond'||cat.includes('liquid')||cat.includes('overnight')||cat.includes('money market')||cat.includes('gilt')||cat.includes('corporate bond'));
+      return !(ac==='debt'||ac==='bond'||ac==='precious metals'||
+        cat.includes('liquid')||cat.includes('overnight')||cat.includes('money market')||
+        cat.includes('gilt')||cat.includes('corporate bond')||cat.includes('gold')||
+        cat.includes('silver')||cat.includes('precious metal'));
     });
     if (funds2.length < 2) return '';
     const pairwise_matrix = resolvedOverlap.pairwise_matrix;
-    const shortName = n => n.replace(/\b(Fund|Growth|Direct|Regular|Plan|Option|Gr|India|Mutual)\b/gi,'').replace(/\s+/g,' ').trim().slice(0,22);
+    const shortName = n => n.replace(/\b(Fund|Growth|Direct|Regular|Plan|Option|Gr|India|Mutual)\b/gi,'').replace(/\s+/g,' ').trim().slice(0,18);
+    const ms = matrixScale(funds2.length);
     const overlapColor = pct => pct>=35?'#C0392B':pct>=25?'#E67E22':pct>=15?'#F39C12':pct>=5?'#27AE60':'#A0A0A0';
     const overlapBg   = pct => pct>=35?'rgba(192,57,43,.10)':pct>=25?'rgba(230,126,34,.10)':pct>=15?'rgba(243,156,18,.10)':pct>=5?'rgba(39,174,96,.10)':'#f4f4f4';
-    const matrixHtml = `<table style="border-collapse:separate;border-spacing:5px;margin:0 auto">
+    const matrixHtml = `<table style="border-collapse:separate;border-spacing:${ms.spacing}px;margin:0 auto">
       <thead><tr>
-        <td style="width:110px"></td>
-        ${funds2.map(f=>`<th style="text-align:center;padding:0 3px 8px;font-size:9px;font-weight:500;width:74px">
-          <div style="display:flex;flex-direction:column;align-items:center;gap:3px">
-            <div style="width:8px;height:8px;border-radius:2px;background:${f.color||LAV}"></div>
-            <div style="max-width:70px;text-align:center;line-height:1.3">${shortName(f.name)}</div>
+        <td style="width:${ms.labelW}px"></td>
+        ${funds2.map(f=>`<th style="text-align:center;padding:0 2px 6px;font-size:${ms.font-2}px;font-weight:500;width:${ms.cell}px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <div style="width:7px;height:7px;border-radius:2px;background:${f.color||LAV}"></div>
+            <div style="max-width:${ms.cell}px;text-align:center;line-height:1.2;font-size:${ms.font-3}px">${shortName(f.name)}</div>
           </div></th>`).join('')}
       </tr></thead>
       <tbody>${funds2.map((fa,i)=>`<tr>
-        <td style="text-align:right;padding:3px 8px 3px 0;font-size:9px;font-weight:500;white-space:nowrap">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${fa.color||LAV};margin-right:5px;vertical-align:middle"></span>${shortName(fa.name)}
+        <td style="text-align:right;padding:2px 6px 2px 0;font-size:${ms.font-3}px;font-weight:500;white-space:nowrap;max-width:${ms.labelW}px;overflow:hidden;text-overflow:ellipsis">
+          <span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:${fa.color||LAV};margin-right:4px;vertical-align:middle"></span>${shortName(fa.name)}
         </td>
         ${funds2.map((fb,j)=>{
-          if(i===j) return `<td style="width:74px;height:40px;background:#f4f4f4;border-radius:7px;text-align:center;font-size:15px;color:#ccc">—</td>`;
+          if(i===j) return `<td style="width:${ms.cell}px;height:${ms.cell-8}px;background:#f4f4f4;border-radius:5px;text-align:center;font-size:${ms.font}px;color:#ccc">—</td>`;
           const key = i<j?`${fa.isin}|${fb.isin}`:`${fb.isin}|${fa.isin}`;
           const p = pairwise_matrix[key]; const pct = p?.overlap_pct||0;
-          return `<td style="width:74px;height:40px;background:${overlapBg(pct)};border-radius:7px;text-align:center;vertical-align:middle">
-            <div style="font-family:'DM Mono',monospace;font-weight:700;font-size:14px;color:${overlapColor(pct)}">${pct.toFixed(0)}%</div>
+          return `<td style="width:${ms.cell}px;height:${ms.cell-8}px;background:${overlapBg(pct)};border-radius:5px;text-align:center;vertical-align:middle">
+            <div style="font-family:'DM Mono',monospace;font-weight:700;font-size:${ms.font}px;color:${overlapColor(pct)}">${pct.toFixed(0)}%</div>
           </td>`;
         }).join('')}
       </tr>`).join('')}
@@ -968,20 +1032,23 @@ ${sec("overlap") ? `<!-- ═══ PAGE 6c: OVERLAP ═══ -->
         <span><span style="color:#E67E22">●</span> 25–35% High</span>
         <span><span style="color:#C0392B">●</span> &gt;35% Very high</span>
       </div>`;
-    return tblBox('Portfolio overlap matrix',`<div style="padding:14px 16px;overflow-x:auto">${matrixHtml}</div>`,'Active equity funds only. Overlap >25% may indicate concentration risk.');
+    return tblBox('Portfolio overlap matrix',`<div style="padding:14px 16px;width:100%;display:flex;justify-content:center"><div style="display:inline-block">${matrixHtml}</div></div>`,'Active equity funds only. Overlap >25% may indicate concentration risk.');
   })()}
+  </div>
 </section>
 
 ` : ""}
 ${sec("correlation") ? `<!-- ═══ PAGE 6d: CORRELATION ═══ -->
 <section class="pg">
+  <div style="page-break-inside:avoid;break-inside:avoid">
   ${sectionHd('05c','Return correlation matrix','3-year daily NAV return correlation between all portfolio funds.')}
   ${(()=>{
     if (!resolvedCorr?.matrix || !resolvedCorr?.included || resolvedCorr.included.length < 2) return callout('Insufficient NAV history to compute correlation — funds may be too new.','info');
     const inc = resolvedCorr.included;
     // Build fund list in same order as included ISINs
     const corrFunds = inc.map(isin => funds.find(f => f.isin === isin)).filter(Boolean);
-    const shortName = n => n.replace(/\b(Fund|Growth|Direct|Regular|Plan|Option|Gr|India|Mutual)\b/gi,'').replace(/\s+/g,' ').trim().slice(0,18);
+    const shortName2 = n => n.replace(/\b(Fund|Growth|Direct|Regular|Plan|Option|Gr|India|Mutual)\b/gi,'').replace(/\s+/g,' ').trim().slice(0,18);
+    const cms = matrixScale(corrFunds.length);
     const corrColor = v => {
       if (v == null) return {bg:'#f4f4f4', clr:'#ccc'};
       const a = Math.abs(v);
@@ -992,21 +1059,25 @@ ${sec("correlation") ? `<!-- ═══ PAGE 6d: CORRELATION ═══ -->
       return {bg:'rgba(26,122,82,.10)', clr:POS};
     };
     const drStr = resolvedCorr.date_range ? `${resolvedCorr.date_range.start} → ${resolvedCorr.date_range.end} · ${resolvedCorr.common_days} trading days` : '';
-    const corrMatrixHtml = `<table style="border-collapse:separate;border-spacing:4px;margin:0 auto">
+    const corrMatrixHtml = `<table style="border-collapse:separate;border-spacing:${cms.spacing}px;margin:0 auto">
       <thead><tr>
-        <td style="min-width:100px"></td>
-        ${corrFunds.map((f,i)=>`<th style="text-align:center;padding:0 4px 8px;font-size:9px;font-weight:600;color:${f.color||LAV};width:68px">F${i+1}</th>`).join('')}
+        <td style="min-width:${cms.labelW}px"></td>
+        ${corrFunds.map((f,i)=>`<th style="text-align:center;padding:0 2px 6px;font-size:${cms.font-3}px;font-weight:500;width:${cms.cell}px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <div style="width:7px;height:7px;border-radius:2px;background:${f.color||LAV}"></div>
+            <div style="max-width:${cms.cell}px;text-align:center;line-height:1.2">${shortName2(f.name)}</div>
+          </div></th>`).join('')}
       </tr></thead>
       <tbody>${corrFunds.map((fi,i)=>`<tr>
-        <td style="text-align:right;padding:3px 8px 3px 0;font-size:9px;font-weight:500;white-space:nowrap">
-          <span style="color:${fi.color||LAV};font-weight:700">F${i+1}</span> ${shortName(fi.name)}
+        <td style="text-align:right;padding:2px 6px 2px 0;font-size:${cms.font-3}px;font-weight:500;white-space:nowrap;max-width:${cms.labelW}px;overflow:hidden;text-overflow:ellipsis">
+          <span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:${fi.color||LAV};margin-right:4px;vertical-align:middle"></span>${shortName2(fi.name)}
         </td>
         ${corrFunds.map((_,j)=>{
           const ri = inc.indexOf(fi.isin), rj = inc.indexOf(corrFunds[j].isin);
           const v = (ri>=0&&rj>=0) ? resolvedCorr.matrix[ri][rj] : null;
           const {bg,clr} = corrColor(v);
-          return `<td style="width:68px;height:38px;background:${bg};border-radius:6px;text-align:center;vertical-align:middle;border:2px solid #fff">
-            <span style="font-family:'DM Mono',monospace;font-weight:700;font-size:13px;color:${clr}">${v!=null?v.toFixed(2):'—'}</span>
+          return `<td style="width:${cms.cell}px;height:${cms.cell-8}px;background:${bg};border-radius:5px;text-align:center;vertical-align:middle;border:1px solid #fff">
+            <span style="font-family:'DM Mono',monospace;font-weight:700;font-size:${cms.font-1}px;color:${clr}">${v!=null?v.toFixed(2):'—'}</span>
           </td>`;
         }).join('')}
       </tr>`).join('')}</tbody></table>
@@ -1018,8 +1089,9 @@ ${sec("correlation") ? `<!-- ═══ PAGE 6d: CORRELATION ═══ -->
         ${drStr?`<span style="margin-left:auto;font-style:italic">${drStr}</span>`:''}
       </div>
       ${resolvedCorr.excluded?.length?`<div style="margin-top:8px;font-size:9px;color:#92700A;background:#FEF9EC;padding:7px 12px;border-radius:6px;border:1px solid rgba(234,179,8,.3)">Excluded (insufficient data): ${resolvedCorr.excluded.map(e=>{const f=funds.find(f=>f.isin===e.isin);return f?f.name:e.isin}).join(', ')}</div>`:''}`;
-    return tblBox('Return correlation matrix',`<div style="padding:14px 16px;overflow-x:auto">${corrMatrixHtml}</div>`,'Based on 3-year daily NAV returns. ≥0.85 = high correlation — funds move together, reducing diversification benefit.');
+    return tblBox('Return correlation matrix',`<div style="padding:14px 16px;width:100%;display:flex;justify-content:center"><div style="display:inline-block">${corrMatrixHtml}</div></div>`,'Based on 3-year daily NAV returns. ≥0.85 = high correlation — funds move together, reducing diversification benefit.');
   })()}
+  </div>
 </section>
 
 ` : ""}
@@ -1053,29 +1125,64 @@ ${sec("exposure") ? `<!-- ═══ PAGE 7: EXPOSURE & STYLE ═══ -->
 </section>
 
 ` : ""}
-${sec("fundtable") ? `<!-- ═══ PAGE 8: FUND TABLE ═══ -->
-<section class="pg">
-  ${sectionHd('07','Fund details',`Complete data for all ${SF.length} holdings in the recommended portfolio.`)}
-  ${tblBox('Portfolio holdings — all metrics',
-    `<div style="overflow-x:auto"><table><thead><tr>
-      ${TH('Fund','left')}${TH('Weight')}${TH('Amount')}${TH('ER')}${TH('1Y')}${TH('3Y CAGR')}${TH('5Y CAGR')}${TH('Sharpe')}${TH('Alpha')}${TH('Dn cap')}
-    </tr></thead><tbody>${fundRows}</tbody>
-    <tfoot><tr style="background:${PLUM}">
-      <td colspan="2" style="padding:8px 12px;background:${PLUM};color:#fff;font-family:'DM Sans',sans-serif;font-weight:700">Blended portfolio</td>
-      <td style="padding:8px 12px;background:${PLUM};color:#fff;font-family:'DM Mono',monospace;font-weight:700;text-align:right">${fmtL(investAmt)}</td>
-      <td style="padding:8px 12px;background:${PLUM};color:#fff;font-family:'DM Mono',monospace;font-weight:700;text-align:right">${nb(B.er)+'%'}</td>
-      <td style="padding:8px 12px;background:${PLUM};color:${(B.ret1y||0)>=0?'#A4E4C0':'#FFB3B3'};font-family:'DM Mono',monospace;font-weight:700;text-align:right">${pc(B.ret1y)}</td>
-      <td style="padding:8px 12px;background:${PLUM};color:${(B.ret3y||0)>=0?'#A4E4C0':'#FFB3B3'};font-family:'DM Mono',monospace;font-weight:700;text-align:right">${pc(B.ret3y)}</td>
-      <td style="padding:8px 12px;background:${PLUM};color:${(B.ret5y||0)>=0?'#A4E4C0':'#FFB3B3'};font-family:'DM Mono',monospace;font-weight:700;text-align:right">${pc(B.ret5y)}</td>
-      <td style="padding:8px 12px;background:${PLUM};color:#fff;font-family:'DM Mono',monospace;font-weight:700;text-align:right">${nb(B.sharpe)}</td>
-      <td style="padding:8px 12px;background:${PLUM};color:${(B.alpha||0)>=0?'#A4E4C0':'#FFB3B3'};font-family:'DM Mono',monospace;font-weight:700;text-align:right">${pc(B.alpha)}</td>
-      <td style="padding:8px 12px;background:${PLUM};color:#fff;font-family:'DM Mono',monospace;font-weight:700;text-align:right">${B.dncap!=null?nb(B.dncap)+'%':'—'}</td>
-    </tr></tfoot></table></div>`,
-    `Sharpe ≥ 0.5 = strong · Alpha ≥ 0 = outperforming · Down capture ≤ 100% = portfolio loses less than market in drawdowns · ER < 1.0% = low cost`)}
-  ${callout(`The ${SF.length}-fund portfolio achieves a blended 3Y CAGR of ${pc(B.ret3y)} with a Sharpe ratio of ${nb(B.sharpe)} and alpha of ${pc(B.alpha)} vs ${bmDisplayName}. The blended ER of ${nb(B.er)}% ${(B.er||0)<=1.2?'reflects an efficient, cost-conscious construction.':'should be reviewed — migrating to Direct plans could reduce costs significantly.'}`,(B.sharpe||0)>=0.5&&(B.alpha||0)>=0?'pos':'warn')}
-</section>
+${sec("fundtable") ? (()=>{
+  const detailColHdrs = `${TH('Fund','left')}${TH('Weight')}${TH('Amount')}${TH('ER')}${TH('1Y')}${TH('3Y CAGR')}${TH('5Y CAGR')}${TH('Sharpe')}${TH('Alpha')}${TH('Dn cap')}`;
+  const detailRows = SF.map((f,i) => {
+    const s=snapshots[f.isin]||{};
+    return `<tr style="background:${i%2===0?'#fff':GR10}">
+      ${TDL(`<div style="display:flex;align-items:center;gap:8px"><div style="width:4px;height:38px;border-radius:2px;background:${f.color};flex-shrink:0"></div>
+        <div><div style="font-size:12px;font-weight:600;color:${GR80}">${f.name}</div>
+        <div style="font-size:9.5px;color:${GR60}">${f.category||''}</div></div></div>`)}
+      ${TD(f._wPct.toFixed(1)+'%',PLUM,'1')}
+      ${TD(fmtL(f._wPct/100*investAmt),GR80)}
+      ${TD(s.expense_ratio!=null?parseFloat(s.expense_ratio).toFixed(2)+'%':'—',rcL(parseFloat(s.expense_ratio),1.2,1.8))}
+      ${TD(pc(s.returns?.['1y']),rc(parseFloat(s.returns?.['1y']),0,-5),'1')}
+      ${TD(pc(s.returns?.['3y']),rc(parseFloat(s.returns?.['3y']),0,-5))}
+      ${TD(pc(s.returns?.['5y']),rc(parseFloat(s.returns?.['5y']),0,-5))}
+      ${TD(nb(s.risk?.sharpe_ratio_3y),rc(parseFloat(s.risk?.sharpe_ratio_3y),0.5,0.3),'1')}
+      ${TD(pc(s.risk?.alpha_3y),rc(parseFloat(s.risk?.alpha_3y),0,-2))}
+      ${TD(s.risk?.down_capture_3y!=null?nb(s.risk.down_capture_3y,1)+'%':'—',rcL(parseFloat(s.risk?.down_capture_3y),90,105))}
+    </tr>`;
+  });
+  const footerRow = `<tfoot><tr style="background:${PLUM}">
+    <td colspan="2" style="padding:8px 12px;background:${PLUM};color:#fff;font-family:'DM Sans',sans-serif;font-weight:700">Blended portfolio</td>
+    <td style="padding:8px 12px;background:${PLUM};color:#fff;font-family:'DM Mono',monospace;font-weight:700;text-align:right">${fmtL(investAmt)}</td>
+    <td style="padding:8px 12px;background:${PLUM};color:#fff;font-family:'DM Mono',monospace;font-weight:700;text-align:right">${nb(B.er)+'%'}</td>
+    <td style="padding:8px 12px;background:${PLUM};color:${(B.ret1y||0)>=0?'#A4E4C0':'#FFB3B3'};font-family:'DM Mono',monospace;font-weight:700;text-align:right">${pc(B.ret1y)}</td>
+    <td style="padding:8px 12px;background:${PLUM};color:${(B.ret3y||0)>=0?'#A4E4C0':'#FFB3B3'};font-family:'DM Mono',monospace;font-weight:700;text-align:right">${pc(B.ret3y)}</td>
+    <td style="padding:8px 12px;background:${PLUM};color:${(B.ret5y||0)>=0?'#A4E4C0':'#FFB3B3'};font-family:'DM Mono',monospace;font-weight:700;text-align:right">${pc(B.ret5y)}</td>
+    <td style="padding:8px 12px;background:${PLUM};color:#fff;font-family:'DM Mono',monospace;font-weight:700;text-align:right">${nb(B.sharpe)}</td>
+    <td style="padding:8px 12px;background:${PLUM};color:${(B.alpha||0)>=0?'#A4E4C0':'#FFB3B3'};font-family:'DM Mono',monospace;font-weight:700;text-align:right">${pc(B.alpha)}</td>
+    <td style="padding:8px 12px;background:${PLUM};color:#fff;font-family:'DM Mono',monospace;font-weight:700;text-align:right">${B.dncap!=null?nb(B.dncap)+'%':'—'}</td>
+  </tr></tfoot>`;
+  const note = `Sharpe ≥ 0.5 = strong · Alpha ≥ 0 = outperforming · Down capture ≤ 100% = portfolio loses less than market in drawdowns · ER < 1.0% = low cost`;
+  const calloutHtml = callout(`The ${SF.length}-fund portfolio achieves a blended 3Y CAGR of ${pc(B.ret3y)} with a Sharpe ratio of ${nb(B.sharpe)} and alpha of ${pc(B.alpha)} vs ${bmDisplayName}. The blended ER of ${nb(B.er)}% ${(B.er||0)<=1.2?'reflects an efficient, cost-conscious construction.':'should be reviewed — migrating to Direct plans could reduce costs significantly.'}`,(B.sharpe||0)>=0.5&&(B.alpha||0)>=0?'pos':'warn');
 
-` : ""}
+  // Paginate: ~12 rows fit on first page (with section header), ~14 on continuation
+  const rpfp2 = Math.max(4, Math.floor((PAGE_H - SEC_OH - TBLFT - TBLHD - TBLNT - GAP - 40) / ROW_H));
+  const rpcp2 = Math.max(4, Math.floor((PAGE_H - SEC_OH - TBLFT - TBLHD - TBLNT - GAP) / ROW_H));
+  const ftPages = [];
+  let rem2 = [...detailRows];
+  let isF2 = true;
+  while (rem2.length > 0) {
+    const take = isF2 ? rpfp2 : rpcp2;
+    ftPages.push({ rows: rem2.slice(0, take), isFirst: isF2 });
+    rem2 = rem2.slice(take);
+    isF2 = false;
+  }
+
+  return ftPages.map((p, pi) => {
+    const isCont = pi > 0;
+    const isLast = pi === ftPages.length - 1;
+    const hd = sectionHd('07'+(isCont?String.fromCharCode(96+pi):''), 'Fund details'+(isCont?' — continued':''), isCont?'':'Complete data for all '+SF.length+' holdings in the recommended portfolio.');
+    const tbl = `<div style="overflow-x:auto"><table><thead><tr>${detailColHdrs}</tr></thead><tbody>${p.rows.join('')}</tbody>${isLast?footerRow:''}</table></div>`;
+    return `<section class="pg">
+      ${hd}
+      ${tblBox('Portfolio holdings — all metrics'+(isCont?` (part ${pi+1})`:''), tbl, isLast?note:'')}
+      ${isLast?calloutHtml:''}
+    </section>`;
+  }).join('\n');
+})() : ""}
 ${sec("annexure") ? `<!-- ═══ ANNEXURE: FUND SNAPSHOTS ═══ -->
 <section class="pg">
   ${sectionHd('A','Annexure — Individual fund snapshots','Performance, risk metrics and calendar year returns for each holding.')}
