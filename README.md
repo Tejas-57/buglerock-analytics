@@ -1,25 +1,100 @@
 # BugleRock Analytics
 
-**AI-native portfolio analytics platform for BugleRock Capital**
-
-GitHub: https://github.com/Tejas-57/buglerock-analytics
-
----
-
-## Live URLs
-
-- **Frontend**: https://buglerock-analytics-plum.vercel.app
-- **Backend**: https://buglerock-analytics-ew17.onrender.com
-- **Local backend**: `cd backend && venv\Scripts\activate && python main.py`
+AI-native investment analytics platform for BugleRock Capital. Enables wealth managers to research mutual funds, build client portfolios, run risk/performance analysis, optimise allocations, and generate branded client proposals — all in one workflow.
 
 ---
 
 ## Stack
 
-- **Frontend**: React (Create React App) → Vercel (BugleRock work account)
-- **Backend**: FastAPI (Python) → Render (BugleRock work account)
-- **Database**: PostgreSQL → Render Basic-1gb + 5GB storage
-- **Data source**: Morningstar daily Excel via Gmail API
+| Layer | Technology | Details |
+|---|---|---|
+| **Frontend** | React (Create React App) | Deployed on Vercel — BugleRock work account |
+| **Backend** | FastAPI (Python 3.11) | Deployed on Render — BugleRock work account |
+| **Database** | PostgreSQL via SQLAlchemy ORM | Render Basic-1GB plan, 5GB storage |
+| **Data Source** | Morningstar daily Excel | Delivered via Gmail API, auto-parsed on arrival |
+| **Auth / Secrets** | Gmail OAuth 2.0 | Token stored in PostgreSQL `settings` table |
+
+**Repo:** https://github.com/Tejas-57/buglerock-analytics  
+**Frontend (live):** https://buglerock-analytics-plum.vercel.app  
+**Backend (live):** https://buglerock-analytics-ew17.onrender.com
+
+---
+
+## Local Development
+
+### Prerequisites
+- Python 3.11+
+- Node.js 18+
+- PostgreSQL (local) or use Render DB connection string
+
+### Backend
+```bash
+cd backend
+python -m venv venv
+venv\Scripts\activate          # Windows
+source venv/bin/activate       # Mac/Linux
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+### Frontend
+```bash
+cd frontend
+npm install
+npm start                      # Runs on http://localhost:3000
+```
+
+### Environment Variables
+
+**Backend** — create `backend/.env` or set in Render dashboard:
+```env
+DATABASE_URL=postgresql://user:password@host:5432/dbname
+GMAIL_CLIENT_ID=...
+GMAIL_CLIENT_SECRET=...
+GMAIL_REDIRECT_URI=...
+GMAIL_TOKEN_JSON=...           # Stored in DB automatically after first OAuth flow
+```
+
+**Frontend** — create `frontend/.env.local`:
+```env
+REACT_APP_API_URL=http://localhost:8000
+```
+
+---
+
+## Data Pipeline
+
+Morningstar emails a daily Excel file (`New_Singlesheet_Daily_MF_Report_DDMMYYYY.xlsx`) to a monitored Gmail inbox.
+
+### How it works
+1. Backend polls Gmail every **5 minutes** and immediately on startup
+2. Searches: `from:sujaya.l@alerts-morningstar.com subject:New Singlesheet Daily MF Report`
+3. Downloads the `.xlsx` attachment
+4. Parses all sheets into `DailyFundData` and `BenchmarkData` tables
+5. `data_date` = most common `Return Date (Daily)` across all parsed funds — dynamically handles x-1, x-2, x-3 for market holidays
+
+### Sheets parsed
+| Sheet | Asset Class |
+|---|---|
+| Equity | Equity (active) |
+| Equity Index & FoF | Equity Index, Passive FoFs |
+| Equity ETF | ETF — Equity, Precious Metals ETF |
+| Hybrid | Hybrid / Multi-asset |
+| SIF | Specialised Investment Funds |
+| Debt | Debt (active) |
+| Debt ETF | ETF — Debt |
+| International | International / Global funds |
+
+### Manual trigger (if email missed or for recovery)
+```
+GET /api/funds/fetch?date=YYYY-MM-DD
+```
+⚠️ Use the **email arrival date**, not the data date. Email for 21 July data arrives on 22 July.
+
+### Debug Gmail search
+```
+GET /api/funds/debug-gmail?date=YYYY-MM-DD
+```
 
 ---
 
@@ -29,199 +104,166 @@ GitHub: https://github.com/Tejas-57/buglerock-analytics
 buglerock-analytics/
 ├── frontend/
 │   └── src/
-│       ├── components/
-│       │   ├── PortfolioBuilder/
-│       │   │   ├── PortfolioBuilder.jsx       ← parent, 6-step rail
-│       │   │   └── steps/
-│       │   │       ├── ClientIPS.jsx           ← Step 1
-│       │   │       ├── BuildPortfolio.jsx      ← Step 2
-│       │   │       ├── Analyse.jsx             ← Step 3 (incl. Overlap sub-tab)
-│       │   │       ├── Optimise.jsx            ← Step 4 (Monte Carlo)
-│       │   │       ├── Compare.jsx             ← Step 5
-│       │   │       └── PDFProposal.jsx         ← Step 6
-│       │   ├── FundExplorer/
-│       │   │   └── FundExplorer.jsx
-│       │   ├── FundDetail/
-│       │   │   └── FundDetail.jsx
-│       │   ├── PeerComparison/
-│       │   │   └── CompareFunds.jsx
-│       │   ├── Performance/
-│       │   │   ├── Performance.jsx
-│       │   │   ├── NAVLineChart.jsx
-│       │   │   ├── ReturnMetrics.jsx
-│       │   │   └── RiskMetrics.jsx
-│       │   ├── RollingAnalytics/
-│       │   │   └── RollingAnalytics.jsx        ← rolling return/CAGR analysis
-│       │   ├── Simulator/
-│       │   │   └── Simulator.jsx               ← lumpsum/SIP what-if simulator
-│       │   ├── Chat/
-│       │   │   └── ChatButton.jsx              ← Gemini-powered fund assistant
-│       │   ├── Watchlist/
-│       │   │   └── Watchlist.jsx
-│       │   ├── Layout/
-│       │   │   ├── Header.jsx
-│       │   │   └── Navbar.jsx
-│       │   └── ...
-│       └── styles/
-│           └── global.css
+│       └── components/
+│           ├── FundExplorer/          # Fund browsing, filtering, search
+│           │   └── FundExplorer.jsx
+│           ├── FundDetail/            # Individual fund deep dive
+│           └── PortfolioBuilder/      # 6-step portfolio workflow
+│               ├── PortfolioBuilder.jsx
+│               └── steps/
+│                   ├── ClientIPS.jsx          # Step 1: Investment Policy Statement
+│                   ├── FundSearch.jsx         # Step 2: Select funds
+│                   ├── BuildPortfolio.jsx     # Step 3: Assign weights
+│                   ├── Analyse.jsx            # Step 4: Full analytics suite
+│                   ├── Optimise.jsx           # Step 5: Monte Carlo optimiser
+│                   ├── Compare.jsx            # Step 5b: Original vs optimised
+│                   └── PDFProposal.jsx        # Step 6: Client proposal generator
+│
 └── backend/
-    ├── main.py
-    ├── models/
-    │   └── database.py
+    ├── main.py                        # FastAPI app, startup, Gmail poll loop
     ├── routers/
-    │   ├── status.py
-    │   ├── home.py
-    │   ├── funds.py
-    │   ├── performance.py
-    │   ├── peer.py
-    │   ├── benchmarks.py
-    │   ├── optimise.py
-    │   ├── holdings.py        ← overlap analysis, Morningstar holdings
-    │   ├── rolling.py         ← rolling return / CAGR endpoints
-    │   ├── simulator.py       ← lumpsum/SIP simulator endpoints
-    │   ├── chat.py            ← Gemini chat assistant endpoint
-    │   ├── nav.py
-    │   ├── gmail.py
-    │   └── ...
+    │   ├── funds.py                   # /api/funds — browse, search, categories
+    │   ├── home.py                    # /api/home — fund snapshot
+    │   ├── nav.py                     # /api/nav — NAV history, stress test, correlation, rolling
+    │   ├── holdings.py                # /api/holdings — overlap matrix
+    │   ├── performance.py             # /api/performance — peer comparison
+    │   ├── peer.py                    # /api/peer — peer averages
+    │   ├── benchmarks.py              # /api/benchmarks — benchmark data
+    │   ├── optimise.py                # /api/optimise — Monte Carlo
+    │   └── proposal.py                # /api/proposal — PPT export (WIP)
     ├── services/
-    │   ├── parser.py           ← PARSER_VERSION=1.5
-    │   ├── db_service.py
-    │   ├── gmail_watcher.py
-    │   ├── optimiser.py        ← Monte Carlo engine
-    │   ├── nav_fetcher.py
-    │   ├── mfapi.py             ← external NAV history fetch (mfapi.in), CAGR/XIRR helpers
-    │   ├── morningstar_service.py  ← Morningstar NewPortfolioApi client (holdings, access code)
-    │   └── nse_fetch.py         ← NSE data fetch helpers
-    └── utils/
-        └── trading_calendar.py
+    │   ├── parser.py                  # Excel → PostgreSQL parser
+    │   ├── gmail_watcher.py           # Gmail OAuth + fetch logic
+    │   ├── db_service.py              # DB query functions
+    │   └── optimiser.py               # Monte Carlo optimiser
+    └── models/
+        └── database.py                # SQLAlchemy models (PostgreSQL)
 ```
+
+---
+
+## Database Models
+
+### `DailyFundData`
+Stores one row per fund per data date. Fields include: ISIN, name, category, asset_class, NAV, returns (1M/3M/6M/1Y/3Y/5Y/YTD/CY), risk metrics (Sharpe, Alpha, Beta, Sortino, Up/Down capture, Std dev), cap allocation (large/mid/small), equity/bond/cash/other pct, expense ratio, AUM, Morningstar rating, holdings data.
+
+### `BenchmarkData`
+Benchmark performance by date. Fields: name, display_name, returns (1M/3M/6M/1Y/3Y/5Y/YTD/CY2021-2025).
+
+### `EmailFetchLog`
+Tracks which emails have been processed to prevent duplicate imports.
 
 ---
 
 ## Key Features
 
 ### Fund Explorer
-- Browse all mutual funds by asset class, category, sub-type
-- Asset classes: Equity, Hybrid, Debt, ETF, Precious Metals, International, SIF
-- Precious Metals as separate asset class (Gold, Silver, ETFs)
-- Global search with deduplication
-- R1/R2 whitelist filter
+- 2,000+ mutual funds across all asset classes
+- Filter by: Active, Passive Index, Passive ETF, Global Funds
+- Sub-filters by category (e.g. Large Cap, Nifty 50 ETF, Corporate Bond)
+- Sort by 1Y / 3Y return
+- Category peer average shown inline
+- Search by fund name, AMC, or ISIN
 
-### Portfolio Builder (6 steps)
-1. **Client & IPS** — client details, risk profile, asset allocation ranges, live benchmark picker (multi-select with manual weights)
-2. **Build Portfolio** — add funds, set weights, view exposure metrics from snapshots
-3. **Analyse** — 6 sub-tabs: overview, returns, risk, exposure, calendar year, projection
-4. **Optimise** — Monte Carlo (10,000 simulations), 3 strategies: Max Sharpe / Min Volatility / Max Return
-5. **Compare** — original vs optimised side-by-side
-6. **PDF Proposal** — branded client-ready proposal
+### Portfolio Builder — 6-Step Workflow
 
-### Optimiser Architecture
-- **Layer 1**: IPS constraints (equity/debt ranges, per-fund min 3% / max 20%)
-- **Layer 2**: Sleeve classification (equity active/passive, hybrid equity/debt, debt, alternatives, international)
-- **Layer 3**: Monte Carlo on weekly NAV returns (3Y lookback from `nav_history`)
-- **Sub-sleeve caps**: Precious metals 10%, Equity passive 10%, International 10%, Thematic 10%
-- **R1/R2 quality flags** with alternative suggestions
-- **Manual weight** option for funds with <1Y NAV history
+**Step 1 — IPS (Investment Policy Statement)**  
+Client name, objective, risk profile, investment amount, SIP amount, tenure, target return, benchmark (single or blended), constraints, deployment mode, review frequency, adviser notes.
 
-### Holdings & Overlap Analysis
-- Fund holdings sourced from Morningstar NewPortfolioApi (`services/morningstar_service.py`)
-- `fund_holdings` table stores per-fund holding-level data (`holding_type='E'` = equity)
-- `/api/holdings/overlap` — pairwise overlap % + common holdings across 2-4 active equity funds
-- `fund_portfolio_stats` stores derived portfolio-level stats per fund/date
-- `morningstar_accesscode` stores/refreshes the Morningstar API access token (`MSTAR_ACCESSCODE`, expiry-tracked)
-- Overlap analysis surfaced as a sub-tab inside Portfolio Builder → Analyse (Step 3)
+**Step 2 — Select Funds**  
+Search and add funds. Supports up to 20 funds.
 
-### Peer Comparison
-- `CompareFunds.jsx` (PeerComparison) — side-by-side comparison of funds across return, risk, cost & rating metrics
-- Backed by `routers/peer.py`
-- Color-coded win/loss cells (green/red) per metric
+**Step 3 — Build Portfolio**  
+Assign weights manually. Equal-weight button. Validation that weights sum to 100%.
 
-### Rolling Analytics
-- `RollingAnalytics.jsx` + `routers/rolling.py`
-- Rolling CAGR over 1Y/3Y/5Y windows using external NAV history (`services/mfapi.py`, mfapi.in)
-- Validates requested date range against fund inception date; warns/adjusts if start predates inception
+**Step 4 — Analyse**  
+Full analytics across 8 subtabs:
+- Returns & Projections — fund-level returns with 1Y/3Y/5Y contribution columns; lump sum and SIP wealth projections vs benchmark
+- Risk Metrics — Sharpe, Alpha, Beta, Up/Down capture, Std dev, ER
+- Rolling Returns — 3M (avg 1Y), 1Y (avg 3Y), 3Y CAGR (avg 5Y)
+- Style & Drift — cap-tier drift vs 60/25/15 neutral mix
+- Exposure — asset class allocation vs IPS targets
+- Overlap — pairwise stock overlap matrix (active equity funds only, max 20)
+- Correlation — 3-year daily NAV correlation matrix
+- Stress Test — historical drawdown in 6 market crash scenarios using actual NAV data
 
-### Simulator
-- `Simulator.jsx` + `routers/simulator.py`
-- Lumpsum / SIP what-if return simulation using historical NAV (CAGR, XIRR)
-- Inception-date validation shared with Rolling Analytics
+**Step 5 — Optimise**  
+Monte Carlo simulation across 10,000+ portfolio combinations. Constraints: max fund weight, max passive exposure, max precious metals, min international. Strategies: Max Sharpe, Min Volatility, Max Alpha, Balanced.
 
-### Fund Detail & Chat Assistant
-- `FundDetail.jsx` — single-fund deep dive (metrics, holdings, performance)
-- `ChatButton.jsx` + `routers/chat.py` — Gemini-powered (`gemini-2.5-flash`) fund/financial Q&A assistant, scoped to fund context passed from the frontend; no personalized investment advice
-
-### Data Pipeline
-- Gmail watcher polls every 5 minutes for Morningstar daily Excel
-- Parser v1.5 extracts funds, benchmarks, all metrics
-- `data_date` = most common `nav_date` from the file (not filename date)
-- Benchmarks stored in `DailyFundData` with `is_benchmark=1`
-- NAV history in `nav_history` table (3.6M+ rows)
-- `nse_fetch.py` — supplementary NSE data fetch helpers
+**Step 6 — Proposal**  
+Generate a branded client-ready PDF proposal with 12 configurable sections. Dynamic pagination — tables split across pages automatically with continuation headers. Overlap and correlation matrices auto-scale by fund count.
 
 ---
 
-## Database Tables
+## Asset Class Classification
 
-| Table | Rows (approx) | Purpose |
-|---|---|---|
-| `daily_fund_data` | ~8,000/day | Fund metrics per data_date |
-| `nav_history` | 3.6M+ | Daily NAV per ISIN |
-| `email_fetch_log` | ~100+ | Gmail fetch audit trail |
-| `app_settings` | 4 | Gmail token, parser version, mail_date |
-| `benchmark_data` | 0 (cleared) | Legacy — not used |
-| `nav_fetch_log` | ~6,500 | NAV fetch audit |
-| `fund_holdings` | growing | Per-fund, per-holding data from Morningstar (equity/debt) |
-| `fund_portfolio_stats` | growing | Derived portfolio-level stats per fund/date |
-| `holdings_fetch_log` | growing | Morningstar holdings fetch audit trail |
-| `morningstar_accesscode` | 1 | Cached Morningstar API access token + expiry |
+Single source of truth: `blendAssetClass()` function used across Analyse, Compare, Optimise, and PDF.
+
+| Fund type | Classified as |
+|---|---|
+| Gold ETF, Silver ETF, Gold/Silver FoF | Commodities |
+| Debt, Bond, Liquid, Gilt, Money Market | Debt |
+| Hybrid / Multi-asset | Split by equity_pct / bond_pct |
+| Equity, Index, Passive ETF | Equity |
+| REITs, convertibles, preferred | REITs/Other |
+
+**Rule:** Raw Morningstar values used as-is. No normalisation. Weights rebased when funds have null data.
 
 ---
 
-## Environment Variables (Backend)
+## Overlap Analysis
 
-```
-DATABASE_URL          = PostgreSQL connection string (new Render DB)
-CORS_ORIGINS          = https://buglerock-analytics-plum.vercel.app
-GEMINI_API_KEY        = Gemini AI key (chat assistant, gemini-2.5-flash)
-WEB_CONCURRENCY       = 2
-APP_PORT              = backend port override
-MSTAR_ACCOUNT_CODE    = Morningstar API account code
-MSTAR_ACCOUNT_PASSWORD = Morningstar API account password
-MSTAR_ACCESSCODE      = cached Morningstar access token (auto-refreshed, stored in DB)
-MSTAR_ACCESSCODE_EXPIRY = expiry timestamp for cached Morningstar access token
-```
+Excluded from overlap (hold no equity stocks):
+- All debt categories: liquid, overnight, money market, gilt, ultra short, low duration, corporate bond, credit risk, banking & PSU, duration, floater, fixed maturity
+- All precious metals: gold ETFs, silver ETFs, gold FoFs, silver FoFs
+- India OE (open-end non-equity)
+- **API limit: 20 funds maximum**
 
-## Secret Files (Render)
+---
 
-```
-gmail_credentials.json   → OAuth2 client credentials
-gmail_token.json         → OAuth2 refresh token
+## Benchmark Support
+
+- Single or multiple benchmarks with custom IPS weights
+- Blended returns computed per period with weight rebasing for missing data
+- Periods with partial benchmark data marked with `~`
+- Multi-benchmark displayed as "Blended BM" with footnote showing composition
+- All periods covered: 1M, 3M, 6M, YTD, 1Y, 3Y, 5Y, CY2021–2025
+
+---
+
+## PDF Proposal
+
+### Sections (configurable via checkbox)
+Cover → IPS → Portfolio Overview → Performance → Wealth Projection → Risk Profile → Stress Test → Overlap Matrix → Correlation Matrix → Exposure & Style → Fund Table → Per-Fund Annexure
+
+### Layout Engine
+- Pre-calculates content height before rendering
+- Fund allocation table paginated dynamically — calculates exact rows per page
+- Each overflow page gets a "— continued" header with same spacing
+- Asset class + market cap + scorecard always on their own slide
+- Stress, overlap, correlation each on their own slide
+- Matrices scale cell/font size automatically: ≤5 funds → 74px cells, 14+ funds → 30px cells
+
+### Print CSS
+```css
+.pg { page-break-before: always; padding-top: 48px }
+@page { margin: 8mm 12mm; size: 297mm 210mm }
+tr { page-break-inside: avoid }
 ```
 
 ---
 
-## Git Workflow
+## Deployment
 
-```bash
-git add -A && git commit -m "message" && git push
-```
+### Frontend (Vercel)
+Push to `main` → Vercel auto-builds and deploys. No manual steps.
 
-- Push to `main` → auto-deploys to Render (backend) and Vercel (frontend)
-
----
-
-## Important Rules
-
-1. Always generate full files for download — never snippets
-2. Never alter `parser.py` for debugging
-3. Never create separate files for same task — modify existing
-4. Save Python scripts as `.py` files — never multiline in CMD
-5. Parser version bump (`PARSER_VERSION`) triggers automatic re-parse on deploy
+### Backend (Render)
+Push to `main` → Render auto-deploys (~3 minutes). On startup the backend immediately fetches the latest Gmail email and begins the 5-minute polling loop.
 
 ---
 
-## Pending / Known Issues
+## Known Limitations / Pending
 
-- ✅ Render web service on Standard plan ($25/mo) — upgraded
-- `WEB_CONCURRENCY=2`
-- Old Render account (personal) still running — delete after confirming new account stable
+- PPT export is built but hidden (`display:none`) — to be enabled when ready
+- `backend/utils/trading_calendar.py` is deprecated and safe to delete — no longer imported anywhere

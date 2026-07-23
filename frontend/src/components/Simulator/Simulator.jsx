@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import './Simulator.css';
 
@@ -18,25 +17,136 @@ function ResultCard({ label, value, sub }) {
   );
 }
 
-export default function Simulator({ selectedFund }) {
-  const [mode, setMode] = useState('lumpsum');
-  const [amount, setAmount] = useState('100000');
+function FundSearchBar({ selectedDate, onSelect }) {
+  const [query, setQuery]       = useState('');
+  const [results, setResults]   = useState([]);
+  const [open, setOpen]         = useState(false);
+  const [loading, setLoading]   = useState(false);
+
+  const dateStr = selectedDate
+    ? selectedDate.toISOString().split('T')[0]
+    : new Date().toISOString().split('T')[0];
+
+  useEffect(() => {
+    if (!query.trim() || query.trim().length < 2) {
+      setResults([]);
+      setOpen(false);
+      return;
+    }
+    setLoading(true);
+    const timer = setTimeout(() => {
+      fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/search?q=${encodeURIComponent(query.trim())}&date=${dateStr}`)
+        .then(r => r.json())
+        .then(d => {
+          setResults(d.funds || []);
+          setOpen(true);
+          setLoading(false);
+        })
+        .catch(() => setLoading(false));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query, dateStr]);
+
+  const handleSelect = (fund) => {
+    setQuery('');
+    setResults([]);
+    setOpen(false);
+    onSelect(fund);
+  };
+
+  return (
+    <div
+      style={{ position: 'relative', width: 360 }}
+      onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false); }}
+    >
+      <input
+        type="text"
+        placeholder="Search any fund, AMC or ISIN..."
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        onFocus={() => { if (results.length > 0) setOpen(true); }}
+        style={{
+          padding: '8px 12px 8px 34px', borderRadius: 8,
+          border: '1px solid var(--border)', fontSize: 12, width: '100%',
+          outline: 'none', background: '#fff', color: 'var(--text-primary)',
+          boxSizing: 'border-box',
+        }}
+      />
+      <svg
+        style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+        width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      >
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      {loading && (
+        <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: 'var(--text-muted)' }}>...</span>
+      )}
+      {open && results.length > 0 && (
+        <div style={{
+          position: 'absolute', top: '100%', right: 0,
+          width: 'min(420px, calc(100vw - var(--nav-width) - 48px))',
+          maxHeight: '60vh',
+          overflowY: 'auto', background: '#fff', border: '1px solid var(--border)',
+          borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 1000, marginTop: 4,
+        }}>
+          {results.map((fund, idx) => (
+            <div
+              key={fund.isin || fund.amfi_code || `s-${idx}`}
+              tabIndex={0}
+              onClick={() => handleSelect(fund)}
+              onKeyDown={e => e.key === 'Enter' && handleSelect(fund)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px',
+                borderBottom: idx < results.length - 1 ? '1px solid var(--border)' : 'none',
+                cursor: 'pointer', transition: 'background .1s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fund.name}
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                  <span style={{ fontSize: 10, color: 'var(--brand-mid)', background: 'rgba(109,84,121,0.08)', padding: '1px 5px', borderRadius: 3 }}>
+                    {['Cat: India Fund Sector - Precious Metals-Gold','Cat: India Fund Sector - Precious Metals-Silver','India Fund Sector - Precious Metals','India ETF Sector - Precious Metals'].includes(fund.category)
+                      ? 'Precious Metals'
+                      : fund.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}
+                  </span>
+                </div>
+              </div>
+              {fund.ranking && fund.ranking !== '-' && fund.ranking !== '0' && (
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: 'rgba(16,185,129,0.1)', color: '#059669' }}>
+                  {fund.ranking}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Simulator({ selectedDate }) {
+  const [fund, setFund]         = useState(null);
+  const [mode, setMode]         = useState('lumpsum');
+  const [amount, setAmount]     = useState('100000');
   const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [sipDate, setSipDate] = useState('1');
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const navigate = useNavigate();
+  const [endDate, setEndDate]   = useState('');
+  const [sipDate, setSipDate]   = useState('1');
+  const [result, setResult]     = useState(null);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState(null);
 
   const handleGo = () => {
-    if (!selectedFund || !amount || !startDate || !endDate) return;
+    if (!fund || !amount || !startDate || !endDate) return;
     setLoading(true);
     setError(null);
     setResult(null);
 
     const params = new URLSearchParams({
-      amfi_code: selectedFund.amfi_code,
+      amfi_code: fund.amfi_code,
       mode,
       amount,
       start_date: startDate,
@@ -50,90 +160,96 @@ export default function Simulator({ selectedFund }) {
       .catch(() => { setError('Simulation failed. Please check inputs.'); setLoading(false); });
   };
 
-  const canGo = selectedFund && amount && startDate && endDate;
+  const canGo = fund && amount && startDate && endDate;
 
-  if (!selectedFund) {
-    return (
-      <div className="simulator-page fade-in">
-        <div className="page-header">
+  return (
+    <div className="simulator-page fade-in">
+      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
           <h1 className="section-title">Simulator</h1>
           <p className="page-desc">Backtest SIP or Lumpsum investment using historical NAV data.</p>
         </div>
+        <FundSearchBar selectedDate={selectedDate} onSelect={f => { setFund(f); setResult(null); setError(null); }} />
+      </div>
+
+      {fund && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: '8px 14px', background: 'rgba(145,47,99,0.05)', borderRadius: 8, border: '1px solid var(--border)' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--brand-primary)" strokeWidth="2">
+            <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+          </svg>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>{fund.name}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fund.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}</span>
+          <button
+            onClick={() => { setFund(null); setResult(null); setError(null); }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1, padding: '0 2px' }}
+            title="Clear fund"
+          >×</button>
+        </div>
+      )}
+
+      {!fund && (
         <div className="empty-state">
           <div className="empty-icon">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.3">
               <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
             </svg>
           </div>
-          <p>No fund selected. Please select a fund from the Home tab.</p>
-          <button className="btn-primary" style={{ marginTop: '16px' }} onClick={() => navigate('/home')}>
-            Go to Home
-          </button>
+          <p>Search for a fund above to begin.</p>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  return (
-    <div className="simulator-page fade-in">
-      <div className="page-header">
-        <h1 className="section-title">Simulator</h1>
-        <p className="page-desc">
-          Simulating: <span style={{ color: 'var(--gold)' }}>{selectedFund.name}</span>
-          <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>{selectedFund.category}</span>
-        </p>
-      </div>
-
-      <div className="card sim-inputs">
-        <div className="section-subtitle">Simulation Parameters</div>
-        <div className="sim-form">
-          <div className="input-group">
-            <label className="input-label">Investment Type</label>
-            <div className="mode-toggle">
-              <button className={`mode-btn ${mode === 'lumpsum' ? 'active' : ''}`} onClick={() => setMode('lumpsum')}>Lumpsum</button>
-              <button className={`mode-btn ${mode === 'sip' ? 'active' : ''}`} onClick={() => setMode('sip')}>SIP</button>
-            </div>
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">{mode === 'sip' ? 'Monthly SIP Amount (₹)' : 'Investment Amount (₹)'}</label>
-            <input
-              type="number"
-              className="input-field"
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
-              placeholder="e.g. 100000"
-              min="1"
-            />
-          </div>
-
-          {mode === 'sip' && (
+      {fund && (
+        <div className="card sim-inputs">
+          <div className="section-subtitle">Simulation Parameters</div>
+          <div className="sim-form">
             <div className="input-group">
-              <label className="input-label">SIP Date (day of month)</label>
-              <select className="input-field" value={sipDate} onChange={e => setSipDate(e.target.value)}>
-                {Array.from({ length: 28 }, (_, i) => i + 1).map(d => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
+              <label className="input-label">Investment Type</label>
+              <div className="mode-toggle">
+                <button className={`mode-btn ${mode === 'lumpsum' ? 'active' : ''}`} onClick={() => setMode('lumpsum')}>Lumpsum</button>
+                <button className={`mode-btn ${mode === 'sip' ? 'active' : ''}`} onClick={() => setMode('sip')}>SIP</button>
+              </div>
             </div>
-          )}
 
-          <div className="input-group">
-            <label className="input-label">Start Date</label>
-            <input type="date" className="input-field" value={startDate} onChange={e => setStartDate(e.target.value)} max={endDate || new Date().toISOString().split('T')[0]} />
-          </div>
-          <div className="input-group">
-            <label className="input-label">End Date</label>
-            <input type="date" className="input-field" value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate} max={new Date().toISOString().split('T')[0]} />
-          </div>
+            <div className="input-group">
+              <label className="input-label">{mode === 'sip' ? 'Monthly SIP Amount (₹)' : 'Investment Amount (₹)'}</label>
+              <input
+                type="number"
+                className="input-field"
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                placeholder="e.g. 100000"
+                min="1"
+              />
+            </div>
 
-          <div className="input-group go-group">
-            <button className="btn-primary" onClick={handleGo} disabled={!canGo || loading}>
-              {loading ? 'Simulating…' : 'GO'}
-            </button>
+            {mode === 'sip' && (
+              <div className="input-group">
+                <label className="input-label">SIP Date (day of month)</label>
+                <select className="input-field" value={sipDate} onChange={e => setSipDate(e.target.value)}>
+                  {Array.from({ length: 28 }, (_, i) => i + 1).map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="input-group">
+              <label className="input-label">Start Date</label>
+              <input type="date" className="input-field" value={startDate} onChange={e => setStartDate(e.target.value)} max={endDate || new Date().toISOString().split('T')[0]} />
+            </div>
+            <div className="input-group">
+              <label className="input-label">End Date</label>
+              <input type="date" className="input-field" value={endDate} onChange={e => setEndDate(e.target.value)} min={startDate} max={new Date().toISOString().split('T')[0]} />
+            </div>
+
+            <div className="input-group go-group">
+              <button className="btn-primary" onClick={handleGo} disabled={!canGo || loading}>
+                {loading ? 'Simulating…' : 'GO'}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {error && <div className="error-msg">{error}</div>}
       {result?.warning && <div className="warning-msg">⚠ {result.warning}</div>}

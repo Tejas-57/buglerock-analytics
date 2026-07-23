@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import './RollingAnalytics.css';
 
@@ -24,26 +23,136 @@ function StatCard({ label, value, suffix = '%' }) {
   );
 }
 
-export default function RollingAnalytics({ selectedFund }) {
+function FundSearchBar({ selectedDate, onSelect }) {
+  const [query, setQuery]     = useState('');
+  const [results, setResults] = useState([]);
+  const [open, setOpen]       = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const dateStr = selectedDate
+    ? selectedDate.toISOString().split('T')[0]
+    : new Date().toISOString().split('T')[0];
+
+  useEffect(() => {
+    if (!query.trim() || query.trim().length < 2) {
+      setResults([]);
+      setOpen(false);
+      return;
+    }
+    setLoading(true);
+    const timer = setTimeout(() => {
+      fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/search?q=${encodeURIComponent(query.trim())}&date=${dateStr}`)
+        .then(r => r.json())
+        .then(d => {
+          setResults(d.funds || []);
+          setOpen(true);
+          setLoading(false);
+        })
+        .catch(() => setLoading(false));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query, dateStr]);
+
+  const handleSelect = (fund) => {
+    setQuery('');
+    setResults([]);
+    setOpen(false);
+    onSelect(fund);
+  };
+
+  return (
+    <div
+      style={{ position: 'relative', width: 360 }}
+      onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false); }}
+    >
+      <input
+        type="text"
+        placeholder="Search any fund, AMC or ISIN..."
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        onFocus={() => { if (results.length > 0) setOpen(true); }}
+        style={{
+          padding: '8px 12px 8px 34px', borderRadius: 8,
+          border: '1px solid var(--border)', fontSize: 12, width: '100%',
+          outline: 'none', background: '#fff', color: 'var(--text-primary)',
+          boxSizing: 'border-box',
+        }}
+      />
+      <svg
+        style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+        width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      >
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      {loading && (
+        <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: 'var(--text-muted)' }}>...</span>
+      )}
+      {open && results.length > 0 && (
+        <div style={{
+          position: 'absolute', top: '100%', right: 0,
+          width: 'min(420px, calc(100vw - var(--nav-width) - 48px))',
+          maxHeight: '60vh',
+          overflowY: 'auto', background: '#fff', border: '1px solid var(--border)',
+          borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 1000, marginTop: 4,
+        }}>
+          {results.map((fund, idx) => (
+            <div
+              key={fund.isin || fund.amfi_code || `s-${idx}`}
+              tabIndex={0}
+              onClick={() => handleSelect(fund)}
+              onKeyDown={e => e.key === 'Enter' && handleSelect(fund)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px',
+                borderBottom: idx < results.length - 1 ? '1px solid var(--border)' : 'none',
+                cursor: 'pointer', transition: 'background .1s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fund.name}
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                  <span style={{ fontSize: 10, color: 'var(--brand-mid)', background: 'rgba(109,84,121,0.08)', padding: '1px 5px', borderRadius: 3 }}>
+                    {['Cat: India Fund Sector - Precious Metals-Gold','Cat: India Fund Sector - Precious Metals-Silver','India Fund Sector - Precious Metals','India ETF Sector - Precious Metals'].includes(fund.category)
+                      ? 'Precious Metals'
+                      : fund.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}
+                  </span>
+                </div>
+              </div>
+              {fund.ranking && fund.ranking !== '-' && fund.ranking !== '0' && (
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: 'rgba(16,185,129,0.1)', color: '#059669' }}>
+                  {fund.ranking}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function RollingAnalytics({ selectedDate }) {
+  const [fund, setFund]           = useState(null);
   const [rollingYears, setRollingYears] = useState(1);
   const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [warning, setWarning] = useState(null);
+  const [endDate, setEndDate]     = useState('');
+  const [result, setResult]       = useState(null);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState(null);
   const [validationMsg, setValidationMsg] = useState(null);
 
   const handleGo = () => {
-    if (!selectedFund || !startDate || !endDate) return;
+    if (!fund || !startDate || !endDate) return;
     setLoading(true);
     setError(null);
-    setWarning(null);
     setResult(null);
     setValidationMsg(null);
 
     const params = new URLSearchParams({
-      amfi_code: selectedFund.amfi_code,
+      amfi_code: fund.amfi_code,
       rolling_years: rollingYears,
       start_date: startDate,
       end_date: endDate,
@@ -62,25 +171,45 @@ export default function RollingAnalytics({ selectedFund }) {
       .catch(() => { setError('Analysis failed. Please check inputs.'); setLoading(false); });
   };
 
-  const canGo = selectedFund && startDate && endDate;
+  const canGo = fund && startDate && endDate;
 
   return (
     <div className="rolling-page fade-in">
-      <div className="page-header">
-        <h1 className="section-title">Rolling Average Analytics</h1>
-        <p className="page-desc">Analyse rolling CAGR distribution using daily historical NAV data.</p>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 className="section-title">Rolling Average Analytics</h1>
+          <p className="page-desc">Analyse rolling CAGR distribution using daily historical NAV data.</p>
+        </div>
+        <FundSearchBar selectedDate={selectedDate} onSelect={f => { setFund(f); setResult(null); setError(null); setValidationMsg(null); }} />
       </div>
 
-      {!selectedFund && (
-        <div className="empty-state">
-          <p>No fund selected. Please select a fund from the Home tab.</p>
-          <button className="btn-primary" style={{ marginTop: '16px' }} onClick={() => navigate('/home')}>
-            Go to Home
-          </button>
+      {fund && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: '8px 14px', background: 'rgba(145,47,99,0.05)', borderRadius: 8, border: '1px solid var(--border)' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--brand-primary)" strokeWidth="2">
+            <path d="M21.21 15.89A10 10 0 118 2.83"/><path d="M22 12A10 10 0 0012 2v10z"/>
+          </svg>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>{fund.name}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fund.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}</span>
+          <button
+            onClick={() => { setFund(null); setResult(null); setError(null); setValidationMsg(null); }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1, padding: '0 2px' }}
+            title="Clear fund"
+          >×</button>
         </div>
       )}
 
-      {selectedFund && (
+      {!fund && (
+        <div className="empty-state">
+          <div className="empty-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.3">
+              <path d="M21.21 15.89A10 10 0 118 2.83"/><path d="M22 12A10 10 0 0012 2v10z"/>
+            </svg>
+          </div>
+          <p>Search for a fund above to begin.</p>
+        </div>
+      )}
+
+      {fund && (
         <div className="card rolling-inputs">
           <div className="section-subtitle">Analysis Parameters</div>
           <div className="rolling-form">
@@ -136,7 +265,6 @@ export default function RollingAnalytics({ selectedFund }) {
       )}
 
       {error && <div className="error-msg">{error}</div>}
-      {warning && <div className="warning-msg">⚠ {warning}</div>}
 
       {result && !loading && (
         <div className="rolling-results fade-in">
@@ -151,7 +279,6 @@ export default function RollingAnalytics({ selectedFund }) {
             </div>
           </div>
 
-          {/* Stat cards */}
           <div className="stats-grid">
             <StatCard label="Average Rolling CAGR" value={result.stats?.avg_cagr} />
             <StatCard label="Median Rolling CAGR" value={result.stats?.median_cagr} />
@@ -163,7 +290,6 @@ export default function RollingAnalytics({ selectedFund }) {
             <StatCard label="Total Data Points" value={result.total_points} suffix="" />
           </div>
 
-          {/* Rolling CAGR chart */}
           {result.chart_data?.length > 0 && (
             <div className="card">
               <div className="section-subtitle">Daily Rolling {rollingYears}Y CAGR</div>

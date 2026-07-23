@@ -80,10 +80,10 @@ export default function App() {
                 <CompareFunds selectedDate={selectedDate} />
               } />
               <Route path="/simulator" element={
-                <Simulator selectedFund={selectedFund} setSelectedFund={handleFundSelect} />
+                <Simulator selectedDate={selectedDate} />
               } />
               <Route path="/rolling-analytics" element={
-                <RollingAnalytics selectedFund={selectedFund} setSelectedFund={handleFundSelect} />
+                <RollingAnalytics selectedDate={selectedDate} />
               } />
               <Route path="/portfolio" element={
                 <PortfolioBuilder selectedDate={selectedDate} />
