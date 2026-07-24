@@ -715,6 +715,19 @@ def set_setting(key: str, value: str):
     finally:
         db.close()
 
+def get_isin_for_amfi(amfi_code: str) -> str:
+    """Get ISIN for a fund by AMFI code."""
+    db = get_session()
+    try:
+        result = db.query(DailyFundData.isin).filter(
+            DailyFundData.amfi_code == amfi_code,
+            DailyFundData.isin != None
+        ).first()
+        return result[0] if result else None
+    finally:
+        db.close()
+
+
 def get_amfi_code_for_isin(isin: str) -> str:
     """Get AMFI code for an Indian fund by ISIN."""
     db = get_session()
@@ -722,6 +735,19 @@ def get_amfi_code_for_isin(isin: str) -> str:
         result = db.query(DailyFundData.amfi_code).filter(
             DailyFundData.isin == isin,
             DailyFundData.amfi_code != None
+        ).first()
+        return result[0] if result else None
+    finally:
+        db.close()
+
+
+def get_isin_for_amfi(amfi_code: str) -> str:
+    """Get ISIN for a fund by AMFI code."""
+    db = get_session()
+    try:
+        result = db.query(DailyFundData.isin).filter(
+            DailyFundData.amfi_code == amfi_code,
+            DailyFundData.isin != None
         ).first()
         return result[0] if result else None
     finally:

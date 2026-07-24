@@ -9,6 +9,8 @@ import Performance from './components/Performance/Performance';
 import CompareFunds from './components/PeerComparison/CompareFunds';
 import Simulator from './components/Simulator/Simulator';
 import RollingAnalytics from './components/RollingAnalytics/RollingAnalytics';
+import ModelPortfolios from './components/ModelPortfolios/ModelPortfolios';
+import PeerGroupAnalytics from './components/PeerGroupAnalytics/PeerGroupAnalytics';
 import ChatButton from './components/Chat/ChatButton';
 import PortfolioBuilder from './components/PortfolioBuilder/PortfolioBuilder';
 import './styles/global.css';
@@ -84,6 +86,12 @@ export default function App() {
               } />
               <Route path="/rolling-analytics" element={
                 <RollingAnalytics selectedDate={selectedDate} />
+              } />
+              <Route path="/models" element={
+                <ModelPortfolios selectedDate={selectedDate} />
+              } />
+              <Route path="/peer-group-analytics" element={
+                <PeerGroupAnalytics selectedDate={selectedDate} />
               } />
               <Route path="/portfolio" element={
                 <PortfolioBuilder selectedDate={selectedDate} />

@@ -1,8 +1,8 @@
 # routers/rolling.py
 from fastapi import APIRouter, Query, HTTPException
-from datetime import date as date_type
-from services.mfapi import fetch_nav_history, filter_by_date_range, calculate_rolling_cagr
-from services.db_service import get_fund_inception_date_by_amfi
+from datetime import date as date_type, date
+from services.mfapi import filter_by_date_range, calculate_rolling_cagr
+from services.db_service import get_fund_inception_date_by_amfi, get_isin_for_amfi
 
 router = APIRouter()
 
@@ -10,17 +10,32 @@ router = APIRouter()
 MIN_YEARS = {1: 2, 3: 6, 5: 10}
 
 
+def _get_nav_from_db(amfi_code: str) -> list:
+    """Fetch full NAV history from DB by amfi_code. Returns list of {date: str, nav: float}."""
+    from services.nav_fetcher import get_nav_series
+
+    isin = get_isin_for_amfi(amfi_code)
+    if not isin:
+        raise HTTPException(404, f"No fund found for AMFI code {amfi_code}")
+
+    rows = get_nav_series(isin, date(1970, 1, 1), date.today())
+    if not rows:
+        raise HTTPException(404, "No NAV data in database for this fund. Try again later.")
+
+    return sorted(
+        [{"date": str(r["date"]), "nav": float(r["nav"])} for r in rows if r["nav"]],
+        key=lambda x: x["date"]
+    )
+
+
 @router.get("/analysis")
-async def rolling_analysis(
+def rolling_analysis(
     amfi_code: str,
     rolling_years: int = Query(1, ge=1, le=5),
     start_date: str = Query(...),
     end_date: str   = Query(...),
 ):
-    try:
-        all_nav = await fetch_nav_history(amfi_code)
-    except Exception as e:
-        raise HTTPException(500, f"Failed to fetch NAV data: {e}")
+    all_nav = _get_nav_from_db(amfi_code)
 
     if not all_nav:
         raise HTTPException(404, "No NAV data available for this fund")

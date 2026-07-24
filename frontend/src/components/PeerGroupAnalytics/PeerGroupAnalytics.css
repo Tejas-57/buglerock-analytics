@@ -1,0 +1,275 @@
+/* PeerGroupAnalytics.css */
+
+.pga-page {
+  padding: 22px 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.page-header { margin-bottom: 18px; }
+.page-desc { font-size: 12px; color: var(--text-muted); margin: 2px 0 0; }
+
+.pga-layout {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+/* ── Sidebar ── */
+.pga-sidebar {
+  position: sticky;
+  top: 0;
+  padding: 10px 6px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+.pga-group { margin-bottom: 14px; }
+.pga-group-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0 10px;
+  margin-bottom: 4px;
+}
+.pga-cat-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  font-family: var(--font-body);
+  line-height: 1.3;
+}
+.pga-cat-btn:hover { background: rgba(145,47,99,.07); color: var(--brand-primary); }
+.pga-cat-btn.active { background: rgba(145,47,99,.12); color: var(--brand-primary); font-weight: 600; }
+
+/* ── Header card ── */
+.pga-header-card { padding: 16px 18px; margin-bottom: 10px; }
+.pga-cat-title {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--brand-secondary);
+}
+.pga-fund-count {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  background: rgba(62,52,82,.08);
+  color: var(--brand-secondary);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.pga-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-top: 4px; }
+
+.pga-stats-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.pga-stat-chip {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 8px 14px;
+  min-width: 78px;
+  text-align: center;
+}
+.pga-stat-value {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.pga-stat-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ── Distribution ── */
+.pga-dist-section { margin-top: 14px; }
+.pga-dist-bar { margin-bottom: 10px; }
+.pga-dist-label { font-size: 10px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
+.pga-dist-track {
+  position: relative;
+  height: 10px;
+  background: #f0edf5;
+  border-radius: 5px;
+  overflow: visible;
+}
+.pga-dist-iqr {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(145,47,99,.18);
+  border-radius: 3px;
+}
+.pga-dist-median {
+  position: absolute;
+  top: -2px;
+  width: 3px;
+  height: 14px;
+  background: var(--brand-primary);
+  border-radius: 2px;
+  transform: translateX(-50%);
+}
+.pga-dist-avg {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: 14px;
+  background: var(--brand-secondary);
+  border-radius: 2px;
+  transform: translateX(-50%);
+  opacity: .7;
+}
+.pga-dist-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.pga-dist-mid {
+  font-size: 9px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* ── Filter bar ── */
+.pga-filter-bar {
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.pga-search {
+  width: 100%;
+  padding: 6px 10px 6px 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  color: var(--text-primary);
+  box-sizing: border-box;
+}
+.pga-search:focus { outline: none; border-color: var(--brand-primary); }
+.pga-select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  color: var(--text-primary);
+  background: #fff;
+  cursor: pointer;
+}
+.pga-sort-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: var(--font-body);
+  cursor: pointer;
+  background: #fff;
+  color: var(--text-secondary);
+  transition: all .12s;
+}
+.pga-sort-btn:hover { border-color: var(--brand-primary); color: var(--brand-primary); }
+.pga-sort-btn.active { background: var(--brand-primary); color: #fff; border-color: var(--brand-primary); }
+
+/* ── Table ── */
+.pga-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.pga-th {
+  padding: 9px 10px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  user-select: none;
+}
+.pga-th.sorted { color: var(--brand-primary); }
+.pga-tr { transition: background .1s; }
+.pga-tr:hover td { background: rgba(145,47,99,.04); }
+.pga-tr:not(:last-child) td { border-bottom: 1px solid var(--border-light, #f3f0f7); }
+.pga-td { padding: 9px 10px; vertical-align: middle; }
+.pga-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+  color: var(--text-primary);
+}
+.pga-null { color: var(--text-muted); font-size: 11px; }
+
+/* BugleRock rank pills */
+.pga-br-rank {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  font-family: var(--font-mono);
+}
+.pga-br-R1 { background: #E6F4ED; color: #1A7A52; }
+.pga-br-R2 { background: #EBF4FF; color: #1558A8; }
+.pga-br-R3 { background: #FBF4E0; color: #7A5A10; }
+.pga-br-R4 { background: #FDEAEF; color: #912F63; }
+.pga-rank-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 20px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+/* ── Loading / error ── */
+.pga-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.error-msg {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  padding: 12px 16px;
+  border-radius: var(--r-md);
+  font-size: 13px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .pga-layout { grid-template-columns: 1fr; }
+  .pga-sidebar { position: static; max-height: none; display: flex; flex-wrap: wrap; gap: 4px; }
+  .pga-group { margin-bottom: 0; }
+}

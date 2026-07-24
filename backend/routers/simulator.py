@@ -1,10 +1,29 @@
 # routers/simulator.py
 from fastapi import APIRouter, Query, HTTPException
 from datetime import date as date_type, timedelta
-from services.mfapi import fetch_nav_history, filter_by_date_range, calculate_cagr, calculate_xirr
-from services.db_service import get_fund_inception_date_by_amfi
+from services.mfapi import filter_by_date_range, calculate_cagr, calculate_xirr
+from services.db_service import get_fund_inception_date_by_amfi, get_isin_for_amfi
 
 router = APIRouter()
+
+
+def _get_nav_from_db(amfi_code: str) -> list:
+    """Fetch full NAV history from DB by amfi_code. Returns list of {date: str, nav: float}."""
+    from services.nav_fetcher import get_nav_series
+    from datetime import date
+
+    isin = get_isin_for_amfi(amfi_code)
+    if not isin:
+        raise HTTPException(404, f"No fund found for AMFI code {amfi_code}")
+
+    rows = get_nav_series(isin, date(1970, 1, 1), date.today())
+    if not rows:
+        raise HTTPException(404, "No NAV data in database for this fund. Try again later.")
+
+    return sorted(
+        [{"date": str(r["date"]), "nav": float(r["nav"])} for r in rows if r["nav"]],
+        key=lambda x: x["date"]
+    )
 
 
 def find_nav_on_or_after(nav_data: list, target_date: str) -> dict:
@@ -62,7 +81,7 @@ def validate_and_adjust_dates(amfi_code: str, start_date: str, end_date: str, na
 
 
 @router.get("/run")
-async def run_simulation(
+def run_simulation(
     amfi_code: str,
     mode: str,
     amount: float,
@@ -70,10 +89,7 @@ async def run_simulation(
     end_date: str,
     sip_date: int = Query(1, ge=1, le=28),
 ):
-    try:
-        nav_data = await fetch_nav_history(amfi_code)
-    except Exception as e:
-        raise HTTPException(500, f"Failed to fetch NAV: {e}")
+    nav_data = _get_nav_from_db(amfi_code)
 
     if not nav_data:
         raise HTTPException(404, "No NAV data available")
@@ -167,7 +183,7 @@ def _sip(nav_data, monthly_amount, start_date, end_date, sip_date):
             total_invested += monthly_amount
             cash_flows.append(-monthly_amount)
             cf_dates.append(date_type.fromisoformat(nav_entry["date"]))
-            cumulative.append({"date": nav_entry["date"], "invested": total_invested})
+            cumulative.append({"date": nav_entry["date"], "invested": total_invested, "units_held": total_units})
 
         # Next month
         if current.month == 12:
@@ -192,15 +208,14 @@ def _sip(nav_data, monthly_amount, start_date, end_date, sip_date):
     abs_return = ((current_value - total_invested) / total_invested) * 100
     years      = (cf_dates[-1] - cf_dates[0]).days / 365.25
 
-    # Chart
-    chart_data     = []
-    running_units  = 0
+    # Chart: units_held is cumulative units after each instalment;
+    # portfolio_value = units held × NAV on that instalment date.
+    chart_data = []
     for inv in cumulative:
-        running_units += monthly_amount / (nav_lookup.get(inv["date"]) or final_nav_entry["nav"])
-        nav_at_date    = nav_lookup.get(inv["date"]) or final_nav_entry["nav"]
+        nav_at_date = nav_lookup[inv["date"]]
         chart_data.append({
             "date": inv["date"],
-            "portfolio_value": round(running_units * nav_at_date, 2),
+            "portfolio_value": round(inv["units_held"] * nav_at_date, 2),
             "invested_value":  round(inv["invested"], 2),
         })
 

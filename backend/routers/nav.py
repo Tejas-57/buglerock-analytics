@@ -802,3 +802,109 @@ def get_stress_test(isins: str, weights: str):
 
     finally:
         db.close()
+
+
+@router.get("/fetch-log")
+def fetch_log(isin: str = Query(...), limit: int = 5):
+    """Show recent fetch log entries for an ISIN — confirms which source was used."""
+    from models.database import SessionLocal, NavFetchLog
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(NavFetchLog)
+            .filter(NavFetchLog.isin == isin)
+            .order_by(NavFetchLog.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return {"isin": isin, "log": [
+            {"status": r.status, "rows_added": r.rows_added, "message": r.message, "fetched_at": str(r.fetched_at)}
+            for r in rows
+        ]}
+    finally:
+        db.close()
+
+
+def test_mstar_price(isin: str = Query(..., description="Fund ISIN e.g. INF966L01457")):
+    """
+    Test endpoint — verifies that Morningstar Price API returns daily NAV
+    for a given ISIN using the stored accesscode.
+    Fetches last 10 days only. Safe to call repeatedly.
+    """
+    import requests
+    import xml.etree.ElementTree as ET
+    from datetime import date, timedelta
+    from services.morningstar_service import get_valid_accesscode
+
+    accesscode = get_valid_accesscode()
+    if not accesscode:
+        return {"status": "error", "error": "No valid Morningstar accesscode in DB"}
+
+    end = date.today()
+    start = end - timedelta(days=10)
+
+    url = f"https://api.morningstar.com/service/mf/Price/isin/{isin}"
+    params = {
+        "accesscode": accesscode,
+        "startdate": start.isoformat(),
+        "enddate": end.isoformat(),
+    }
+
+    try:
+        resp = requests.get(url, params=params, timeout=20)
+        raw_status = resp.status_code
+        raw_text = resp.text[:2000]  # cap for safety
+
+        if resp.status_code != 200:
+            return {
+                "status": "error",
+                "isin": isin,
+                "http_status": raw_status,
+                "response_preview": raw_text,
+            }
+
+        # Try JSON first
+        rows = []
+        parse_method = None
+        try:
+            data = resp.json()
+            parse_method = "json"
+            # Expected shape based on screenshot: list of {Date, Value}
+            items = data if isinstance(data, list) else data.get("data", data.get("Prices", []))
+            for item in items:
+                d = item.get("Date") or item.get("date")
+                v = item.get("Value") or item.get("nav") or item.get("value")
+                if d and v:
+                    rows.append({"date": str(d), "nav": float(v)})
+        except Exception:
+            # Fall back to XML
+            try:
+                parse_method = "xml"
+                root = ET.fromstring(resp.text)
+                for p in root.findall(".//p"):
+                    d = p.attrib.get("d")
+                    v = p.attrib.get("v")
+                    if d and v:
+                        rows.append({"date": d, "nav": float(v)})
+            except Exception as xml_err:
+                return {
+                    "status": "error",
+                    "isin": isin,
+                    "http_status": raw_status,
+                    "parse_error": str(xml_err),
+                    "response_preview": raw_text,
+                }
+
+        return {
+            "status": "ok" if rows else "no_data",
+            "isin": isin,
+            "http_status": raw_status,
+            "parse_method": parse_method,
+            "date_range": f"{start} to {end}",
+            "rows_returned": len(rows),
+            "sample": rows[:5],
+            "raw_preview": raw_text if not rows else None,
+        }
+
+    except requests.RequestException as e:
+        return {"status": "error", "isin": isin, "error": str(e)}

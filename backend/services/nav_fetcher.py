@@ -141,6 +141,41 @@ def fetch_via_mfapi(amfi_code: str, start_date: date, end_date: date) -> list:
     raise last_error
 
 
+def fetch_via_morningstar_price(isin: str, start_date: date, end_date: date) -> list:
+    """
+    Fetch daily NAV history from Morningstar API Center Price endpoint.
+    Uses the same accesscode already stored in DB (no extra auth needed).
+    Returns list of {'date': date, 'nav': float, 'total_return': None}.
+    """
+    import xml.etree.ElementTree as ET
+    from services.morningstar_service import get_valid_accesscode
+
+    accesscode = get_valid_accesscode()
+    if not accesscode:
+        raise ValueError("No valid Morningstar accesscode available")
+
+    url = f"https://api.morningstar.com/service/mf/Price/isin/{isin}"
+    resp = requests.get(url, params={
+        "accesscode": accesscode,
+        "startdate": start_date.isoformat(),
+        "enddate": end_date.isoformat(),
+    }, headers=HEADERS, timeout=30)
+    resp.raise_for_status()
+
+    root = ET.fromstring(resp.text)
+    rows = []
+    for p in root.findall(".//p"):
+        try:
+            rows.append({
+                "date": date.fromisoformat(p.attrib["d"]),
+                "nav": float(p.attrib["v"]),
+                "total_return": None,
+            })
+        except Exception:
+            continue
+    return rows
+
+
 def search_amfi_code_by_name(fund_name: str) -> str:
     """Search mfapi by fund name to find AMFI code when not in DB."""
     try:
@@ -246,32 +281,27 @@ def fetch_nav_history(isin: str, force_full: bool = False) -> dict:
         rows = []
         source = ''
 
-        # All AMFI-registered funds (equity, debt, hybrid, global, ETF) use mfapi
-        # SIF funds and funds without AMFI code are skipped
-        source = 'mfapi'
+        # Try Morningstar Price API first (same accesscode, daily NAV from inception)
+        # Fall back to mfapi if Morningstar fails for any reason
         try:
-            from services.db_service import get_amfi_code_for_isin
-            amfi_code = get_amfi_code_for_isin(isin)
-            if not amfi_code:
-                logger.info(f"No AMFI code for {isin} — skipping")
-                return {'isin': isin, 'rows_added': 0, 'status': 'skipped', 'message': 'No AMFI code — SIF or unsupported fund'}
-            rows = fetch_via_mfapi(amfi_code, start, end)
-            logger.info(f"mfapi returned {len(rows)} rows for {isin}")
-        except Exception as e:
-            logger.error(f"mfapi failed for {isin}: {e}")
-            _log_fetch(isin, 0, 'error', str(e))
-            return {'isin': isin, 'rows_added': 0, 'status': 'error', 'message': str(e)}
-
-        # NOTE: Morningstar public API branch commented out for now
-        # Uncomment below when non-AMFI global funds need to be supported
-        # else:
-        #     source = 'morningstar_public'
-        #     try:
-        #         rows = fetch_via_morningstar(isin, start, end)
-        #     except Exception as e:
-        #         logger.error(f"Morningstar public failed for {isin}: {e}")
-        #         _log_fetch(isin, 0, 'error', str(e))
-        #         return {'isin': isin, 'rows_added': 0, 'status': 'error', 'message': str(e)}
+            rows = fetch_via_morningstar_price(isin, start, end)
+            source = 'morningstar'
+            logger.info(f"Morningstar returned {len(rows)} rows for {isin}")
+        except Exception as ms_err:
+            logger.warning(f"Morningstar Price API failed for {isin}: {ms_err} — falling back to mfapi")
+            try:
+                from services.db_service import get_amfi_code_for_isin
+                amfi_code = get_amfi_code_for_isin(isin)
+                if not amfi_code:
+                    logger.info(f"No AMFI code for {isin} — skipping")
+                    return {'isin': isin, 'rows_added': 0, 'status': 'skipped', 'message': 'No AMFI code — SIF or unsupported fund'}
+                rows = fetch_via_mfapi(amfi_code, start, end)
+                source = 'mfapi'
+                logger.info(f"mfapi returned {len(rows)} rows for {isin}")
+            except Exception as mf_err:
+                logger.error(f"Both Morningstar and mfapi failed for {isin}: {mf_err}")
+                _log_fetch(isin, 0, 'error', str(mf_err))
+                return {'isin': isin, 'rows_added': 0, 'status': 'error', 'message': str(mf_err)}
 
         if not rows:
             # If fund already has data in DB, it's just up to date (no new rows in range)
