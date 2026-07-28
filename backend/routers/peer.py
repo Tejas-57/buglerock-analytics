@@ -151,6 +151,7 @@ def peer_category(
                 "fund_size":         _safe_float(f.fund_size),
                 "expense_ratio":     _safe_float(f.expense_ratio),
                 "ranking":           f.ranking,
+                "return_6m":         _safe_float(f.return_6m),
                 "return_1y":         _safe_float(f.return_1y),
                 "return_3y":         _safe_float(f.return_3y),
                 "return_5y":         _safe_float(f.return_5y),
@@ -159,8 +160,10 @@ def peer_category(
                 "return_3m":         _safe_float(f.return_3m),
                 "sharpe_ratio_3y":   _safe_float(f.sharpe_ratio_3y),
                 "alpha_3y":          _safe_float(f.alpha_3y),
+                "alpha_5y":          _safe_float(f.alpha_5y),
                 "beta_3y":           _safe_float(f.beta_3y),
                 "std_dev_3y":        _safe_float(f.std_dev_3y),
+                "std_dev_5y":        _safe_float(f.std_dev_5y),
                 "up_capture_3y":     _safe_float(f.up_capture_3y),
                 "down_capture_3y":   _safe_float(f.down_capture_3y),
             }
@@ -188,19 +191,23 @@ def peer_category(
 
         stats = {
             "fund_count":       len(fund_list),
-            "avg_return_1y":    avg([f["return_1y"]       for f in fund_list]),
-            "avg_return_3y":    avg([f["return_3y"]       for f in fund_list]),
+            "avg_return_1m":    avg([f["return_1m"]    for f in fund_list]),
+            "avg_return_3m":    avg([f["return_3m"]    for f in fund_list]),
+            "avg_return_6m":    avg([f["return_6m"]    for f in fund_list]),
+            "avg_return_1y":    avg([f["return_1y"]    for f in fund_list]),
+            "avg_return_3y":    avg([f["return_3y"]    for f in fund_list]),
+            "avg_return_5y":    avg([f["return_5y"]    for f in fund_list]),
+            "avg_std_dev_3y":   avg([f["std_dev_3y"]   for f in fund_list]),
+            "avg_std_dev_5y":   avg([f["std_dev_5y"]   for f in fund_list]),
+            "avg_aum":          avg([f["fund_size"]    for f in fund_list]),
+            # kept for other sections
             "avg_sharpe":       avg([f["sharpe_ratio_3y"] for f in fund_list]),
             "avg_er":           avg([f["expense_ratio"]   for f in fund_list]),
-            "avg_aum":          avg([f["fund_size"]       for f in fund_list]),
-            "avg_return_1m":    avg([f["return_1m"]       for f in fund_list]),
-            "avg_return_3m":    avg([f["return_3m"]       for f in fund_list]),
-            "avg_alpha":        avg([f["alpha_3y"]        for f in fund_list]),
+            "avg_alpha_3y":     avg([f["alpha_3y"]        for f in fund_list]),
+            "avg_alpha_5y":     avg([f["alpha_5y"]        for f in fund_list]),
             "avg_beta":         avg([f["beta_3y"]         for f in fund_list]),
             "avg_up_capture":   avg([f["up_capture_3y"]   for f in fund_list]),
             "avg_down_capture": avg([f["down_capture_3y"] for f in fund_list]),
-            "avg_pe":           None,
-            "avg_pb":           None,
         }
 
         cy_medians = {}

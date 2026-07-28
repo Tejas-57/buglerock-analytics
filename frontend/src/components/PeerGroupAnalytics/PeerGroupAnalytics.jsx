@@ -17,8 +17,8 @@ const NEG  = '#B71C1C';
 const WARN = '#7A5A10';
 
 function fmt(v, dec = 2)  { if (v == null) return '—'; return parseFloat(v).toFixed(dec); }
-function fmtPct(v)        { if (v == null) return '—'; const n = parseFloat(v); return `${n > 0 ? '+' : ''}${n.toFixed(2)}%`; }
-function fmtSgn(v, s='%') { if (v == null) return '—'; const n = parseFloat(v); return `${n >= 0 ? '+' : ''}${n.toFixed(2)}${s}`; }
+function fmtPct(v)        { if (v == null) return '—'; const n = parseFloat(v); return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`; }
+function fmtSgn(v, s='%') { if (v == null) return '—'; const n = parseFloat(v); return `${n >= 0 ? '+' : ''}${n.toFixed(1)}${s}`; }
 function fmtAum(v) {
   if (!v) return '—';
   if (v >= 100000) return `₹${(v/100000).toFixed(1)}L Cr`;
@@ -406,22 +406,31 @@ function StatChip({ label, value, color }) {
 }
 
 const SORT_KEYS = [
-  { key: 'peer_rank_1y',    label: 'Rank'   },
-  { key: 'return_1y',       label: '1Y'     },
-  { key: 'return_3y',       label: '3Y'     },
-  { key: 'return_5y',       label: '5Y'     },
+  { key: 'ranking',        label: 'BR Rank' },
+  { key: 'return_1y',     label: '1Y'     },
+  { key: 'return_3y',     label: '3Y'     },
+  { key: 'return_5y',     label: '5Y'     },
   { key: 'sharpe_ratio_3y', label: 'Sharpe' },
-  { key: 'alpha_3y',        label: 'Alpha'  },
-  { key: 'fund_size',       label: 'AUM'    },
-  { key: 'expense_ratio',   label: 'ER'     },
+  { key: 'alpha_3y',      label: 'Alpha'  },
+  { key: 'fund_size',     label: 'AUM'    },
+  { key: 'expense_ratio', label: 'ER'     },
 ];
+
+// R1→1, R2→2 … R5→5, R0/null/anything else → 99 (sorts last)
+function rankOrder(r) {
+  if (!r) return 99;
+  const n = parseInt(r.replace('R', ''), 10);
+  return (!n || n === 0) ? 99 : n;
+}
 
 /* ─────────────────────────────────────────────────────────
    MAIN COMPONENT
 ───────────────────────────────────────────────────────── */
 export default function PeerGroupAnalytics({ selectedDate }) {
   const [categories, setCategories] = useState([]);
-  const [selectedCat, setSelectedCat] = useState('');
+  const [selectedCat, setSelectedCat] = useState(() => {
+    return localStorage.getItem('pga_selected_cat') || '';
+  });
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
@@ -429,7 +438,7 @@ export default function PeerGroupAnalytics({ selectedDate }) {
   const [search, setSearch]       = useState('');
   const [minRating, setMinRating] = useState(0);
   const [maxEr, setMaxEr]         = useState(99);
-  const [sortKey, setSortKey]     = useState('peer_rank_1y');
+  const [sortKey, setSortKey]     = useState('ranking');
   const [sortDir, setSortDir]     = useState('asc');
 
   const dateStr = selectedDate ? selectedDate.toISOString().split('T')[0] : null;
@@ -439,7 +448,9 @@ export default function PeerGroupAnalytics({ selectedDate }) {
       .then(r => r.json())
       .then(d => {
         setCategories(d.groups || []);
-        if (d.groups?.length && d.groups[0].categories?.length) {
+        // Only default to first category if nothing saved
+        const saved = localStorage.getItem('pga_selected_cat');
+        if (!saved && d.groups?.length && d.groups[0].categories?.length) {
           setSelectedCat(d.groups[0].categories[0].label);
         }
       })
@@ -468,6 +479,10 @@ export default function PeerGroupAnalytics({ selectedDate }) {
         return true;
       })
       .sort((a, b) => {
+        if (sortKey === 'ranking') {
+          const diff = rankOrder(a.ranking) - rankOrder(b.ranking);
+          return sortDir === 'asc' ? diff : -diff;
+        }
         let av = a[sortKey], bv = b[sortKey];
         if (av == null && bv == null) return 0;
         if (av == null) return 1; if (bv == null) return -1;
@@ -477,7 +492,7 @@ export default function PeerGroupAnalytics({ selectedDate }) {
 
   function handleSort(key) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(key); setSortDir(key === 'expense_ratio' || key === 'peer_rank_1y' ? 'asc' : 'desc'); }
+    else { setSortKey(key); setSortDir(key === 'expense_ratio' || key === 'peer_rank_1y' || key === 'ranking' ? 'asc' : 'desc'); }
   }
 
   function SortTh({ sk, label, align = 'right' }) {
@@ -507,7 +522,7 @@ export default function PeerGroupAnalytics({ selectedDate }) {
             <select
               className="pga-cat-dropdown btn"
               value={selectedCat}
-              onChange={e => setSelectedCat(e.target.value)}
+              onChange={e => { setSelectedCat(e.target.value); localStorage.setItem('pga_selected_cat', e.target.value); }}
             >
               {categories.map(grp => (
                 <optgroup key={grp.group} label={grp.group}>
@@ -548,11 +563,14 @@ export default function PeerGroupAnalytics({ selectedDate }) {
               </div>
             </div>
             <div className="pga-stats-row">
-              <StatChip label="Avg 1Y"      value={fmtPct(stats?.avg_return_1y)} color={stats?.avg_return_1y >= 0 ? POS : NEG}/>
-              <StatChip label="Avg 3Y CAGR" value={fmtPct(stats?.avg_return_3y)} color={stats?.avg_return_3y >= 0 ? POS : NEG}/>
-              <StatChip label="Avg Sharpe"  value={fmt(stats?.avg_sharpe)}/>
-              <StatChip label="Avg ER"      value={stats?.avg_er != null ? `${stats.avg_er.toFixed(2)}%` : '—'}/>
-              <StatChip label="Avg AUM"     value={fmtAum(stats?.avg_aum)}/>
+              <StatChip label="Avg 1M"       value={fmtPct(stats?.avg_return_1m)}  color={stats?.avg_return_1m  >= 0 ? POS : NEG}/>
+              <StatChip label="Avg 3M"       value={fmtPct(stats?.avg_return_3m)}  color={stats?.avg_return_3m  >= 0 ? POS : NEG}/>
+              <StatChip label="Avg 6M"       value={fmtPct(stats?.avg_return_6m)}  color={stats?.avg_return_6m  >= 0 ? POS : NEG}/>
+              <StatChip label="Avg 1Y"       value={fmtPct(stats?.avg_return_1y)}  color={stats?.avg_return_1y  >= 0 ? POS : NEG}/>
+              <StatChip label="Avg 3Y CAGR"  value={fmtPct(stats?.avg_return_3y)}  color={stats?.avg_return_3y  >= 0 ? POS : NEG}/>
+              <StatChip label="Avg 5Y CAGR"  value={fmtPct(stats?.avg_return_5y)}  color={stats?.avg_return_5y  >= 0 ? POS : NEG}/>
+              <StatChip label="Std Dev (3Y)" value={stats?.avg_std_dev_3y != null ? `${fmt(stats.avg_std_dev_3y, 1)}%` : '—'}/>
+              <StatChip label="Std Dev (5Y)" value={stats?.avg_std_dev_5y != null ? `${fmt(stats.avg_std_dev_5y, 1)}%` : '—'}/>
             </div>
           </div>
 
@@ -604,12 +622,12 @@ export default function PeerGroupAnalytics({ selectedDate }) {
                   {filteredFunds.length === 0 ? (
                     <tr><td colSpan={10} style={{ textAlign:'center', padding:32, color:'var(--text-muted)', fontSize:13 }}>No funds match the current filters.</td></tr>
                   ) : filteredFunds.map(f => {
-                    const rankNum = f.peer_rank_1y;
                     const brRank  = f.ranking;
-                    // BR colour: R1/R2 green, R3 dark, R4/R5 red, 0 or null → "—"
-                    const brClass = !brRank || brRank === 'R0' ? null
-                      : brRank === 'R1' || brRank === 'R2' ? 'pga-br-green'
-                      : brRank === 'R3' ? 'pga-br-neutral'
+                    // BR colour: R1/R2 green, R3 dark, R4/R5 red, 0/null/R0 → "—"
+                    const rankVal = brRank ? parseInt(brRank.replace('R',''), 10) : 0;
+                    const brClass = !brRank || rankVal === 0 ? null
+                      : rankVal <= 2 ? 'pga-br-green'
+                      : rankVal === 3 ? 'pga-br-neutral'
                       : 'pga-br-red';
                     return (
                       <tr key={f.isin} className="pga-tr">
@@ -628,10 +646,10 @@ export default function PeerGroupAnalytics({ selectedDate }) {
                         <td className="pga-td"><ReturnCell value={f.return_1y} quartile={f.quartile_1y} showQ/></td>
                         <td className="pga-td"><ReturnCell value={f.return_3y}/></td>
                         <td className="pga-td"><ReturnCell value={f.return_5y}/></td>
-                        <td className="pga-td pga-num pga-center">{fmt(f.sharpe_ratio_3y)}</td>
-                        <td className="pga-td pga-num pga-center" style={{ color: f.alpha_3y >= 0 ? POS : NEG }}>{fmtPct(f.alpha_3y)}</td>
-                        <td className="pga-td pga-num pga-center">{fmt(f.std_dev_3y,1)}%</td>
-                        <td className="pga-td pga-num pga-center">{f.expense_ratio != null ? `${f.expense_ratio.toFixed(2)}%` : '—'}</td>
+                        <td className="pga-td pga-num pga-center">{fmt(f.sharpe_ratio_3y, 1)}</td>
+                        <td className="pga-td pga-num pga-center" style={{ color: f.alpha_3y >= 0 ? POS : NEG }}>{f.alpha_3y != null ? `${f.alpha_3y > 0 ? '+' : ''}${parseFloat(f.alpha_3y).toFixed(1)}%` : '—'}</td>
+                        <td className="pga-td pga-num pga-center">{fmt(f.std_dev_3y, 1)}%</td>
+                        <td className="pga-td pga-num pga-center">{f.expense_ratio != null ? `${parseFloat(f.expense_ratio).toFixed(1)}%` : '—'}</td>
                         <td className="pga-td pga-num pga-center" style={{ fontSize:11 }}>{fmtAum(f.fund_size)}</td>
                       </tr>
                     );
