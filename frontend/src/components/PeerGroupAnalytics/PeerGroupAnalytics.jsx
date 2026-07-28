@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { addToWatchlist, isInWatchlist } from '../Watchlist/Watchlist';
 import './PeerGroupAnalytics.css';
 
 const API = process.env.REACT_APP_API_URL || '';
@@ -153,6 +155,9 @@ function RiskReturnScatter({ funds }) {
         <span className="pga-section-title">Risk / return — 3Y CAGR vs. std deviation</span>
         <span className="pga-section-meta">{pts.length} funds · lines = category median</span>
       </div>
+      <div className="pga-db-explain">
+        Each dot is one fund. <strong>Higher and further left is better</strong> — more return for less bumpiness along the way. Dots clustered together behave similarly; a dot far from the pack is a genuine outlier, good or bad.
+      </div>
       <div className="pga-scatter-wrap">
         <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block', fontSize: '6px' }}>
 
@@ -234,6 +239,9 @@ function ConsistencyChart({ funds, cyMedians }) {
         <span className="pga-section-title">Consistency — years beating category median</span>
         <span className="pga-section-meta">CY 2021–2025 vs peer median · top 10 funds</span>
       </div>
+      <div className="pga-db-explain">
+        A fund that wins big one year and lags badly the next is harder to rely on than one that steadily beats the middle of the pack. This checks each fund against its own category's median return, year by year — a high score (e.g. 4/5) suggests dependable, repeatable performance rather than a single lucky year.
+      </div>
       <div className="pga-consist-head">
         <div className="pga-consist-name-col"/>
         <div className="pga-consist-dots-col">
@@ -313,11 +321,14 @@ function DistributionBars({ distribution, fundCount }) {
   return (
     <div className="pga-section">
       <div className="pga-section-hd">
-        <span className="pga-section-title">Distribution across {fundCount} funds</span>
+        <span className="pga-section-title">Distribution across {fundCount} funds — Min · 25th–75th percentile band · Median · Max</span>
         <span className="pga-legend">
           <span className="pga-leg-item"><span className="pga-leg-sq" style={{ background: '#7A2754', opacity: .25 }}/>25th–75th pct band</span>
           <span className="pga-leg-item"><span style={{ display:'inline-block', width:3, height:12, background:'#3E3452', borderRadius:2, marginRight:4 }}/>Median</span>
         </span>
+      </div>
+      <div className="pga-db-explain">
+        The shaded band covers the middle 50% of funds (25th to 75th percentile) — a fund inside the band is "typical" for its category; one far outside it, in either direction, is a genuine outlier worth understanding.
       </div>
       <div className="pga-db-grid">
         {DB_METRICS.map(m => (
@@ -357,23 +368,26 @@ function MomentumValuation({ stats }) {
         <span className="pga-section-title">Momentum &amp; valuation snapshot</span>
         <span className="pga-section-meta">Category averages</span>
       </div>
+      <div className="pga-db-explain">
+        <strong>Momentum</strong> shows whether the category is currently heating up or cooling off over the last few months. <strong>Valuation</strong> shows whether the category's underlying stocks look expensive or cheap right now, plus a few extra risk gauges. Hover any label for a definition.
+      </div>
       <div className="pga-mv-body">
-        <div className="pga-mv-section-label">Return momentum</div>
+        <div className="pga-mv-section-label">Short-term momentum (avg return)</div>
         <div className="pga-mv-grid pga-mv-grid-4">
           <Chip label="1 month"  value={fmtSgn(stats.avg_return_1m)} color={retClr(stats.avg_return_1m)}/>
           <Chip label="3 months" value={fmtSgn(stats.avg_return_3m)} color={retClr(stats.avg_return_3m)}/>
+          <Chip label="6 months" value={fmtSgn(stats.avg_return_6m)} color={retClr(stats.avg_return_6m)}/>
           <Chip label="1 year"   value={fmtSgn(stats.avg_return_1y)} color={retClr(stats.avg_return_1y)}/>
-          <Chip label="3Y CAGR"  value={fmtSgn(stats.avg_return_3y)} color={retClr(stats.avg_return_3y)}/>
         </div>
         <div className="pga-mv-divider"/>
-        <div className="pga-mv-section-label">Risk characteristics (3Y)</div>
+        <div className="pga-mv-section-label">Valuation &amp; additional risk (3Y)</div>
         <div className="pga-mv-grid pga-mv-grid-6">
-          <Chip label="Alpha"      value={fmtSgn(stats.avg_alpha)}                                          color={retClr(stats.avg_alpha)}   sub="vs benchmark"/>
-          <Chip label="Beta"       value={stats.avg_beta != null ? fmt(stats.avg_beta) : '—'}               color={betaClr(stats.avg_beta)}   sub="mkt sensitivity"/>
-          <Chip label="Sharpe"     value={stats.avg_sharpe != null ? fmt(stats.avg_sharpe) : '—'}/>
+          <Chip label="Avg P/E"    value={stats.avg_pe  != null ? `${fmt(stats.avg_pe, 1)}x`  : '—'} sub="price / earnings"/>
+          <Chip label="Avg P/B"    value={stats.avg_pb  != null ? `${fmt(stats.avg_pb, 1)}x`  : '—'} sub="price / book"/>
+          <Chip label="Alpha"      value={fmtSgn(stats.avg_alpha_3y)}                                  color={retClr(stats.avg_alpha_3y)} sub="vs benchmark"/>
+          <Chip label="Beta"       value={stats.avg_beta    != null ? fmt(stats.avg_beta)    : '—'}   color={betaClr(stats.avg_beta)}    sub="mkt sensitivity"/>
           <Chip label="Up capture" value={stats.avg_up_capture   != null ? `${fmt(stats.avg_up_capture,0)}%`   : '—'} sub="upside"/>
           <Chip label="Dn capture" value={stats.avg_down_capture != null ? `${fmt(stats.avg_down_capture,0)}%` : '—'} color={dcClr(stats.avg_down_capture)} sub="downside"/>
-          <Chip label="Avg ER"     value={stats.avg_er != null ? `${fmt(stats.avg_er)}%` : '—'}/>
         </div>
       </div>
     </div>
@@ -426,7 +440,8 @@ function rankOrder(r) {
 /* ─────────────────────────────────────────────────────────
    MAIN COMPONENT
 ───────────────────────────────────────────────────────── */
-export default function PeerGroupAnalytics({ selectedDate }) {
+export default function PeerGroupAnalytics({ selectedDate, setSelectedFund }) {
+  const navigate = useNavigate();
   const [categories, setCategories] = useState([]);
   const [selectedCat, setSelectedCat] = useState(() => {
     return localStorage.getItem('pga_selected_cat') || '';
@@ -440,6 +455,8 @@ export default function PeerGroupAnalytics({ selectedDate }) {
   const [maxEr, setMaxEr]         = useState(99);
   const [sortKey, setSortKey]     = useState('ranking');
   const [sortDir, setSortDir]     = useState('asc');
+  const [selectedISINs, setSelectedISINs] = useState(new Set());
+  const [watchlistAdded, setWatchlistAdded] = useState(new Set());
 
   const dateStr = selectedDate ? selectedDate.toISOString().split('T')[0] : null;
 
@@ -600,14 +617,61 @@ export default function PeerGroupAnalytics({ selectedDate }) {
             </div>
           </div>
 
+          {/* ── Table header block ── */}
+          <div className="pga-table-header-block">
+            <div className="pga-table-title">ALL FUNDS IN {(data.category || '').toUpperCase()} — CLICK A COLUMN TO SORT, CHECK UP TO 4 TO COMPARE</div>
+            <div className="pga-table-subtitle">
+              Every fund in this category, ranked and searchable. <strong>Quartile (Q1–Q4)</strong> shows which quarter of the pack a fund sits in by 1-year return (Q1 = best 25%, Q4 = worst 25%) and stays fixed no matter how you sort the table.
+            </div>
+          </div>
+
+          {/* ── Action bar — shown when funds are selected ── */}
+          {selectedISINs.size > 0 && (
+            <div className="pga-action-bar">
+              <span className="pga-action-count">{selectedISINs.size} fund{selectedISINs.size > 1 ? 's' : ''} selected</span>
+              <div className="pga-action-btns">
+                <button className="pga-action-btn pga-action-compare" onClick={() => {
+                  if (selectedISINs.size > 4) {
+                    alert('You can compare up to 4 funds at a time. Please deselect some funds.');
+                    return;
+                  }
+                  const selected = filteredFunds.filter(f => selectedISINs.has(f.isin));
+                  sessionStorage.setItem('compareFunds', JSON.stringify(selected.map(f => ({ isin: f.isin, name: f.name, ranking: f.ranking, amfi_code: f.amfi_code, category: f.category }))));
+                  navigate('/peer-comparison');
+                }}>
+                  Compare funds →
+                </button>
+                <button className="pga-action-btn pga-action-watchlist" onClick={() => {
+                  const selected = filteredFunds.filter(f => selectedISINs.has(f.isin));
+                  selected.forEach(f => addToWatchlist({ isin: f.isin, name: f.name, ranking: f.ranking, amfi_code: f.amfi_code, category: f.category }));
+                  setWatchlistAdded(new Set([...watchlistAdded, ...selectedISINs]));
+                }}>
+                  + Add to watchlist
+                </button>
+                <button className="pga-action-btn pga-action-clear" onClick={() => setSelectedISINs(new Set())}>
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* ── Fund table ── */}
           <div className="pga-table-card">
             <div style={{ overflowX:'auto' }}>
               <table className="pga-table">
                 <thead>
                   <tr>
+                    <th className="pga-th" style={{ width:32, textAlign:'center', paddingRight:4 }}>
+                      <input type="checkbox"
+                        checked={filteredFunds.length > 0 && filteredFunds.every(f => selectedISINs.has(f.isin))}
+                        onChange={e => {
+                          if (e.target.checked) setSelectedISINs(new Set(filteredFunds.map(f => f.isin)));
+                          else setSelectedISINs(new Set());
+                        }}
+                      />
+                    </th>
                     <th className="pga-th" style={{ textAlign:'left' }}>Fund</th>
-                    <th className="pga-th" style={{ textAlign:'center' }}>BR</th>
+                    <SortTh sk="ranking"         label="BR"     align="center"/>
                     <SortTh sk="return_1y"       label="1Y"     align="center"/>
                     <SortTh sk="return_3y"       label="3Y"     align="center"/>
                     <SortTh sk="return_5y"       label="5Y"     align="center"/>
@@ -616,21 +680,32 @@ export default function PeerGroupAnalytics({ selectedDate }) {
                     <SortTh sk="std_dev_3y"      label="Std dev" align="center"/>
                     <SortTh sk="expense_ratio"   label="ER"     align="center"/>
                     <SortTh sk="fund_size"       label="AUM"    align="center"/>
+                    <th className="pga-th" style={{ textAlign:'center' }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredFunds.length === 0 ? (
-                    <tr><td colSpan={10} style={{ textAlign:'center', padding:32, color:'var(--text-muted)', fontSize:13 }}>No funds match the current filters.</td></tr>
+                    <tr><td colSpan={12} style={{ textAlign:'center', padding:32, color:'var(--text-muted)', fontSize:13 }}>No funds match the current filters.</td></tr>
                   ) : filteredFunds.map(f => {
                     const brRank  = f.ranking;
-                    // BR colour: R1/R2 green, R3 dark, R4/R5 red, 0/null/R0 → "—"
                     const rankVal = brRank ? parseInt(brRank.replace('R',''), 10) : 0;
                     const brClass = !brRank || rankVal === 0 ? null
                       : rankVal <= 2 ? 'pga-br-green'
                       : rankVal === 3 ? 'pga-br-neutral'
                       : 'pga-br-red';
+                    const isChecked = selectedISINs.has(f.isin);
+                    const inWatchlist = watchlistAdded.has(f.isin) || isInWatchlist(f.isin);
                     return (
-                      <tr key={f.isin} className="pga-tr">
+                      <tr key={f.isin} className={`pga-tr ${isChecked ? 'pga-tr-selected' : ''}`}>
+                        <td className="pga-td" style={{ textAlign:'center', paddingRight:4 }}>
+                          <input type="checkbox" checked={isChecked}
+                            onChange={e => {
+                              const next = new Set(selectedISINs);
+                              if (e.target.checked) next.add(f.isin); else next.delete(f.isin);
+                              setSelectedISINs(next);
+                            }}
+                          />
+                        </td>
                         <td className="pga-td">
                           <div style={{ fontWeight:600, fontSize:12.5, color:'var(--text-primary)', marginBottom:2 }}>{f.name}</div>
                           <div style={{ fontSize:10, color:'var(--text-muted)' }}>
@@ -651,6 +726,17 @@ export default function PeerGroupAnalytics({ selectedDate }) {
                         <td className="pga-td pga-num pga-center">{fmt(f.std_dev_3y, 1)}%</td>
                         <td className="pga-td pga-num pga-center">{f.expense_ratio != null ? `${parseFloat(f.expense_ratio).toFixed(1)}%` : '—'}</td>
                         <td className="pga-td pga-num pga-center" style={{ fontSize:11 }}>{fmtAum(f.fund_size)}</td>
+                        <td className="pga-td" style={{ textAlign:'center', whiteSpace:'nowrap' }}>
+                          <button className="pga-row-btn pga-row-watch" title="Add to watchlist"
+                            onClick={() => { addToWatchlist({ isin: f.isin, name: f.name, ranking: f.ranking, amfi_code: f.amfi_code, category: f.category }); setWatchlistAdded(prev => new Set([...prev, f.isin])); }}
+                            style={{ background: inWatchlist ? 'rgba(26,122,82,.1)' : undefined, color: inWatchlist ? POS : undefined }}>
+                            {inWatchlist ? '✓' : '+ Watch'}
+                          </button>
+                          <button className="pga-row-btn pga-row-view" title="View fund detail"
+                            onClick={() => { setSelectedFund?.({ isin: f.isin, name: f.name, ranking: f.ranking, amfi_code: f.amfi_code, category: f.category }); navigate('/home'); }}>
+                            View →
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
@@ -665,7 +751,15 @@ export default function PeerGroupAnalytics({ selectedDate }) {
           </div>
 
           <div className="pga-footnote">
-            Quartiles computed on 1Y return within the full category. Consistency uses each fund's CY return vs the peer median for that calendar year. Scatter bubble size proportional to AUM.
+            Quartiles computed on 1Y return within the full category. Consistency uses each fund's CY return vs the peer median for that calendar year.
+          </div>
+
+          {/* ── Methodology box ── */}
+          <div className="pga-methodology">
+            <div className="pga-methodology-hd">ℹ Methodology</div>
+            <div className="pga-methodology-body">
+              Quartiles are computed within the category peer set using 1Y return (Q1 = top performers) and stay fixed regardless of how the table is sorted. Averages exclude funds with no data for that metric. Consistency scoring compares each fund's calendar-year return to the peer median for that year. Figures reflect live data from the BugleRock database, refreshed daily.
+            </div>
           </div>
         </>
       )}

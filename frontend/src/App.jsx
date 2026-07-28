@@ -91,7 +91,7 @@ export default function App() {
                 <ModelPortfolios selectedDate={selectedDate} />
               } />
               <Route path="/peer-group-analytics" element={
-                <PeerGroupAnalytics selectedDate={selectedDate} />
+                <PeerGroupAnalytics selectedDate={selectedDate} setSelectedFund={handleFundSelect} />
               } />
               <Route path="/portfolio" element={
                 <PortfolioBuilder selectedDate={selectedDate} />

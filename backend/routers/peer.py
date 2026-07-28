@@ -166,6 +166,8 @@ def peer_category(
                 "std_dev_5y":        _safe_float(f.std_dev_5y),
                 "up_capture_3y":     _safe_float(f.up_capture_3y),
                 "down_capture_3y":   _safe_float(f.down_capture_3y),
+                "pe_ratio":          _safe_float(f.pe_ratio),
+                "pb_ratio":          _safe_float(f.pb_ratio),
             }
             for yr in CY_YEARS:
                 d[f"return_cy{yr}"] = _safe_float(getattr(f, f"return_cy{yr}", None))
@@ -208,6 +210,8 @@ def peer_category(
             "avg_beta":         avg([f["beta_3y"]         for f in fund_list]),
             "avg_up_capture":   avg([f["up_capture_3y"]   for f in fund_list]),
             "avg_down_capture": avg([f["down_capture_3y"] for f in fund_list]),
+            "avg_pe":           avg([f["pe_ratio"]        for f in fund_list]),
+            "avg_pb":           avg([f["pb_ratio"]        for f in fund_list]),
         }
 
         cy_medians = {}
