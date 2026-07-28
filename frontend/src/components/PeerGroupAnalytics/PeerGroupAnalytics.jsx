@@ -381,10 +381,9 @@ function MomentumValuation({ stats }) {
         </div>
         <div className="pga-mv-divider"/>
         <div className="pga-mv-section-label">Valuation &amp; additional risk (3Y)</div>
-        <div className="pga-mv-grid pga-mv-grid-6">
+        <div className="pga-mv-grid pga-mv-grid-5">
           <Chip label="Avg P/E"    value={stats.avg_pe  != null ? `${fmt(stats.avg_pe, 1)}x`  : '—'} sub="price / earnings"/>
           <Chip label="Avg P/B"    value={stats.avg_pb  != null ? `${fmt(stats.avg_pb, 1)}x`  : '—'} sub="price / book"/>
-          <Chip label="Alpha"      value={fmtSgn(stats.avg_alpha_3y)}                                  color={retClr(stats.avg_alpha_3y)} sub="vs benchmark"/>
           <Chip label="Beta"       value={stats.avg_beta    != null ? fmt(stats.avg_beta)    : '—'}   color={betaClr(stats.avg_beta)}    sub="mkt sensitivity"/>
           <Chip label="Up capture" value={stats.avg_up_capture   != null ? `${fmt(stats.avg_up_capture,0)}%`   : '—'} sub="upside"/>
           <Chip label="Dn capture" value={stats.avg_down_capture != null ? `${fmt(stats.avg_down_capture,0)}%` : '—'} color={dcClr(stats.avg_down_capture)} sub="downside"/>
