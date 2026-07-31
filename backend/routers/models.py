@@ -412,7 +412,7 @@ def _build_portfolio(model_key, all_funds):
         "actual": {
             "equity_pct":     round(eff_equity, 1),
             "debt_pct":       round(eff_debt, 1),
-            "alternates_pct": round(eff_other, 1),
+            "cash_other_pct": round(eff_other, 1),
             "large_cap":      rb_large,
             "mid_cap":        rb_mid,
             "small_cap":      rb_small,
@@ -421,7 +421,7 @@ def _build_portfolio(model_key, all_funds):
         "asset_mix": {
             "Equity":     round(eff_equity, 1),
             "Debt":       round(eff_debt, 1),
-            "Alternates": round(eff_other, 1),
+            "Cash & Others": round(eff_other, 1),
             "Gold":       0.0,
         },
         "blended": {

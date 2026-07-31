@@ -23,7 +23,7 @@ function Donut({ mix, size = 130 }) {
   const segs = [
     { pct: mix.Equity,     c: SLEEVE.Equity, l: 'Equity' },
     { pct: mix.Debt,       c: SLEEVE.Debt,   l: 'Debt' },
-    { pct: mix.Alternates, c: SLEEVE.Other,  l: 'Alternates' },
+    { pct: mix["Cash & Others"], c: SLEEVE.Other,  l: 'Cash & Others' },
   ].filter(s => s.pct > 0.5);
   const circ = 2*Math.PI*r;
   let off = 0;
@@ -88,7 +88,7 @@ function OverviewCard({ p, selected, onClick }) {
       <div className="mp-card-legend">
         <div><i style={{ background: SLEEVE.Equity }}/>Equity {p.actual.equity_pct}%</div>
         <div><i style={{ background: SLEEVE.Debt }}/>Debt {p.actual.debt_pct}%</div>
-        {p.actual.alternates_pct > 0.5 && <div><i style={{ background: SLEEVE.Other }}/>Alt {p.actual.alternates_pct}%</div>}
+        {p.actual.cash_other_pct > 0.5 && <div><i style={{ background: SLEEVE.Other }}/>Cash & Others {p.actual.cash_other_pct}%</div>}
       </div>
       <div className="mp-card-stats">
         <div><b style={{ color: p.blended.return_3y >= 0 ? '#1A7A52' : '#912F63' }}>{pct(p.blended.return_3y)}</b><span>3Y CAGR</span></div>
@@ -104,7 +104,7 @@ function Detail({ p }) {
   const rc = RISK_COLORS[p.risk_score] || RISK_COLORS[3];
   const b = p.blended;
   const eq = p.actual.equity_pct, db = p.actual.debt_pct;
-  const alt = p.actual.alternates_pct || 0;
+  const alt = p.actual.cash_other_pct || 0;
   const est = ((eq*15) + (db*7) + (alt*7)) / 100;
   const dbl = est > 0 ? (72/est).toFixed(1) : '—';
   return (
@@ -125,7 +125,7 @@ function Detail({ p }) {
         <div className="mp-alloc-chips">
           <div className="mp-chip"><b style={{ color: SLEEVE.Equity }}>{eq}%</b><span>Equity (wtd avg)</span><em>Target {p.target.eq_lo}–{p.target.eq_hi}%</em></div>
           <div className="mp-chip"><b style={{ color: SLEEVE.Debt }}>{db}%</b><span>Debt (wtd avg)</span><em>Target {p.target.debt_lo}–{p.target.debt_hi}%</em></div>
-          {alt > 0.5 && <div className="mp-chip"><b style={{ color: SLEEVE.Other }}>{alt}%</b><span>Alternates</span><em>Cash / other</em></div>}
+          {alt > 0.5 && <div className="mp-chip"><b style={{ color: SLEEVE.Other }}>{alt}%</b><span>Cash & Others</span><em>Cash / other</em></div>}
           <div className="mp-chip"><b>{est.toFixed(1)}%</b><span>Est. return p.a.</span><em>Eq 15% · Debt 7%</em></div>
           <div className="mp-chip"><b>{dbl} yrs</b><span>Time to double</span><em>Rule of 72</em></div>
         </div>

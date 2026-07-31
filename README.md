@@ -396,57 +396,32 @@ Local SQLite may be missing newer columns added to the schema (e.g. `tracking_er
 ## Model Portfolios (BugleRock Multi-Asset DPMS)
 
 ### Architecture
-Constraint-based portfolio construction using `scipy.optimize.linprog` with HiGHS backend — pure feasibility LP (no objective, just find valid weights).
+Constraint-based portfolio construction using `scipy.optimize.linprog` with HiGHS backend — pure feasibility LP (no objective function, just finds valid weights satisfying all constraints).
 
 ### Fund universe
-R1/R2 ranked funds only. Three asset classes:
-- **Equity** — 8 core categories only (Large Cap, Large & Mid Cap, Flexi Cap, Multi Cap, Focused Fund, Mid Cap, Small Cap, Contra/Value). ELSS and thematic excluded.
-- **Debt** — filtered by risk tier per model profile (Tier 1=Overnight/Liquid → Tier 5=Govt Bond/Credit Risk)
-- **Hybrid** — filtered by risk tier per model profile (Tier 1=Arbitrage/Conservative → Tier 4=Aggressive Allocation)
+R1/R2 ranked funds only. Three asset classes: Equity (core categories only — no ELSS/thematic), Debt (filtered by risk tier per model), Hybrid (filtered by risk tier per model). All category definitions and tier mappings are in `backend/routers/models.py`.
 
-### 5 model profiles (equity/debt targets ±3%)
-| Model | Equity | Debt | Cap Mix (L/M/S) |
-|---|---|---|---|
-| Conservative | 30% | 70% | 75/15/10 ±5% |
-| Mod Conservative | 35% | 65% | 70/20/10 ±5% |
-| Balanced | 50% | 50% | 60/25/15 ±5% |
-| Mod Aggressive | 70% | 30% | 55/23/22 ±5% |
-| Aggressive | 80% | 20% | 40/30/30 ±5% |
+### How the solver works
+1. `_pick_candidates()` — selects N best-fit funds per category (by cap-mix deviation from target). Debt/hybrid filtered by risk tier.
+2. `_solve()` — runs `linprog` HiGHS with LP lower bound = 0 (solver can zero-weight funds it doesn't need). Post-filters by minimum weight threshold.
+3. `_solve_with_retry()` — if infeasible, progressively relaxes cap-mix tolerance and retries.
+4. All constraints are **weighted averages** (effective), not sleeve totals — hybrid's equity/debt portion is factored proportionally.
 
-### Solver constraints
-All constraints are weighted averages (effective, not sleeve totals):
-- `Σ wᵢ × equity_pctᵢ / 100` ∈ [eq_lo, eq_hi] — hybrid's equity portion counts
-- `Σ wᵢ × bond_pctᵢ / 100` ∈ [debt_lo, debt_hi] — hybrid's debt portion counts
-- Rebased cap mix: `Σ(wᵢ × equity_pctᵢ × large_capᵢ) / Σ(wᵢ × equity_pctᵢ)` ∈ cap_target ±5%
-- Per-fund weight: 0% ≤ wᵢ ≤ 20% (LP lower bound = 0, post-filtered at 3% or 5%)
-- Portfolio fund count: 9–15 funds (dynamic, solver decides)
-
-### Per-category fund limits
-| Model | Equity/cat | Debt/cat | Hybrid/cat |
-|---|---|---|---|
-| Conservative | 1 | 2 | 2 |
-| Mod Conservative | 1 | 2 | 2 |
-| Balanced | 1 | 1 | 2 |
-| Mod Aggressive | 2 | 1 | 1 |
-| Aggressive | 2 | 1 | 1 |
-
-### Dynamic minimum weight
-- ≤11 funds → min weight 5% per fund
-- 12–15 funds → min weight 3% per fund
-
-### Cap mix note
-`large_cap`, `mid_cap`, `small_cap` in `DailyFundData` are **point-in-time** values from the Morningstar daily Excel. Historical rolling averages (`MCBRP` fields) are in `fund_portfolio_stats` on Render — but whether `MCBRP` is truly a rolling average or also point-in-time is **not confirmed** from Morningstar's API docs. Verify before relying on it.
+### Key design decisions (do not change without understanding why)
+- LP lower bound = 0, not MIN_W — this is intentional. Setting lb=MIN_W with many candidates causes infeasibility because `n × MIN_W > 100%`. Solver zeros unwanted funds; post-filter enforces MIN_W.
+- `bond_pct` fallback uses `v > 0` not `v is not None` — DB stores 0 (not NULL) for debt funds.
+- Cap mix constraints are linearised ratios — see solver comments for the math.
 
 ### API endpoints
 - `GET /api/models/portfolios` — all 5 portfolios
 - `GET /api/models/detail?key=balanced` — single portfolio
 - `GET /api/models/debug` — per-model error traces (use when portfolios return empty)
 
-### Key debug script
+### Debug
 ```bash
 cd backend && python debug_all.py
 ```
-Shows per-model candidate counts, feasibility range checks, and solver status.
+All model-specific constraints, fund counts, and targets are in `backend/routers/models.py` — source of truth, not README.
 
 ---
 
