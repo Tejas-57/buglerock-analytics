@@ -4,6 +4,41 @@ AI-native investment analytics platform for BugleRock Capital. Enables wealth ma
 
 ---
 
+## 🔴 Developer Rules — Read Before Every Session
+
+These rules apply to every Claude session working on this project. No exceptions.
+
+### 1. Full files only
+When making any change to a file, always output the **complete file** — never diffs, never partial snippets, never "replace lines X–Y". The full file goes to `/mnt/user-data/outputs/` so it can be downloaded and replaced directly.
+
+### 2. No multi-line code in terminal
+Never write multi-line Python/bash directly in the terminal (`python3 -c "..."`). Always write debug/test logic to a `.py` file in `/mnt/user-data/outputs/`, present it for download, and ask the user to run it with:
+```bash
+cd buglerock-analytics/backend
+python <filename>.py
+```
+
+### 3. Git commit format
+Every change must end with a git commit command in this exact format:
+```bash
+git add -A && git commit -m "<type>(<scope>): <description>" && git push origin main
+```
+Types: `feat`, `fix`, `docs`, `refactor`, `chore`. Example:
+```bash
+git add -A && git commit -m "fix(models): correct bond_pct zero fallback for debt funds" && git push origin main
+```
+
+### 4. Session prompt — ask at the start of every new chat
+When a new chat begins, ask:
+> *"Should I read the transcript from the last session before we start? Also — are we continuing an existing feature or starting something new?"*
+
+Then read `/mnt/transcripts/` for the relevant session transcript before making any changes.
+
+### 5. Suggest README updates proactively
+Whenever something new is built, discovered, or decided that future sessions need to know — suggest adding it to the README immediately. Say: *"This is worth noting in the README — want me to add it?"*
+
+---
+
 ## Stack
 
 | Layer | Technology | Details |
@@ -17,6 +52,22 @@ AI-native investment analytics platform for BugleRock Capital. Enables wealth ma
 **Repo:** https://github.com/Tejas-57/buglerock-analytics  
 **Frontend (live):** https://buglerock-analytics-plum.vercel.app  
 **Backend (live):** https://buglerock-analytics-ew17.onrender.com
+
+### Useful backend URLs
+| Purpose | URL |
+|---|---|
+| API health check | https://buglerock-analytics-ew17.onrender.com/api/status |
+| Model portfolios | https://buglerock-analytics-ew17.onrender.com/api/models/portfolios |
+| Model portfolio debug | https://buglerock-analytics-ew17.onrender.com/api/models/debug |
+| Holdings fetch status | https://buglerock-analytics-ew17.onrender.com/api/holdings/admin/fetch-status |
+| Holdings fetch progress | https://buglerock-analytics-ew17.onrender.com/api/holdings/admin/fetch-progress |
+| Accesscode status | https://buglerock-analytics-ew17.onrender.com/api/holdings/admin/accesscode-status |
+| Fetch single fund holdings | https://buglerock-analytics-ew17.onrender.com/api/holdings/fetch/{isin} (POST) |
+| Fetch all holdings | https://buglerock-analytics-ew17.onrender.com/api/holdings/fetch-universe (POST) |
+| Trigger Gmail fetch | https://buglerock-analytics-ew17.onrender.com/api/funds/fetch?date=YYYY-MM-DD |
+| Debug Gmail search | https://buglerock-analytics-ew17.onrender.com/api/funds/debug-gmail?date=YYYY-MM-DD |
+| Peer group analytics | https://buglerock-analytics-ew17.onrender.com/api/peer/snapshot |
+| FastAPI docs | https://buglerock-analytics-ew17.onrender.com/docs |
 
 ---
 
@@ -263,7 +314,143 @@ Push to `main` → Render auto-deploys (~3 minutes). On startup the backend imme
 
 ---
 
-## Known Limitations / Pending
+## Holdings Data — Fetch Frequency & Logic
+
+### Two independent data pipelines
+
+| | Daily Excel (DailyFundData) | Holdings API (FundHolding + FundPortfolioStats) |
+|---|---|---|
+| Source | Morningstar email attachment | Morningstar REST API (`NewPortfolioApi`) |
+| Frequency | Every trading day (auto) | Every day at 6AM (staleness check) |
+| What it has | Fund-level aggregates (returns, NAV, large_cap%, equity_pct%, risk metrics) | Individual stock holdings + market cap breakdown, sector weights, PE/PB |
+| Exists locally? | ✅ Yes (SQLite) | ❌ No (Render/PostgreSQL only) |
+| Tables | `DailyFundData`, `BenchmarkData` | `FundHolding`, `FundPortfolioStats` |
+
+### How the daily staleness check works (`refresh_stale_holdings`)
+
+Runs every day at **6:00 AM** via `holdings_monthly_cron()` in `main.py`.
+
+**Logic:**
+1. Finds the most recent `portfolio_date` across all funds currently in the DB (e.g. `2026-06-30`)
+2. Checks every fund in the universe — if a fund's `portfolio_date < latest_known_date` → it's stale
+3. Fetches **only the stale funds** — if 2 out of 1,800 funds have updated data on Morningstar, only those 2 are re-fetched
+4. If all funds are up to date → does nothing, exits immediately
+
+**Why daily?**
+Morningstar publishes each fund's monthly holdings on different days (typically 10th–25th of the following month, varies per fund). Running daily ensures we pick up each fund's updated holdings the exact day Morningstar publishes them — rather than waiting for a fixed monthly batch.
+
+**Staleness logic detail:**
+When Fund A updates to `2026-07-31` and Fund B is still at `2026-06-30`, Fund B gets re-fetched every day until it also publishes July data. This is correct — it keeps retrying stale funds until everything is current.
+
+### Manual triggers
+```bash
+# Fetch single fund immediately
+POST /api/holdings/fetch/{isin}
+
+# Fetch all funds immediately (full universe, ~15 min)
+POST /api/holdings/fetch-universe
+
+# Check staleness status
+GET /api/holdings/admin/fetch-status
+GET /api/holdings/admin/fetch-progress
+```
+
+### Holdings data characteristics
+- **No history accumulated** — each successful fetch replaces all previous holdings for that ISIN with the latest month's data. DB always holds exactly one month's disclosure per fund.
+- **Per-fund error isolation** — if one fund fails, others are not affected. Failed fund retains its previous holdings intact.
+- **`large_cap` in DailyFundData** = Giant + Large from Morningstar's 5-tier breakdown (Giant/Large/Mid/Small/Micro). Both are point-in-time, not rolling averages.
+- **`FundPortfolioStats.market_cap_breakdown`** = same point-in-time data from the API, just at individual stock level. No historical rolling average available from current API subscription for Indian funds.
+
+### New fund handling
+When a new fund appears in the daily email that has never been fetched before, `fetch_holdings_for_new_isins()` is called automatically after each daily parse — fetching up to 50 new ISINs per run.
+
+---
+
+The local and production databases are **not in sync** and have different schemas. Always be aware of this when debugging.
+
+### Tables that exist ONLY on Render (PostgreSQL)
+These tables are **missing from local SQLite** — any script querying them will throw `no such table`:
+
+| Table | Purpose |
+|---|---|
+| `fund_holding` | Individual stock-level holdings per fund (from Morningstar `NewPortfolioApi`) |
+| `fund_portfolio_stats` | Fund-level portfolio statistics — asset allocation, market cap breakdown (`MCBRP`), sector weights, PE/PB, duration. Populated by the same holdings fetch |
+| `holdings_fetch_log` | Tracks which ISINs have been fetched, status, timestamp |
+| `morningstar_access_code` | Morningstar API accesscode with expiry, auto-rotated every 90 days |
+
+### Columns that exist ONLY on Render
+Local SQLite may be missing newer columns added to the schema (e.g. `tracking_error_1y`, `tracking_error_3y`, `tracking_error_5y`). **Always use raw `text()` SQL in scripts** — never use the ORM model directly — to avoid `no such column` errors locally.
+
+### Holdings data
+- Fund detail pages showing holdings data **only work on Render** — the `FundHolding` table doesn't exist locally
+- Holdings are fetched monthly via `POST /api/holdings/fetch-universe`
+- Individual fund: `POST /api/holdings/fetch/{isin}`
+- The `fund_portfolio_stats` table contains Morningstar's `MCBRP-MarketCapLargeLongRescaled` etc. fields. **Confirmed point-in-time** (portfolio as of the `portfolio_date`, not a rolling average). Morningstar splits into Giant/Large/Mid/Small/Micro — `DailyFundData.large_cap` = Giant + Large combined. No historical rolling average cap mix is available from the current API subscription for Indian funds.
+
+### Local dev data date
+- Local SQLite data date: `2026-05-28`
+- Render data date: current (updated daily via Gmail)
+
+---
+
+## Model Portfolios (BugleRock Multi-Asset DPMS)
+
+### Architecture
+Constraint-based portfolio construction using `scipy.optimize.linprog` with HiGHS backend — pure feasibility LP (no objective, just find valid weights).
+
+### Fund universe
+R1/R2 ranked funds only. Three asset classes:
+- **Equity** — 8 core categories only (Large Cap, Large & Mid Cap, Flexi Cap, Multi Cap, Focused Fund, Mid Cap, Small Cap, Contra/Value). ELSS and thematic excluded.
+- **Debt** — filtered by risk tier per model profile (Tier 1=Overnight/Liquid → Tier 5=Govt Bond/Credit Risk)
+- **Hybrid** — filtered by risk tier per model profile (Tier 1=Arbitrage/Conservative → Tier 4=Aggressive Allocation)
+
+### 5 model profiles (equity/debt targets ±3%)
+| Model | Equity | Debt | Cap Mix (L/M/S) |
+|---|---|---|---|
+| Conservative | 30% | 70% | 75/15/10 ±5% |
+| Mod Conservative | 35% | 65% | 70/20/10 ±5% |
+| Balanced | 50% | 50% | 60/25/15 ±5% |
+| Mod Aggressive | 70% | 30% | 55/23/22 ±5% |
+| Aggressive | 80% | 20% | 40/30/30 ±5% |
+
+### Solver constraints
+All constraints are weighted averages (effective, not sleeve totals):
+- `Σ wᵢ × equity_pctᵢ / 100` ∈ [eq_lo, eq_hi] — hybrid's equity portion counts
+- `Σ wᵢ × bond_pctᵢ / 100` ∈ [debt_lo, debt_hi] — hybrid's debt portion counts
+- Rebased cap mix: `Σ(wᵢ × equity_pctᵢ × large_capᵢ) / Σ(wᵢ × equity_pctᵢ)` ∈ cap_target ±5%
+- Per-fund weight: 0% ≤ wᵢ ≤ 20% (LP lower bound = 0, post-filtered at 3% or 5%)
+- Portfolio fund count: 9–15 funds (dynamic, solver decides)
+
+### Per-category fund limits
+| Model | Equity/cat | Debt/cat | Hybrid/cat |
+|---|---|---|---|
+| Conservative | 1 | 2 | 2 |
+| Mod Conservative | 1 | 2 | 2 |
+| Balanced | 1 | 1 | 2 |
+| Mod Aggressive | 2 | 1 | 1 |
+| Aggressive | 2 | 1 | 1 |
+
+### Dynamic minimum weight
+- ≤11 funds → min weight 5% per fund
+- 12–15 funds → min weight 3% per fund
+
+### Cap mix note
+`large_cap`, `mid_cap`, `small_cap` in `DailyFundData` are **point-in-time** values from the Morningstar daily Excel. Historical rolling averages (`MCBRP` fields) are in `fund_portfolio_stats` on Render — but whether `MCBRP` is truly a rolling average or also point-in-time is **not confirmed** from Morningstar's API docs. Verify before relying on it.
+
+### API endpoints
+- `GET /api/models/portfolios` — all 5 portfolios
+- `GET /api/models/detail?key=balanced` — single portfolio
+- `GET /api/models/debug` — per-model error traces (use when portfolios return empty)
+
+### Key debug script
+```bash
+cd backend && python debug_all.py
+```
+Shows per-model candidate counts, feasibility range checks, and solver status.
+
+---
+
+
 
 - PPT export is built but hidden (`display:none`) — to be enabled when ready
 - `backend/utils/trading_calendar.py` is deprecated and safe to delete — no longer imported anywhere

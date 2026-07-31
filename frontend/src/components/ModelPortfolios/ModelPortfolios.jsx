@@ -8,420 +8,233 @@ const RISK_COLORS = {
   2: { bg: '#EBF4E8', text: '#3A7A30', bar: '#4C8C3C' },
   3: { bg: '#FBF4E0', text: '#7A5A10', bar: '#D97706' },
   4: { bg: '#FEF0E6', text: '#C2540A', bar: '#C2540A' },
-  5: { bg: '#FDEAEF', text: '#912F63', bar: '#B91C1C' },
+  5: { bg: '#FDEAEF', text: '#912F63', bar: '#912F63' },
 };
+const SLEEVE = { Equity: '#912F63', Hybrid: '#6D5479', Debt: '#3E3452', Gold: '#B8860B', Other: '#A795AE' };
+const CAP = { large: '#912F63', mid: '#6D5479', small: '#A795AE' };
 
-const ASSET_COLORS = {
-  Equity: '#912F63',
-  Debt:   '#3E3452',
-  Hybrid: '#6D5479',
-  Gold:   '#B8860B',
-  Other:  '#A795AE',
-};
+const f1 = (v, suf = '') => v == null ? '—' : `${parseFloat(v).toFixed(1)}${suf}`;
+const f2 = (v) => v == null ? '—' : parseFloat(v).toFixed(2);
+const pct = (v) => { if (v == null) return '—'; const n = parseFloat(v); return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`; };
+const aum = (v) => !v ? '—' : v >= 100000 ? `₹${(v/100000).toFixed(1)}L Cr` : v >= 1000 ? `₹${(v/1000).toFixed(0)}k Cr` : `₹${Math.round(v)} Cr`;
 
-function fmt(v, suffix = '', prefix = '') {
-  if (v == null) return '—';
-  const n = parseFloat(v);
-  return `${prefix}${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}${suffix}`;
-}
-
-function fmtPct(v, showSign = true) {
-  if (v == null) return '—';
-  const n = parseFloat(v);
-  const sign = showSign && n > 0 ? '+' : '';
-  return `${sign}${n.toFixed(2)}%`;
-}
-
-function fmtAum(v) {
-  if (!v) return '—';
-  if (v >= 100000) return `₹${(v / 100000).toFixed(1)}L Cr`;
-  if (v >= 1000) return `₹${(v / 1000).toFixed(0)}k Cr`;
-  return `₹${Math.round(v)} Cr`;
-}
-
-function ReturnPill({ value }) {
-  if (value == null) return <span className="mp-return-null">—</span>;
-  const n = parseFloat(value);
+function Donut({ mix, size = 130 }) {
+  const cx = size/2, cy = size/2, r = size*0.36, sw = size*0.16;
+  const segs = [
+    { pct: mix.Equity,     c: SLEEVE.Equity, l: 'Equity' },
+    { pct: mix.Debt,       c: SLEEVE.Debt,   l: 'Debt' },
+    { pct: mix.Alternates, c: SLEEVE.Other,  l: 'Alternates' },
+  ].filter(s => s.pct > 0.5);
+  const circ = 2*Math.PI*r;
+  let off = 0;
   return (
-    <span className={`mp-return-pill ${n >= 0 ? 'pos' : 'neg'}`}>
-      {n >= 0 ? '+' : ''}{n.toFixed(2)}%
-    </span>
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border)" strokeWidth={sw}/>
+      {segs.map((s, i) => {
+        const dash = (s.pct/100)*circ;
+        const el = (
+          <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.c} strokeWidth={sw}
+            strokeDasharray={`${dash} ${circ-dash}`} strokeDashoffset={-off + circ*0.25}>
+            <title>{s.l}: {s.pct}%</title>
+          </circle>
+        );
+        off += dash;
+        return el;
+      })}
+    </svg>
   );
 }
 
-function Stars({ rating }) {
-  if (!rating) return <span style={{ color: 'var(--text-muted)' }}>—</span>;
-  const r = Math.round(rating);
+function CapMixBar({ actual, target }) {
+  const rows = [
+    { k: 'large', label: 'Large cap', val: actual.large_cap, tgt: target.large_cap },
+    { k: 'mid',   label: 'Mid cap',   val: actual.mid_cap,   tgt: target.mid_cap },
+    { k: 'small', label: 'Small cap', val: actual.small_cap, tgt: target.small_cap },
+  ];
   return (
-    <span style={{ color: '#B8860B', letterSpacing: -1 }}>
-      {'★'.repeat(r)}{'☆'.repeat(5 - r)}
-    </span>
-  );
-}
-
-function AssetMixBar({ mix }) {
-  const keys = ['Equity', 'Hybrid', 'Debt', 'Gold', 'Other'];
-  const total = keys.reduce((s, k) => s + (mix[k] || 0), 0) || 1;
-  return (
-    <div className="mp-asset-bar">
-      {keys.filter(k => (mix[k] || 0) > 0.5).map(k => (
-        <div
-          key={k}
-          className="mp-asset-segment"
-          style={{ width: `${((mix[k] / total) * 100).toFixed(1)}%`, background: ASSET_COLORS[k] }}
-          title={`${k}: ${mix[k].toFixed(0)}%`}
-        />
-      ))}
-    </div>
-  );
-}
-
-function AssetMixLegend({ mix }) {
-  const keys = ['Equity', 'Hybrid', 'Debt', 'Gold', 'Other'];
-  return (
-    <div className="mp-asset-legend">
-      {keys.filter(k => (mix[k] || 0) > 0.5).map(k => (
-        <div key={k} className="mp-legend-item">
-          <div className="mp-legend-dot" style={{ background: ASSET_COLORS[k] }} />
-          <span className="mp-legend-label">{k}</span>
-          <span className="mp-legend-value">{mix[k].toFixed(0)}%</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function RiskSpectrum({ portfolios, selectedKey, onSelect }) {
-  const riskBased = portfolios.filter(p => p.group === 'risk').sort((a, b) => a.risk_score - b.risk_score);
-  return (
-    <div className="mp-spectrum card">
-      <div className="mp-spectrum-title">Risk spectrum</div>
-      <div className="mp-spectrum-track">
-        {riskBased.map((p, i) => {
-          const rc = RISK_COLORS[p.risk_score] || RISK_COLORS[3];
-          const isSelected = selectedKey === p.key;
-          return (
-            <button
-              key={p.key}
-              className={`mp-spectrum-node ${isSelected ? 'selected' : ''}`}
-              onClick={() => onSelect(p.key)}
-              style={{ '--node-color': rc.bar }}
-            >
-              <div className="mp-spectrum-dot" style={{ background: rc.bar, borderColor: isSelected ? rc.bar : 'transparent' }} />
-              <div className="mp-spectrum-label">{p.label}</div>
-              <div className="mp-spectrum-horizon" style={{ color: rc.text }}>{p.horizon}</div>
-              {p.blended?.return_1y != null && (
-                <div className="mp-spectrum-ret" style={{ color: p.blended.return_1y >= 0 ? '#1A7A52' : '#912F63' }}>
-                  {fmtPct(p.blended.return_1y)}
-                </div>
-              )}
-            </button>
-          );
-        })}
-        <div className="mp-spectrum-line" />
-      </div>
-    </div>
-  );
-}
-
-function ComparisonTable({ portfolios, selectedKey, onSelect }) {
-  const [sortKey, setSortKey] = useState('risk_score');
-  const [sortDir, setSortDir] = useState('asc');
-
-  function handleSort(k) {
-    if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(k); setSortDir(k === 'expense_ratio' ? 'asc' : 'desc'); }
-  }
-
-  function arrow(k) { return sortKey === k ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''; }
-
-  const sorted = [...portfolios].sort((a, b) => {
-    let av, bv;
-    if (sortKey === 'risk_score') { av = a.risk_score; bv = b.risk_score; }
-    else if (sortKey === 'label') { av = a.label; bv = b.label; }
-    else if (sortKey === 'fund_count') { av = a.fund_count; bv = b.fund_count; }
-    else { av = a.blended?.[sortKey]; bv = b.blended?.[sortKey]; }
-    if (av == null && bv == null) return 0;
-    if (av == null) return 1;
-    if (bv == null) return -1;
-    const c = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
-    return sortDir === 'asc' ? c : -c;
-  });
-
-  function Th({ label, k, align = 'right' }) {
-    return (
-      <th
-        className={`mp-th ${sortKey === k ? 'sorted' : ''}`}
-        style={{ textAlign: align, cursor: 'pointer' }}
-        onClick={() => handleSort(k)}
-      >
-        {label}{arrow(k)}
-      </th>
-    );
-  }
-
-  return (
-    <div className="mp-table-wrap card">
-      <div className="mp-card-hd">All model portfolios — click a row to view detail</div>
-      <div style={{ overflowX: 'auto' }}>
-        <table className="mp-table">
-          <thead>
-            <tr>
-              <Th label="Portfolio" k="label" align="left" />
-              <th className="mp-th" style={{ textAlign: 'center' }}>Type</th>
-              <Th label="Risk" k="risk_score" align="center" />
-              <Th label="Horizon" k="risk_score" align="left" />
-              <Th label="Funds" k="fund_count" align="right" />
-              <Th label="1Y" k="return_1y" />
-              <Th label="3Y CAGR" k="return_3y" />
-              <Th label="Sharpe" k="sharpe_3y" />
-              <Th label="ER" k="expense_ratio" />
-              <th className="mp-th" />
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map(p => {
-              const rc = RISK_COLORS[p.risk_score] || RISK_COLORS[3];
-              const isTheme = p.group === 'theme';
-              const isSelected = selectedKey === p.key;
-              return (
-                <tr
-                  key={p.key}
-                  className={`mp-tr ${isSelected ? 'selected' : ''}`}
-                  onClick={() => onSelect(p.key)}
-                >
-                  <td className="mp-td" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.label}</td>
-                  <td className="mp-td" style={{ textAlign: 'center' }}>
-                    <span className="mp-type-badge" style={{ background: isTheme ? '#0F6E5618' : '#912F6318', color: isTheme ? '#0F6E56' : '#912F63' }}>
-                      {isTheme ? 'Theme' : 'Risk-based'}
-                    </span>
-                  </td>
-                  <td className="mp-td" style={{ textAlign: 'center' }}>
-                    <span className="mp-risk-badge" style={{ background: rc.bg, color: rc.text }}>{p.risk}</span>
-                  </td>
-                  <td className="mp-td" style={{ color: 'var(--text-muted)', fontSize: 11 }}>{p.horizon}</td>
-                  <td className="mp-td mp-num">{p.fund_count}</td>
-                  <td className="mp-td mp-num" style={{ color: p.blended?.return_1y >= 0 ? '#1A7A52' : '#912F63', fontWeight: 600 }}>
-                    {fmtPct(p.blended?.return_1y)}
-                  </td>
-                  <td className="mp-td mp-num" style={{ color: p.blended?.return_3y >= 0 ? '#1A7A52' : '#912F63' }}>
-                    {fmtPct(p.blended?.return_3y)}
-                  </td>
-                  <td className="mp-td mp-num">{fmt(p.blended?.sharpe_3y)}</td>
-                  <td className="mp-td mp-num">{p.blended?.expense_ratio != null ? `${p.blended.expense_ratio.toFixed(2)}%` : '—'}</td>
-                  <td className="mp-td">
-                    <button className="mp-view-btn" onClick={e => { e.stopPropagation(); onSelect(p.key); }}>
-                      View →
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function PortfolioDetail({ portfolio, onBack }) {
-  const rc = RISK_COLORS[portfolio.risk_score] || RISK_COLORS[3];
-  const b = portfolio.blended || {};
-
-  return (
-    <div className="mp-detail fade-in">
-      {/* Header */}
-      <div className="mp-detail-hd card">
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-              <span className="mp-risk-badge" style={{ background: rc.bg, color: rc.text, fontSize: 11 }}>{portfolio.risk}</span>
-              <span className="mp-type-badge" style={{ background: portfolio.group === 'theme' ? '#0F6E5618' : '#912F6318', color: portfolio.group === 'theme' ? '#0F6E56' : '#912F63' }}>
-                {portfolio.group === 'theme' ? 'Theme-based' : 'Risk-based'}
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Horizon: {portfolio.horizon}</span>
+    <div className="mp-capmix">
+      <div className="mp-section-label">Within-equity cap mix (rebased)</div>
+      {rows.map(r => {
+        const inRange = r.val != null && Math.abs(r.val - r.tgt) <= target.cap_tol;
+        return (
+          <div key={r.k} className="mp-capmix-row">
+            <div className="mp-capmix-label">{r.label}</div>
+            <div className="mp-capmix-track">
+              <div className="mp-capmix-fill" style={{ width: `${Math.min(r.val || 0, 100)}%`, background: CAP[r.k] }}/>
+              <div className="mp-capmix-target" style={{ left: `${r.tgt}%` }} title={`Target ${r.tgt}%`}/>
             </div>
-            <div className="mp-detail-name">{portfolio.label}</div>
-            <div className="mp-detail-suitability">{portfolio.suitability}</div>
+            <div className="mp-capmix-val" style={{ color: inRange ? '#1A7A52' : '#C2540A' }}>
+              {f1(r.val, '%')}
+              <span className="mp-capmix-tgt-txt">/ {r.tgt}±{target.cap_tol}</span>
+            </div>
           </div>
-          <button className="mp-back-btn" onClick={onBack}>← All models</button>
-        </div>
+        );
+      })}
+    </div>
+  );
+}
 
-        {/* Blended metrics */}
-        <div className="mp-metrics-row">
-          {[
-            { label: '1Y Return', value: fmtPct(b.return_1y), color: b.return_1y >= 0 ? '#1A7A52' : '#912F63' },
-            { label: '3Y CAGR', value: fmtPct(b.return_3y), color: b.return_3y >= 0 ? '#1A7A52' : '#912F63' },
-            { label: '5Y CAGR', value: fmtPct(b.return_5y), color: b.return_5y >= 0 ? '#1A7A52' : '#912F63' },
-            { label: 'Sharpe (3Y)', value: fmt(b.sharpe_3y), color: 'var(--text-primary)' },
-            { label: 'Alpha (3Y)', value: fmtPct(b.alpha_3y), color: 'var(--text-primary)' },
-            { label: 'Std Dev (3Y)', value: fmtPct(b.std_dev_3y, false), color: 'var(--text-muted)' },
-            { label: 'Expense Ratio', value: b.expense_ratio != null ? `${b.expense_ratio.toFixed(2)}%` : '—', color: 'var(--text-muted)' },
-          ].map(m => (
-            <div key={m.label} className="mp-metric-chip">
-              <div className="mp-metric-label">{m.label}</div>
-              <div className="mp-metric-value" style={{ color: m.color }}>{m.value}</div>
-            </div>
-          ))}
-        </div>
+function OverviewCard({ p, selected, onClick }) {
+  const rc = RISK_COLORS[p.risk_score] || RISK_COLORS[3];
+  return (
+    <div className={`mp-card ${selected ? 'mp-card--sel' : ''}`} onClick={onClick}>
+      <div className="mp-card-top">
+        <span className="mp-card-label" style={{ color: rc.text }}>{p.label}</span>
+        <span className="mp-card-risk" style={{ background: rc.bg, color: rc.text }}>{p.risk}</span>
+      </div>
+      <div className="mp-card-donut">
+        <Donut mix={p.asset_mix} size={96}/>
+      </div>
+      <div className="mp-card-legend">
+        <div><i style={{ background: SLEEVE.Equity }}/>Equity {p.actual.equity_pct}%</div>
+        <div><i style={{ background: SLEEVE.Debt }}/>Debt {p.actual.debt_pct}%</div>
+        {p.actual.alternates_pct > 0.5 && <div><i style={{ background: SLEEVE.Other }}/>Alt {p.actual.alternates_pct}%</div>}
+      </div>
+      <div className="mp-card-stats">
+        <div><b style={{ color: p.blended.return_3y >= 0 ? '#1A7A52' : '#912F63' }}>{pct(p.blended.return_3y)}</b><span>3Y CAGR</span></div>
+        <div><b>{f2(p.blended.sharpe_3y)}</b><span>Sharpe</span></div>
+        <div><b>{p.fund_count}</b><span>Funds</span></div>
+      </div>
+      <div className="mp-card-horizon">⏱ {p.horizon} · Vol {p.volatility}</div>
+    </div>
+  );
+}
 
-        {/* Asset mix */}
-        <div style={{ marginTop: 16 }}>
-          <div className="mp-section-label">Asset allocation</div>
-          <AssetMixBar mix={portfolio.asset_mix} />
-          <AssetMixLegend mix={portfolio.asset_mix} />
+function Detail({ p }) {
+  const rc = RISK_COLORS[p.risk_score] || RISK_COLORS[3];
+  const b = p.blended;
+  const eq = p.actual.equity_pct, db = p.actual.debt_pct;
+  const alt = p.actual.alternates_pct || 0;
+  const est = ((eq*15) + (db*7) + (alt*7)) / 100;
+  const dbl = est > 0 ? (72/est).toFixed(1) : '—';
+  return (
+    <div className="mp-detail">
+      <div className="mp-detail-hd">
+        <div>
+          <div className="mp-detail-badges">
+            <span className="mp-card-risk" style={{ background: rc.bg, color: rc.text }}>{p.risk}</span>
+            <span className="mp-detail-meta">Horizon {p.horizon} · Volatility {p.volatility} · Max DD {p.max_drawdown}</span>
+          </div>
+          <div className="mp-detail-title">{p.label}</div>
+          <div className="mp-detail-sub">{p.suitability}</div>
         </div>
       </div>
 
-      {/* Fund table */}
-      <div className="card">
-        <div className="mp-card-hd">Fund selection — {portfolio.fund_count} funds</div>
+      <div className="mp-alloc">
+        <div className="mp-alloc-donut"><Donut mix={p.asset_mix} size={150}/></div>
+        <div className="mp-alloc-chips">
+          <div className="mp-chip"><b style={{ color: SLEEVE.Equity }}>{eq}%</b><span>Equity (wtd avg)</span><em>Target {p.target.eq_lo}–{p.target.eq_hi}%</em></div>
+          <div className="mp-chip"><b style={{ color: SLEEVE.Debt }}>{db}%</b><span>Debt (wtd avg)</span><em>Target {p.target.debt_lo}–{p.target.debt_hi}%</em></div>
+          {alt > 0.5 && <div className="mp-chip"><b style={{ color: SLEEVE.Other }}>{alt}%</b><span>Alternates</span><em>Cash / other</em></div>}
+          <div className="mp-chip"><b>{est.toFixed(1)}%</b><span>Est. return p.a.</span><em>Eq 15% · Debt 7%</em></div>
+          <div className="mp-chip"><b>{dbl} yrs</b><span>Time to double</span><em>Rule of 72</em></div>
+        </div>
+      </div>
+
+      <CapMixBar actual={p.actual} target={p.target}/>
+
+      <div className="mp-metrics">
+        {[
+          ['1Y Return', pct(b.return_1y), b.return_1y >= 0 ? '#1A7A52' : '#912F63'],
+          ['3Y CAGR', pct(b.return_3y), b.return_3y >= 0 ? '#1A7A52' : '#912F63'],
+          ['5Y CAGR', pct(b.return_5y), b.return_5y >= 0 ? '#1A7A52' : '#912F63'],
+          ['Sharpe (3Y)', f2(b.sharpe_3y), 'var(--text-primary)'],
+          ['Std Dev (3Y)', b.std_dev_3y != null ? `${f1(b.std_dev_3y)}%` : '—', 'var(--text-muted)'],
+          ['Expense Ratio', b.expense_ratio != null ? `${f2(b.expense_ratio)}%` : '—', 'var(--text-muted)'],
+        ].map(([l, v, c]) => (
+          <div key={l} className="mp-metric"><b style={{ color: c }}>{v}</b><span>{l}</span></div>
+        ))}
+      </div>
+
+      <div className="mp-table-card">
+        <div className="mp-table-hd">Fund holdings — {p.fund_count} funds · R1/R2 only · solver-weighted</div>
         <div style={{ overflowX: 'auto' }}>
           <table className="mp-table">
-            <thead>
-              <tr>
-                <th className="mp-th" style={{ textAlign: 'left', width: 30 }}>Wt%</th>
-                <th className="mp-th" style={{ textAlign: 'left' }}>Fund</th>
-                <th className="mp-th">NAV</th>
-                <th className="mp-th">1Y</th>
-                <th className="mp-th">3Y</th>
-                <th className="mp-th">5Y</th>
-                <th className="mp-th">Sharpe</th>
-                <th className="mp-th">Alpha</th>
-                <th className="mp-th">ER</th>
-                <th className="mp-th">AUM</th>
-                <th className="mp-th">Rating</th>
-              </tr>
-            </thead>
+            <thead><tr>
+              <th style={{ textAlign: 'left' }}>Fund</th>
+              <th>Sleeve</th><th>Rank</th><th>Weight</th>
+              <th>1Y</th><th>3Y</th><th>Sharpe</th><th>ER</th><th>Cap mix</th>
+            </tr></thead>
             <tbody>
-              {portfolio.funds.map((f, i) => (
-                <tr key={f.isin} className="mp-tr">
-                  <td className="mp-td">
-                    <div className="mp-weight-cell">
-                      <div className="mp-weight-bar" style={{ width: `${f.weight}%`, background: ASSET_COLORS[getAssetBucket(f)] }} />
-                      <span className="mp-weight-num">{f.weight}%</span>
-                    </div>
+              {p.funds.map(f => (
+                <tr key={f.isin}>
+                  <td style={{ textAlign: 'left' }}>
+                    <div className="mp-fname">{f.name}</div>
+                    <div className="mp-fcat">{(f.category || '').replace(/^(India Fund |India OE |Cat: )/, '')}</div>
                   </td>
-                  <td className="mp-td">
-                    <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-primary)', marginBottom: 2 }}>{f.name}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{f.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}</div>
+                  <td><span className="mp-sleeve" style={{ background: `${SLEEVE[f.sleeve]}18`, color: SLEEVE[f.sleeve] }}>{f.sleeve}</span></td>
+                  <td><span className={`mp-rank mp-rank-${f.ranking}`}>{f.ranking}</span></td>
+                  <td className="mp-wt">{f.weight}%</td>
+                  <td style={{ color: f.return_1y >= 0 ? '#1A7A52' : '#912F63' }}>{pct(f.return_1y)}</td>
+                  <td style={{ color: f.return_3y >= 0 ? '#1A7A52' : '#912F63' }}>{pct(f.return_3y)}</td>
+                  <td>{f2(f.sharpe_3y)}</td>
+                  <td>{f.expense_ratio ? `${f2(f.expense_ratio)}%` : '—'}</td>
+                  <td>
+                    {f.sleeve === 'Debt' ? <span className="mp-na">N/A</span> : (
+                      <div className="mp-mini-cap">
+                        <div style={{ flex: f.large_cap || 0, background: CAP.large }} title={`Large ${f1(f.large_cap)}%`}/>
+                        <div style={{ flex: f.mid_cap || 0, background: CAP.mid }} title={`Mid ${f1(f.mid_cap)}%`}/>
+                        <div style={{ flex: f.small_cap || 0, background: CAP.small }} title={`Small ${f1(f.small_cap)}%`}/>
+                      </div>
+                    )}
                   </td>
-                  <td className="mp-td mp-num" style={{ fontSize: 11 }}>{f.nav ? `₹${f.nav.toFixed(2)}` : '—'}</td>
-                  <td className="mp-td"><ReturnPill value={f.return_1y} /></td>
-                  <td className="mp-td"><ReturnPill value={f.return_3y} /></td>
-                  <td className="mp-td"><ReturnPill value={f.return_5y} /></td>
-                  <td className="mp-td mp-num">{fmt(f.sharpe_3y)}</td>
-                  <td className="mp-td mp-num" style={{ color: f.alpha_3y >= 0 ? '#1A7A52' : '#912F63' }}>{fmtPct(f.alpha_3y)}</td>
-                  <td className="mp-td mp-num">{f.expense_ratio ? `${f.expense_ratio.toFixed(2)}%` : '—'}</td>
-                  <td className="mp-td mp-num" style={{ fontSize: 11 }}>{fmtAum(f.aum_cr)}</td>
-                  <td className="mp-td"><Stars rating={f.morningstar_rating} /></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <div className="mp-table-footer">
-          Fund selection: highest Sharpe (3Y) → Morningstar rating → AUM within each category slice · Data as of {portfolio.data_date}
-        </div>
       </div>
     </div>
   );
-}
-
-function getAssetBucket(f) {
-  const ac = (f.asset_class || '').toLowerCase();
-  const cat = (f.category || '').toLowerCase();
-  if (ac.includes('debt') || ac.includes('bond')) return 'Debt';
-  if (ac.includes('hybrid')) return 'Hybrid';
-  if (cat.includes('precious') || cat.includes('gold') || cat.includes('silver')) return 'Gold';
-  if (ac.includes('equity')) return 'Equity';
-  return 'Other';
 }
 
 export default function ModelPortfolios({ selectedDate }) {
-  const [portfolios, setPortfolios] = useState([]);
-  const [loading, setLoading]       = useState(true);
-  const [error, setError]           = useState(null);
-  const [selectedKey, setSelectedKey] = useState(null);
-  const [filterGroup, setFilterGroup] = useState('all');
+  const [ports, setPorts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [sel, setSel] = useState(() => localStorage.getItem('mp_sel') || 'balanced');
+  const [dataDate, setDataDate] = useState(null);
 
-  const dateStr = selectedDate
-    ? selectedDate.toISOString().split('T')[0]
-    : null;
+  const ds = selectedDate ? selectedDate.toISOString().split('T')[0] : null;
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    const url = `${API}/api/models/portfolios${dateStr ? `?date=${dateStr}` : ''}`;
-    fetch(url)
+    setLoading(true); setError(null);
+    fetch(`${API}/api/models/portfolios${ds ? `?date=${ds}` : ''}`)
       .then(r => r.json())
-      .then(d => {
-        if (d.error) throw new Error(d.error);
-        setPortfolios(d.portfolios || []);
-        setLoading(false);
-      })
+      .then(d => { if (d.error) throw new Error(d.error); setPorts(d.portfolios || []); setDataDate(d.data_date); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
-  }, [dateStr]);
+  }, [ds]);
 
-  const selected = portfolios.find(p => p.key === selectedKey);
+  const selected = ports.find(p => p.key === sel) || ports[0];
 
-  const filtered = filterGroup === 'all'
-    ? portfolios
-    : portfolios.filter(p => p.group === filterGroup);
-
-  if (loading) return (
-    <div className="mp-page fade-in">
-      <div className="mp-loading">
-        <div className="mp-spinner" />
-        <div>Building model portfolios from live fund universe…</div>
-      </div>
-    </div>
-  );
-
-  if (error) return (
-    <div className="mp-page fade-in">
-      <div className="error-msg">Failed to load model portfolios: {error}</div>
-    </div>
-  );
+  if (loading) return <div className="mp-page"><div className="mp-loading"><div className="mp-spinner"/><span>Building model portfolios…</span></div></div>;
+  if (error) return <div className="mp-page"><div style={{ padding: 40, color: '#B71C1C' }}>Error: {error}</div></div>;
 
   return (
-    <div className="mp-page fade-in">
-      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+    <div className="mp-page">
+      <div className="mp-header">
         <div>
-          <h1 className="section-title">Model Portfolios</h1>
-          <p className="page-desc">
-            BugleRock standard model portfolios — built live from the fund universe. Best Sharpe → rating → AUM selected per slice.
-          </p>
+          <div className="mp-page-title">Model Portfolios</div>
+          <div className="mp-page-desc">BugleRock Multi-Asset DPMS · R1/R2 ranked funds · constraint-based construction (linprog)</div>
         </div>
-        {selected && (
-          <button className="mp-back-btn" onClick={() => setSelectedKey(null)}>← All models</button>
-        )}
+        {dataDate && <div className="mp-data-date">Data: {dataDate}</div>}
       </div>
 
-      {!selected && (
-        <>
-          <RiskSpectrum portfolios={portfolios} selectedKey={selectedKey} onSelect={setSelectedKey} />
+      <div className="mp-grid">
+        {ports.map(p => (
+          <OverviewCard key={p.key} p={p} selected={selected?.key === p.key}
+            onClick={() => { setSel(p.key); localStorage.setItem('mp_sel', p.key); }}/>
+        ))}
+      </div>
 
-          {/* Filter tabs */}
-          <div className="mp-filter-tabs">
-            {[['all', 'All'], ['risk', 'Risk-based'], ['theme', 'Theme-based']].map(([g, l]) => (
-              <button
-                key={g}
-                className={`mp-filter-tab ${filterGroup === g ? 'active' : ''}`}
-                onClick={() => setFilterGroup(g)}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
+      {selected && <Detail p={selected}/>}
 
-          <ComparisonTable portfolios={filtered} selectedKey={selectedKey} onSelect={setSelectedKey} />
-        </>
-      )}
-
-      {selected && (
-        <PortfolioDetail portfolio={selected} onBack={() => setSelectedKey(null)} />
-      )}
+      <div className="mp-method">
+        <div className="mp-method-hd">ℹ Methodology</div>
+        <div className="mp-method-body">
+          Portfolios are constructed from R1/R2 ranked funds only using a linear-programming solver (HiGHS). Weights are chosen to satisfy each model's effective equity/debt bands and a within-equity cap mix of Large 60% / Mid 25% / Small 15% (±10%), rebased across all equity-bearing exposure including the equity portion of hybrid funds. Effective equity and debt factor in each hybrid fund's underlying equity/debt split. Per-fund weights are bounded 5–15%. Estimated returns assume equity 15% p.a., hybrid 11% p.a., debt 7% p.a. Illustrative only, not a guarantee.
+        </div>
+      </div>
     </div>
   );
 }
