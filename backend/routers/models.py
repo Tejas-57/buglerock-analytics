@@ -9,7 +9,7 @@ Solver: scipy.optimize.linprog, method="highs" (pure feasibility LP, objective=0
 
 Constraints per model:
   - Σ wᵢ = 100
-  - MIN_W ≤ wᵢ ≤ MAX_W
+  - MIN_W ≤ wᵢ ≤ MAX_W (with MAX_W capped at 100/MIN_FUNDS to force ≥ MIN_FUNDS)
   - Effective equity  = Σ wᵢ·equity_pctᵢ/100  ∈ [eq_lo, eq_hi]
   - Effective debt    = Σ wᵢ·bond_pctᵢ/100    ∈ [debt_lo, debt_hi]
   - Rebased cap mix (Large/Mid/Small) across equity-bearing funds, weighted by
@@ -51,8 +51,7 @@ HYBRID_RISK_TIER = {
     "India Fund Aggressive Allocation":         4,
 }
 
-# ── Model definitions (5 profiles, per PDF + interpolation) ─────────────────────
-# eq_lo/eq_hi and debt_lo/debt_hi are EFFECTIVE asset-class ranges (incl hybrid split)
+# ── Model definitions ──────────────────────────────────────────────────────────
 MODELS = {
     "conservative": {
         "label": "Conservative", "risk": "Low", "risk_score": 1,
@@ -101,13 +100,11 @@ MODELS = {
     },
 }
 
-# Portfolio-level fund count bounds
 MIN_FUNDS = 9
 MAX_FUNDS = 15
-# Dynamic minimum weight: if portfolio has >11 funds, allow smaller weights
-MIN_W_TIGHT = 5.0    # for 9-11 funds
-MIN_W_LOOSE = 3.0    # for 12-15 funds
-FUND_COUNT_THRESHOLD = 11  # switch point
+MIN_W_TIGHT = 5.0
+MIN_W_LOOSE = 3.0
+FUND_COUNT_THRESHOLD = 11
 
 # ── Equity category classification ─────────────────────────────────────────────
 CORE_EQUITY_CATS = {
@@ -121,27 +118,7 @@ CORE_EQUITY_CATS = {
     "Cat: Contra / Value Funds",
 }
 
-# Non-core (thematic/sectoral) — allowed but capped at MAX_NONCORE_W per fund
-NONCORE_EQUITY_CATS = {
-    "Cat: Banking & Financial Services Funds",
-    "Cat: Healthcare funds",
-    "Cat: IT / Tech Funds",
-    "Cat: Infrastructure Funds",
-    "Cat: Consumption Funds",
-    "Cat: MNC Funds",
-    "India Fund Sector - Energy",
-    "Thematic Funds",
-}
-
-# Excluded entirely from model portfolios
-EXCLUDED_EQUITY_CATS = {"India Fund ELSS (Tax Savings)"}
-
-MAX_NONCORE_W = 10.0   # non-core equity funds capped at 10% of portfolio
-
-# Cap-mix tolerance (per model targets defined in MODELS dict)
 CAP_TOL = 5.0
-
-# Weight bounds per fund
 MAX_W = 20.0
 
 
@@ -158,7 +135,6 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
            cap_tol=CAP_TOL, max_w=MAX_W):
     """
     Pure feasibility LP via HiGHS. Returns weight array (sums to 100) or None.
-    Cap targets and tolerance are per-model.
     """
     from scipy.optimize import linprog
 
@@ -203,17 +179,13 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
     res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method="highs")
     if res.status == 0:
         w = res.x
-        # First pass: drop anything below the loose threshold (3%)
         w[w < MIN_W_LOOSE] = 0.0
         total = w.sum()
         if total <= 0:
             return None
         w = w / total * 100
 
-        # Count remaining funds
         nonzero = np.where(w > 0)[0]
-
-        # Dynamic min weight: if ≤11 funds, apply tight (5%) threshold
         if len(nonzero) <= FUND_COUNT_THRESHOLD:
             w2 = w.copy()
             w2[w2 < MIN_W_TIGHT] = 0.0
@@ -221,7 +193,6 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
                 w = w2 / w2.sum() * 100
                 nonzero = np.where(w > 0)[0]
 
-        # Enforce MAX_FUNDS: if too many, drop lowest-weighted
         if len(nonzero) > MAX_FUNDS:
             sorted_idx = nonzero[np.argsort(w[nonzero])]
             drop = sorted_idx[:len(nonzero) - MAX_FUNDS]
@@ -235,27 +206,40 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
 def _solve_with_retry(funds, m):
     """
     Retry ladder: progressively relax cap-mix tolerance.
-    LP lower bound = 0 throughout.
+    Enforces MIN_FUNDS by capping MAX_W at 100/MIN_FUNDS (~11.1%).
     """
     cap_l, cap_m, cap_s = m["cap_large"], m["cap_mid"], m["cap_small"]
+
+    # Force ≥ MIN_FUNDS by capping MAX_W
+    forced_max_w = min(MAX_W, 100.0 / MIN_FUNDS)
+
     for tol in [CAP_TOL, CAP_TOL+2, CAP_TOL+5, CAP_TOL+8, CAP_TOL+12]:
+        w = _solve(funds, m["eq_lo"], m["eq_hi"], m["debt_lo"], m["debt_hi"],
+                   cap_l, cap_m, cap_s, tol, forced_max_w)
+        if w is not None:
+            nonzero = np.sum(w > 0)
+            if nonzero >= MIN_FUNDS:
+                return w, tol
+
+    # Fallback: relax MAX_W constraint but still try to get MIN_FUNDS
+    for tol in [CAP_TOL, CAP_TOL+5, CAP_TOL+12]:
         w = _solve(funds, m["eq_lo"], m["eq_hi"], m["debt_lo"], m["debt_hi"],
                    cap_l, cap_m, cap_s, tol, MAX_W)
         if w is not None:
             return w, tol
+
     # Last resort: widen asset bands by 5%
     w = _solve(funds, m["eq_lo"]-5, m["eq_hi"]+5, m["debt_lo"]-5, m["debt_hi"]+5,
-               cap_l, cap_m, cap_s, CAP_TOL+15, MAX_W)
+               cap_l, cap_m, cap_s, CAP_TOL+15, forced_max_w)
     return (w, CAP_TOL+15) if w is not None else (None, None)
 
 
 def _pick_candidates(eq_pool, debt_pool, hybrid_pool, m):
     """
     Pass eligible candidates to the solver with per-category limits.
-    - eq_per_cat: max equity funds per category (typically 1, 2 for aggressive)
+    - eq_per_cat: max equity funds per category
     - debt_per_cat: max debt funds per category
     - hyb_per_cat: max hybrid funds per category
-    LP lower bound = 0 so solver zeros funds it doesn't need.
     """
     cap_l, cap_m, cap_s = m["cap_large"], m["cap_mid"], m["cap_small"]
     def cap_dev(f):
@@ -266,7 +250,6 @@ def _pick_candidates(eq_pool, debt_pool, hybrid_pool, m):
     from collections import defaultdict
 
     def top_n_per_cat(pool, n):
-        """Take top N funds per category, sorted by cap-mix fit within category."""
         bc = defaultdict(list)
         for f in pool: bc[f.get("category","")].append(f)
         result = []
@@ -305,7 +288,7 @@ def _build_portfolio(model_key, all_funds):
 
     candidates = _pick_candidates(eq_pool, debt_pool, hybrid_pool, m)
 
-    # Final dedup — belt and suspenders
+    # Final dedup
     seen, candidates_deduped = set(), []
     for f in candidates:
         key = f.get("isin") or (f.get("name") or "").strip().lower()
@@ -346,7 +329,7 @@ def _build_portfolio(model_key, all_funds):
     eff_debt   = sum(f["weight"] * _debt_pct(f) / 100 for f in result)
     eff_other  = max(0.0, 100 - eff_equity - eff_debt)
 
-    # ── Rebased cap mix (weighted by equity-bearing exposure) ───────────────
+    # ── Rebased cap mix ──────────────────────────────────────────────────────
     cap_num_l = cap_num_m = cap_num_s = cap_den = 0.0
     for f in result:
         eq_frac = _eq_pct(f) / 100
@@ -389,7 +372,7 @@ def _build_portfolio(model_key, all_funds):
 
     result.sort(key=sort_key)
 
-    # ── Normalise cap mix to sum to exactly 100 (they should already ~≈100) ──
+    # Normalise cap mix to sum to exactly 100
     if rb_large is not None and rb_mid is not None and rb_small is not None:
         cap_total = rb_large + rb_mid + rb_small
         if cap_total > 0:
@@ -408,7 +391,6 @@ def _build_portfolio(model_key, all_funds):
             "debt_lo": m["debt_lo"], "debt_hi": m["debt_hi"],
             "large_cap": m["cap_large"], "mid_cap": m["cap_mid"], "small_cap": m["cap_small"], "cap_tol": CAP_TOL,
         },
-        # Weighted-avg asset exposure (hybrid split factored) — sums to 100 with alternates
         "actual": {
             "equity_pct":     round(eff_equity, 1),
             "debt_pct":       round(eff_debt, 1),
@@ -417,12 +399,11 @@ def _build_portfolio(model_key, all_funds):
             "mid_cap":        rb_mid,
             "small_cap":      rb_small,
         },
-        # asset_mix now = weighted avg (not sleeve totals) — matches actual
         "asset_mix": {
-            "Equity":     round(eff_equity, 1),
-            "Debt":       round(eff_debt, 1),
-            "Cash & Others": round(eff_other, 1),
-            "Gold":       0.0,
+            "Equity":         round(eff_equity, 1),
+            "Debt":           round(eff_debt, 1),
+            "Cash & Others":  round(eff_other, 1),
+            "Gold":           0.0,
         },
         "blended": {
             "return_1y": wavg("return_1y"), "return_3y": wavg("return_3y"),
@@ -459,8 +440,6 @@ def _get_funds(db, data_date):
         WHERE data_date = :date AND ranking IN ('R1','R2') AND nav IS NOT NULL
     """), {"date": str(data_date)}).fetchall()
 
-    # Deduplicate — a fund must appear only once.
-    # Dedupe by ISIN first, then by normalised name as a safety net.
     seen_isin, seen_name, out = set(), set(), []
     for r in rows:
         d = dict(r._mapping)
@@ -478,7 +457,6 @@ def _get_funds(db, data_date):
 
 @router.get("/debug")
 def debug_portfolios(date: str = Query(None)):
-    """Debug endpoint — shows exactly what's failing."""
     from models.database import SessionLocal
     from services.db_service import get_latest_data_date
     import traceback
