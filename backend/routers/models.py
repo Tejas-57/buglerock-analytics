@@ -105,7 +105,7 @@ MODELS = {
         "label": "Conservative", "risk": "Low", "risk_score": 1,
         "horizon": "3+ years", "volatility": "5–6%", "max_drawdown": "5–10%",
         "suitability": "A low-volatility portfolio designed for capital preservation and stable returns, emphasizing fixed income with limited equity exposure. Ideal for investors with lower risk tolerance.",
-        "eq_lo": 22, "eq_hi": 28, "debt_lo": 67, "debt_hi": 73,
+        "eq_lo": 22, "eq_hi": 28, "debt_lo": 62, "debt_hi": 73,
         "cap_large": 75, "cap_mid": 15, "cap_small": 10,
         "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [1, 2],
         "allowed_debt_cats": [
@@ -121,23 +121,39 @@ MODELS = {
             "Cat: Flexi Cap Funds",
         ],
         "max_debt_funds": 3,
-        "eq_per_cat": 1, "hyb_per_cat": 2,
+        "eq_per_cat": 1, "hyb_per_cat": 2, "min_funds": 7,
+        "hyb_cat_limits": {
+            "India Fund Conservative Allocation": 2,
+            "India Fund Equity Savings - Conservative": 2,
+            "India Fund Equity Savings": 1,
+            "India Fund Arbitrage Fund": 0,
+            "India Fund Dynamic Asset Allocation": 0,
+            "India Fund Aggressive Allocation": 0,
+        },
     },
     "mod_conservative": {
         "label": "Moderately Conservative", "risk": "Low–Moderate", "risk_score": 2,
         "horizon": "3–5 years", "volatility": "6–7%", "max_drawdown": "8–12%",
         "suitability": "Modest growth with limited equity exposure. Short-to-medium duration debt balanced with hybrid allocation for cautious investors wanting more than pure debt.",
-        "eq_lo": 32, "eq_hi": 38, "debt_lo": 62, "debt_hi": 68,
+        "eq_lo": 33, "eq_hi": 42, "debt_lo": 52, "debt_hi": 62,
         "cap_large": 70, "cap_mid": 20, "cap_small": 10,
         "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [1, 2, 3],
         "allowed_equity_cats": [
-            "India Fund Large-Cap",
             "India Fund Large & Mid-Cap",
             "Cat: Flexi Cap Funds",
             "Cat: Multi Cap Funds",
         ],
-        "max_debt_funds": 2,
-        "eq_per_cat": 1, "hyb_per_cat": 2,
+        "max_debt_funds": 3,
+        "eq_per_cat": 2, "hyb_per_cat": 2, "min_funds": 7,
+        "hyb_cat_limits": {
+            "India Fund Dynamic Asset Allocation": 2,
+            "India Fund Equity Savings - Aggressive": 2,
+            "India Fund Equity Savings": 1,
+            "India Fund Equity Savings - Conservative": 1,
+            "India Fund Conservative Allocation": 1,  # debt anchor
+            "India Fund Arbitrage Fund": 0,
+            "India Fund Aggressive Allocation": 0,
+        },
     },
     "balanced": {
         "label": "Balanced", "risk": "Moderate", "risk_score": 3,
@@ -325,7 +341,9 @@ def _solve_with_retry(funds, m):
     """
     cap_l, cap_m, cap_s = m["cap_large"], m["cap_mid"], m["cap_small"]
     base_tol = m.get("cap_tol", CAP_TOL)
-    forced_max_w = min(MAX_W, 100.0 / MIN_FUNDS)
+    min_funds = m.get("min_funds", MIN_FUNDS)
+    max_funds = m.get("max_funds", MAX_FUNDS)
+    forced_max_w = min(MAX_W, 100.0 / min_funds)
 
     from scipy.optimize import linprog
 
@@ -364,10 +382,10 @@ def _solve_with_retry(funds, m):
                 if w2.sum() > 0:
                     w = w2 / w2.sum() * 100
                     nonzero = np.where(w > 0)[0]
-            if len(nonzero) > MAX_FUNDS:
-                drop = nonzero[np.argsort(w[nonzero])][:len(nonzero)-MAX_FUNDS]
+            if len(nonzero) > max_funds:
+                drop = nonzero[np.argsort(w[nonzero])][:len(nonzero)-max_funds]
                 w[drop] = 0.0; w = w / w.sum() * 100
-            if np.sum(w > 0) >= MIN_FUNDS:
+            if np.sum(w > 0) >= min_funds:
                 return np.round(w, 2), 999  # 999 = pass 1 (no cap mix)
 
     # Pass 2: MAX_W with cap mix, relaxing tolerance
