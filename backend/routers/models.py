@@ -27,29 +27,77 @@ router = APIRouter()
 
 # ── Asset-class risk tiers (debt + hybrid) ──────────────────────────────────────
 DEBT_RISK_TIER = {
+    # Tier 1 — Overnight/liquid: zero duration, zero credit risk
     "India OE Overnight":               1,
     "India OE Liquid":                  1,
     "India OE Money Market":            1,
     "India OE Ultra Short Duration":    1,
+    # Tier 2 — Short duration, high quality credit (AAA/govt)
     "India OE Low Duration":            2,
     "India OE Floating Rate":           2,
     "India OE Banking & PSU":           2,
-    "India OE Short Duration":          3,
-    "India OE Corporate Bond":          3,
-    "India OE Medium Duration":         4,
-    "India OE Medium to Long Duration": 4,
-    "India OE Dynamic Bond":            4,
-    "India OE Government Bond":         5,
-    "India OE Credit Risk":             5,
+    "India OE Short Duration":          2,
+    "India OE Corporate Bond":          2,
+    "India OE Government Bond":         2,  # sovereign = zero credit risk
+    # Tier 3 — Medium duration, still high quality
+    "India OE Medium Duration":         3,
+    "India OE Medium to Long Duration": 3,
+    "India OE Dynamic Bond":            3,
+    # Tier 4 — Higher risk: credit risk or long duration
+    "India OE Long Duration":           4,
+    "India OE 10 yr Government Bond":   4,
+    "India OE Credit Risk":             4,
 }
 HYBRID_RISK_TIER = {
     "India Fund Arbitrage Fund":                1,
     "India Fund Conservative Allocation":       1,
     "India Fund Equity Savings - Conservative": 2,
+    "India Fund Equity Savings":                2,  # plain variant in DB
     "India Fund Dynamic Asset Allocation":      3,
+    "India Fund Balanced Allocation":           3,  # ~65% equity, similar to DAA
+    "India Fund Multi Asset Allocation":        3,  # multi-asset, moderate equity
     "India Fund Equity Savings - Aggressive":   3,
     "India Fund Aggressive Allocation":         4,
 }
+
+# Debt category priority — funds picked in this order (highest priority first)
+DEBT_PRIORITY = [
+    "India OE Corporate Bond",
+    "India OE Ultra Short Duration",
+    "India OE Money Market",
+    "India OE Government Bond",
+    "India OE Floating Rate",
+    "India OE Banking & PSU",
+    "India OE Short Duration",
+    "India OE Low Duration",
+    "India OE Dynamic Bond",
+    "India OE Medium Duration",
+    "India OE Medium to Long Duration",
+    "India OE Liquid",
+    "India OE Overnight",
+    "India OE Credit Risk",
+]
+
+# For aggressive / mod-aggressive: the single debt fund must be one of these
+AGG_DEBT_CATS = {
+    "India OE Corporate Bond",
+    "India OE Dynamic Bond",
+    "India OE Ultra Short Duration",
+    "India OE Government Bond",
+}
+
+# Hybrid category priority — BAF/DAA first, then equity savings, then allocation funds
+HYBRID_PRIORITY = [
+    "India Fund Dynamic Asset Allocation",       # BAF / DAA
+    "India Fund Balanced Allocation",            # balanced hybrid
+    "India Fund Multi Asset Allocation",         # multi-asset
+    "India Fund Equity Savings - Aggressive",
+    "India Fund Equity Savings",                 # plain variant
+    "India Fund Equity Savings - Conservative",
+    "India Fund Aggressive Allocation",
+    "India Fund Conservative Allocation",
+    "India Fund Arbitrage Fund",
+]
 
 # ── Model definitions ──────────────────────────────────────────────────────────
 MODELS = {
@@ -57,10 +105,23 @@ MODELS = {
         "label": "Conservative", "risk": "Low", "risk_score": 1,
         "horizon": "3+ years", "volatility": "5–6%", "max_drawdown": "5–10%",
         "suitability": "A low-volatility portfolio designed for capital preservation and stable returns, emphasizing fixed income with limited equity exposure. Ideal for investors with lower risk tolerance.",
-        "eq_lo": 27, "eq_hi": 33, "debt_lo": 67, "debt_hi": 73,
+        "eq_lo": 22, "eq_hi": 28, "debt_lo": 67, "debt_hi": 73,
         "cap_large": 75, "cap_mid": 15, "cap_small": 10,
-        "debt_tiers": [1, 2, 3], "hybrid_tiers": [1, 2],
-        "eq_per_cat": 1, "debt_per_cat": 2, "hyb_per_cat": 2,
+        "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [1, 2],
+        "allowed_debt_cats": [
+            "India OE Corporate Bond",
+            "India OE Ultra Short Duration",
+            "India OE Money Market",
+            "India OE Government Bond",
+            "India OE Floating Rate",
+        ],
+        "allowed_equity_cats": [
+            "India Fund Large-Cap",
+            "India Fund Large & Mid-Cap",
+            "Cat: Flexi Cap Funds",
+        ],
+        "max_debt_funds": 3,
+        "eq_per_cat": 1, "hyb_per_cat": 2,
     },
     "mod_conservative": {
         "label": "Moderately Conservative", "risk": "Low–Moderate", "risk_score": 2,
@@ -68,35 +129,84 @@ MODELS = {
         "suitability": "Modest growth with limited equity exposure. Short-to-medium duration debt balanced with hybrid allocation for cautious investors wanting more than pure debt.",
         "eq_lo": 32, "eq_hi": 38, "debt_lo": 62, "debt_hi": 68,
         "cap_large": 70, "cap_mid": 20, "cap_small": 10,
-        "debt_tiers": [2, 3, 4], "hybrid_tiers": [1, 2, 3],
-        "eq_per_cat": 1, "debt_per_cat": 2, "hyb_per_cat": 2,
+        "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [1, 2, 3],
+        "allowed_equity_cats": [
+            "India Fund Large-Cap",
+            "India Fund Large & Mid-Cap",
+            "Cat: Flexi Cap Funds",
+            "Cat: Multi Cap Funds",
+        ],
+        "max_debt_funds": 2,
+        "eq_per_cat": 1, "hyb_per_cat": 2,
     },
     "balanced": {
         "label": "Balanced", "risk": "Moderate", "risk_score": 3,
         "horizon": "3–5 years", "volatility": "6–9%", "max_drawdown": "10–15%",
         "suitability": "Moderate growth portfolio with reduced volatility, balancing capital appreciation and income generation. Ideal for investors with moderate risk appetite and medium-term goals.",
-        "eq_lo": 47, "eq_hi": 53, "debt_lo": 47, "debt_hi": 53,
-        "cap_large": 60, "cap_mid": 25, "cap_small": 15,
-        "debt_tiers": [3, 4], "hybrid_tiers": [2, 3, 4],
-        "eq_per_cat": 1, "debt_per_cat": 1, "hyb_per_cat": 2,
+        "eq_lo": 52, "eq_hi": 58, "debt_lo": 42, "debt_hi": 48,
+        "cap_large": 60, "cap_mid": 25, "cap_small": 15, "cap_tol": 15,
+        "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [1, 2, 3, 4],
+        "allowed_equity_cats": [
+            "India Fund Large-Cap",
+            "India Fund Large & Mid-Cap",
+            "Cat: Flexi Cap Funds",
+            "Cat: Multi Cap Funds",
+            "India Fund Focused Fund",
+            "India Fund Mid-Cap",
+        ],
+        "max_debt_funds": 3,
+        "eq_per_cat": 1, "hyb_per_cat": 4,
+        "hyb_cat_limits": {
+            "India Fund Dynamic Asset Allocation": 2,
+            "India Fund Balanced Allocation": 2,
+            "India Fund Multi Asset Allocation": 1,
+            "India Fund Aggressive Allocation": 2,
+            "India Fund Equity Savings - Aggressive": 2,
+            "India Fund Equity Savings": 1,
+            "India Fund Equity Savings - Conservative": 1,
+            "India Fund Conservative Allocation": 1,  # debt-heavy, anchors debt target
+            "India Fund Arbitrage Fund": 0,            # excluded — pure arbitrage
+        },
     },
     "mod_aggressive": {
         "label": "Moderately Aggressive", "risk": "Moderate–High", "risk_score": 4,
         "horizon": "5–7 years", "volatility": "8–12%", "max_drawdown": "12–18%",
         "suitability": "Growth-tilted portfolio with a debt ballast. Primarily equity across the cap spectrum, complemented by aggressive hybrid funds and minimal fixed income.",
-        "eq_lo": 67, "eq_hi": 73, "debt_lo": 27, "debt_hi": 33,
-        "cap_large": 55, "cap_mid": 23, "cap_small": 22,
-        "debt_tiers": [4, 5], "hybrid_tiers": [3, 4],
-        "eq_per_cat": 2, "debt_per_cat": 1, "hyb_per_cat": 1,
+        "eq_lo": 68, "eq_hi": 76, "debt_lo": 27, "debt_hi": 33,
+        "cap_large": 50, "cap_mid": 27, "cap_small": 23,
+        "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [2, 3, 4],
+        "allowed_equity_cats": None,
+        "max_debt_funds": 2,
+        "eq_per_cat": 2, "hyb_per_cat": 2,
+        "eq_cat_limits": {
+            "Cat: Multi Cap Funds": 1,
+            "India Fund Focused Fund": 1,
+            "Cat: Contra / Value Funds": 1,
+        },
+        "hyb_cat_limits": {
+            "India Fund Dynamic Asset Allocation": 2,
+            "India Fund Aggressive Allocation": 2,
+            "India Fund Equity Savings - Aggressive": 1,
+            "India Fund Equity Savings": 0,
+            "India Fund Equity Savings - Conservative": 0,
+            "India Fund Conservative Allocation": 0,
+            "India Fund Arbitrage Fund": 0,
+        },
     },
     "aggressive": {
         "label": "Aggressive", "risk": "High", "risk_score": 5,
         "horizon": "5+ years", "volatility": "10–15%", "max_drawdown": "15–20%",
         "suitability": "Maximizes growth potential through higher equity allocation across all cap segments, suitable for investors with a long-term horizon and higher risk tolerance.",
-        "eq_lo": 77, "eq_hi": 83, "debt_lo": 17, "debt_hi": 23,
-        "cap_large": 40, "cap_mid": 30, "cap_small": 30,
-        "debt_tiers": [4, 5], "hybrid_tiers": [3, 4],
-        "eq_per_cat": 2, "debt_per_cat": 1, "hyb_per_cat": 1,
+        "eq_lo": 80, "eq_hi": 87, "debt_lo": 17, "debt_hi": 23,
+        "cap_large": 35, "cap_mid": 33, "cap_small": 32,
+        "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [2, 3, 4],
+        "allowed_equity_cats": None,
+        "max_debt_funds": 1,
+        "eq_per_cat": 2, "hyb_per_cat": 2,
+        "eq_cat_limits": {
+            "Cat: Multi Cap Funds": 1,
+            "India Fund Focused Fund": 1,
+        },
     },
 }
 
@@ -107,7 +217,7 @@ MIN_W_LOOSE = 3.0
 FUND_COUNT_THRESHOLD = 11
 
 # ── Equity category classification ─────────────────────────────────────────────
-CORE_EQUITY_CATS = {
+CORE_EQUITY_CATS = [
     "India Fund Large-Cap",
     "India Fund Large & Mid-Cap",
     "Cat: Flexi Cap Funds",
@@ -116,7 +226,7 @@ CORE_EQUITY_CATS = {
     "India Fund Mid-Cap",
     "India Fund Small-Cap",
     "Cat: Contra / Value Funds",
-}
+]
 
 CAP_TOL = 5.0
 MAX_W = 20.0
@@ -148,9 +258,11 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
         return 100.0 if f["asset_class"] == "Equity" else 0.0
 
     def get_debt_pct(f):
+        if f["asset_class"] == "Debt": return 100.0
+        if f.get("category") == "India Fund Arbitrage Fund": return 100.0
         v = _s(f.get("bond_pct"))
         if v is not None and v > 0: return v
-        return 100.0 if f["asset_class"] == "Debt" else 0.0
+        return 0.0
 
     eq_pct   = np.array([get_eq_pct(f)   for f in funds])
     debt_pct = np.array([get_debt_pct(f) for f in funds])
@@ -205,41 +317,79 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
 
 def _solve_with_retry(funds, m):
     """
-    Retry ladder: progressively relax cap-mix tolerance.
-    Enforces MIN_FUNDS by capping MAX_W at 100/MIN_FUNDS (~11.1%).
+    Two-pass approach:
+    Pass 1: forced_max_w (100/MIN_FUNDS) with NO cap mix constraint.
+            Ensures MIN_FUNDS by spreading weight across all candidates.
+    Pass 2: MAX_W with cap mix constraint (with tolerance relaxation).
+            Used only if Pass 1 fails to find MIN_FUNDS.
     """
     cap_l, cap_m, cap_s = m["cap_large"], m["cap_mid"], m["cap_small"]
-
-    # Force ≥ MIN_FUNDS by capping MAX_W
+    base_tol = m.get("cap_tol", CAP_TOL)
     forced_max_w = min(MAX_W, 100.0 / MIN_FUNDS)
 
-    for tol in [CAP_TOL, CAP_TOL+2, CAP_TOL+5, CAP_TOL+8, CAP_TOL+12]:
-        w = _solve(funds, m["eq_lo"], m["eq_hi"], m["debt_lo"], m["debt_hi"],
-                   cap_l, cap_m, cap_s, tol, forced_max_w)
-        if w is not None:
-            nonzero = np.sum(w > 0)
-            if nonzero >= MIN_FUNDS:
-                return w, tol
+    from scipy.optimize import linprog
 
-    # Fallback: relax MAX_W constraint but still try to get MIN_FUNDS
-    for tol in [CAP_TOL, CAP_TOL+5, CAP_TOL+12]:
+    def get_eq_pct(f):
+        v = _s(f.get("equity_pct"))
+        if v is not None and v > 0: return v
+        return 100.0 if f["asset_class"] == "Equity" else 0.0
+
+    def get_debt_pct(f):
+        if f["asset_class"] == "Debt": return 100.0
+        if f.get("category") == "India Fund Arbitrage Fund": return 100.0
+        v = _s(f.get("bond_pct"))
+        if v is not None and v > 0: return v
+        return 0.0
+
+    n = len(funds)
+    eq_pct   = np.array([get_eq_pct(f)   for f in funds])
+    debt_pct = np.array([get_debt_pct(f) for f in funds])
+
+    # Pass 1: no cap mix, forced_max_w
+    A_ub = np.array([-eq_pct/100, eq_pct/100, -debt_pct/100, debt_pct/100])
+    b_ub = np.array([-m["eq_lo"], m["eq_hi"], -m["debt_lo"], m["debt_hi"]])
+    res = linprog(np.zeros(n), A_ub=A_ub, b_ub=b_ub,
+                  A_eq=np.ones((1,n)), b_eq=np.array([100.0]),
+                  bounds=[(0.0, forced_max_w)]*n, method="highs")
+
+    if res.status == 0:
+        w = res.x.copy()
+        w[w < MIN_W_LOOSE] = 0.0
+        total = w.sum()
+        if total > 0:
+            w = w / total * 100
+            nonzero = np.where(w > 0)[0]
+            if len(nonzero) <= FUND_COUNT_THRESHOLD:
+                w2 = w.copy(); w2[w2 < MIN_W_TIGHT] = 0.0
+                if w2.sum() > 0:
+                    w = w2 / w2.sum() * 100
+                    nonzero = np.where(w > 0)[0]
+            if len(nonzero) > MAX_FUNDS:
+                drop = nonzero[np.argsort(w[nonzero])][:len(nonzero)-MAX_FUNDS]
+                w[drop] = 0.0; w = w / w.sum() * 100
+            if np.sum(w > 0) >= MIN_FUNDS:
+                return np.round(w, 2), 999  # 999 = pass 1 (no cap mix)
+
+    # Pass 2: MAX_W with cap mix, relaxing tolerance
+    for tol in [base_tol, base_tol+3, base_tol+6, base_tol+10, base_tol+15]:
         w = _solve(funds, m["eq_lo"], m["eq_hi"], m["debt_lo"], m["debt_hi"],
                    cap_l, cap_m, cap_s, tol, MAX_W)
         if w is not None:
             return w, tol
 
-    # Last resort: widen asset bands by 5%
+    # Last resort: widen asset bands
     w = _solve(funds, m["eq_lo"]-5, m["eq_hi"]+5, m["debt_lo"]-5, m["debt_hi"]+5,
-               cap_l, cap_m, cap_s, CAP_TOL+15, forced_max_w)
-    return (w, CAP_TOL+15) if w is not None else (None, None)
+               cap_l, cap_m, cap_s, base_tol+20, MAX_W)
+    return (w, base_tol+20) if w is not None else (None, None)
 
 
 def _pick_candidates(eq_pool, debt_pool, hybrid_pool, m):
     """
-    Pass eligible candidates to the solver with per-category limits.
-    - eq_per_cat: max equity funds per category
-    - debt_per_cat: max debt funds per category
-    - hyb_per_cat: max hybrid funds per category
+    Select candidates per sleeve:
+    - Equity: restricted to allowed_equity_cats (or all core), eq_per_cat best-fit per category
+    - Debt: picked in DEBT_PRIORITY order, capped at max_debt_funds.
+            For agg/mod-agg (max_debt_funds=1), the single debt fund must be from AGG_DEBT_CATS.
+    - Hybrid: picked in HYBRID_PRIORITY order, hyb_per_cat funds per category.
     """
     cap_l, cap_m, cap_s = m["cap_large"], m["cap_mid"], m["cap_small"]
     def cap_dev(f):
@@ -249,25 +399,63 @@ def _pick_candidates(eq_pool, debt_pool, hybrid_pool, m):
 
     from collections import defaultdict
 
-    def top_n_per_cat(pool, n):
-        bc = defaultdict(list)
-        for f in pool: bc[f.get("category","")].append(f)
-        result = []
-        for cat, funds in bc.items():
-            result.extend(sorted(funds, key=cap_dev)[:n])
-        return sorted(result, key=cap_dev)
+    # ── Equity ────────────────────────────────────────────────────────────────
+    allowed_eq = m.get("allowed_equity_cats") or CORE_EQUITY_CATS
+    eq_by_cat = defaultdict(list)
+    for f in eq_pool:
+        if f.get("category") in allowed_eq:
+            eq_by_cat[f.get("category","")].append(f)
 
-    eq_sorted = top_n_per_cat(eq_pool, m["eq_per_cat"])
+    eq_sorted = []
+    eq_cat_limits = m.get("eq_cat_limits", {})
+    for cat in CORE_EQUITY_CATS:
+        if cat in eq_by_cat:
+            n = eq_cat_limits.get(cat, m["eq_per_cat"])
+            eq_sorted.extend(sorted(eq_by_cat[cat], key=cap_dev)[:n])
+    for cat, funds in eq_by_cat.items():
+        if cat not in CORE_EQUITY_CATS:
+            n = eq_cat_limits.get(cat, m["eq_per_cat"])
+            eq_sorted.extend(sorted(funds, key=cap_dev)[:n])
 
-    debt_allowed = {c for c,t in DEBT_RISK_TIER.items()   if t in m["debt_tiers"]}
-    hyb_allowed  = {c for c,t in HYBRID_RISK_TIER.items() if t in m["hybrid_tiers"]}
-    debt_elig = [f for f in debt_pool   if f.get("category") in debt_allowed] or list(debt_pool)
-    hyb_elig  = [f for f in hybrid_pool if f.get("category") in hyb_allowed]  or list(hybrid_pool)
+    # ── Debt ──────────────────────────────────────────────────────────────────
+    debt_allowed = {c for c,t in DEBT_RISK_TIER.items() if t in m["debt_tiers"]}
+    max_debt = m.get("max_debt_funds", 3)
 
-    debt_sorted = top_n_per_cat(debt_elig, m["debt_per_cat"])
-    hyb_sorted  = top_n_per_cat(hyb_elig,  m["hyb_per_cat"])
+    if m.get("allowed_debt_cats"):
+        debt_eligible_cats = set(m["allowed_debt_cats"]) & debt_allowed
+    elif max_debt == 1:
+        debt_eligible_cats = debt_allowed & AGG_DEBT_CATS
+    else:
+        debt_eligible_cats = debt_allowed
 
-    raw = eq_sorted + debt_sorted + hyb_sorted
+    debt_by_cat = defaultdict(list)
+    for f in debt_pool:
+        if f.get("category") in debt_eligible_cats:
+            debt_by_cat[f.get("category")].append(f)
+
+    debt_sorted = []
+    for cat in DEBT_PRIORITY:
+        if cat in debt_by_cat and len(debt_sorted) < max_debt:
+            best = min(debt_by_cat[cat], key=lambda f: -_sf(f.get("sharpe_ratio_3y")))
+            debt_sorted.append(best)
+        if len(debt_sorted) >= max_debt:
+            break
+
+    # ── Hybrid ────────────────────────────────────────────────────────────────
+    hyb_allowed = {c for c,t in HYBRID_RISK_TIER.items() if t in m["hybrid_tiers"]}
+    hyb_by_cat = defaultdict(list)
+    for f in hybrid_pool:
+        if f.get("category") in hyb_allowed:
+            hyb_by_cat[f.get("category")].append(f)
+
+    hyb_sorted = []
+    hyb_cat_limits = m.get("hyb_cat_limits", {})
+    for cat in HYBRID_PRIORITY:
+        if cat in hyb_by_cat:
+            n = hyb_cat_limits.get(cat, m["hyb_per_cat"])
+            hyb_sorted.extend(sorted(hyb_by_cat[cat], key=cap_dev)[:n])
+
+    raw = eq_sorted + hyb_sorted + debt_sorted
 
     seen, out = set(), []
     for f in raw:
@@ -288,7 +476,6 @@ def _build_portfolio(model_key, all_funds):
 
     candidates = _pick_candidates(eq_pool, debt_pool, hybrid_pool, m)
 
-    # Final dedup
     seen, candidates_deduped = set(), []
     for f in candidates:
         key = f.get("isin") or (f.get("name") or "").strip().lower()
@@ -314,22 +501,22 @@ def _build_portfolio(model_key, all_funds):
             for f in result:
                 f["weight"] = round(f["weight"] * 100 / tot, 1)
 
-    # ── Effective asset-class exposure (rebased incl hybrid split) ──────────
     def _eq_pct(f):
         v = _s(f.get("equity_pct"))
         if v is not None and v > 0: return v
         return 100.0 if f["asset_class"] == "Equity" else 0.0
 
     def _debt_pct(f):
+        if f["asset_class"] == "Debt": return 100.0
+        if f.get("category") == "India Fund Arbitrage Fund": return 100.0
         v = _s(f.get("bond_pct"))
         if v is not None and v > 0: return v
-        return 100.0 if f["asset_class"] == "Debt" else 0.0
+        return 0.0
 
     eff_equity = sum(f["weight"] * _eq_pct(f) / 100 for f in result)
     eff_debt   = sum(f["weight"] * _debt_pct(f) / 100 for f in result)
     eff_other  = max(0.0, 100 - eff_equity - eff_debt)
 
-    # ── Rebased cap mix ──────────────────────────────────────────────────────
     cap_num_l = cap_num_m = cap_num_s = cap_den = 0.0
     for f in result:
         eq_frac = _eq_pct(f) / 100
@@ -349,7 +536,6 @@ def _build_portfolio(model_key, all_funds):
         tw = sum(w for w,_ in vals)
         return round(sum(w*v for w,v in vals)/tw, 2) if tw else None
 
-    # ── Sort funds: equity (by category order) → hybrid → debt → alternates ────
     EQUITY_CAT_ORDER = [
         "India Fund Large-Cap",
         "India Fund Large & Mid-Cap",
@@ -372,7 +558,6 @@ def _build_portfolio(model_key, all_funds):
 
     result.sort(key=sort_key)
 
-    # Normalise cap mix to sum to exactly 100
     if rb_large is not None and rb_mid is not None and rb_small is not None:
         cap_total = rb_large + rb_mid + rb_small
         if cap_total > 0:
@@ -409,6 +594,7 @@ def _build_portfolio(model_key, all_funds):
             "return_1y": wavg("return_1y"), "return_3y": wavg("return_3y"),
             "return_5y": wavg("return_5y"), "sharpe_3y": wavg("sharpe_ratio_3y"),
             "alpha_3y": wavg("alpha_3y"), "std_dev_3y": wavg("std_dev_3y"),
+            "std_dev_5y": wavg("std_dev_5y"),
             "expense_ratio": wavg("expense_ratio"),
         },
         "funds": [
@@ -419,7 +605,7 @@ def _build_portfolio(model_key, all_funds):
                 "nav": f.get("nav"),
                 "return_1y": f.get("return_1y"), "return_3y": f.get("return_3y"),
                 "return_5y": f.get("return_5y"), "sharpe_3y": f.get("sharpe_ratio_3y"),
-                "alpha_3y": f.get("alpha_3y"), "expense_ratio": f.get("expense_ratio"),
+                "alpha_3y": f.get("alpha_3y"), "std_dev_3y": f.get("std_dev_3y"), "std_dev_5y": f.get("std_dev_5y"), "expense_ratio": f.get("expense_ratio"),
                 "aum_cr": f.get("fund_size"), "morningstar_rating": f.get("morningstar_rating"),
                 "equity_pct": f.get("equity_pct"), "bond_pct": f.get("bond_pct"),
                 "large_cap": f.get("large_cap"), "mid_cap": f.get("mid_cap"), "small_cap": f.get("small_cap"),
@@ -434,7 +620,7 @@ def _get_funds(db, data_date):
         SELECT isin, name, asset_class, ranking, category,
                equity_pct, bond_pct, large_cap, mid_cap, small_cap,
                sharpe_ratio_3y, return_1y, return_3y, return_5y,
-               expense_ratio, std_dev_3y, alpha_3y,
+               expense_ratio, std_dev_3y, std_dev_5y, alpha_3y,
                fund_size, amfi_code, nav, morningstar_rating
         FROM daily_fund_data
         WHERE data_date = :date AND ranking IN ('R1','R2') AND nav IS NOT NULL
@@ -445,10 +631,8 @@ def _get_funds(db, data_date):
         d = dict(r._mapping)
         isin = d.get("isin")
         name_key = (d.get("name") or "").strip().lower()
-        if isin and isin in seen_isin:
-            continue
-        if name_key and name_key in seen_name:
-            continue
+        if isin and isin in seen_isin: continue
+        if name_key and name_key in seen_name: continue
         if isin:      seen_isin.add(isin)
         if name_key:  seen_name.add(name_key)
         out.append(d)

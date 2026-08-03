@@ -1,0 +1,342 @@
+{
+  "conservative": {
+    "funds": 10,
+    "E": 2,
+    "H": 5,
+    "D": 3,
+    "tol": 7.0,
+    "equity": 27.0,
+    "debt": 67.0,
+    "L": 68.0,
+    "M": 8.1,
+    "S": 6.4,
+    "holdings": [
+      {
+        "w": 11.1,
+        "ac": "E",
+        "cat": "Cat: Flexi Cap Funds",
+        "name": "HDFC Flexi Cap Gr"
+      },
+      {
+        "w": 11.1,
+        "ac": "E",
+        "cat": "India Fund Large-Cap",
+        "name": "Invesco India largecap Gr"
+      },
+      {
+        "w": 11.1,
+        "ac": "H",
+        "cat": "servative Allocation",
+        "name": "ICICI Pru Regular Savings Gr"
+      },
+      {
+        "w": 11.1,
+        "ac": "H",
+        "cat": " Fund Arbitrage Fund",
+        "name": "ICICI Prudential Arbitrage Reg Gr"
+      },
+      {
+        "w": 8.7,
+        "ac": "H",
+        "cat": " Fund Arbitrage Fund",
+        "name": "Kotak Arbitrage Reg Gr"
+      },
+      {
+        "w": 8.5,
+        "ac": "H",
+        "cat": "servative Allocation",
+        "name": "Aditya BSL Regular Sav Reg Gr"
+      },
+      {
+        "w": 5.1,
+        "ac": "H",
+        "cat": "vings - Conservative",
+        "name": "ICICI Pru Equity Savings Gr"
+      },
+      {
+        "w": 11.1,
+        "ac": "D",
+        "cat": "ia OE Corporate Bond",
+        "name": "DSP Corporate Bond Reg Gr"
+      },
+      {
+        "w": 11.1,
+        "ac": "D",
+        "cat": "Ultra Short Duration",
+        "name": "Bandhan Ultra Short Dur Reg Gr"
+      },
+      {
+        "w": 11.1,
+        "ac": "D",
+        "cat": "ndia OE Dynamic Bond",
+        "name": "ICICI Pru All Seasons Bond Gr"
+      }
+    ]
+  },
+  "mod_conservative": {
+    "funds": 9,
+    "E": 1,
+    "H": 6,
+    "D": 2,
+    "tol": 13.0,
+    "equity": 32.4,
+    "debt": 64.1,
+    "L": 56.9,
+    "M": 13.2,
+    "S": 6.0,
+    "holdings": [
+      {
+        "w": 11.6,
+        "ac": "E",
+        "cat": "India Fund Large-Cap",
+        "name": "Invesco India largecap Gr"
+      },
+      {
+        "w": 11.6,
+        "ac": "H",
+        "cat": "mic Asset Allocation",
+        "name": "Baroda BNP P Bal Advtg Reg Gr"
+      },
+      {
+        "w": 11.6,
+        "ac": "H",
+        "cat": "servative Allocation",
+        "name": "ICICI Pru Regular Savings Gr"
+      },
+      {
+        "w": 11.6,
+        "ac": "H",
+        "cat": "servative Allocation",
+        "name": "Aditya BSL Regular Sav Reg Gr"
+      },
+      {
+        "w": 11.6,
+        "ac": "H",
+        "cat": " Fund Arbitrage Fund",
+        "name": "Kotak Arbitrage Reg Gr"
+      },
+      {
+        "w": 11.6,
+        "ac": "H",
+        "cat": " Fund Arbitrage Fund",
+        "name": "ICICI Prudential Arbitrage Reg Gr"
+      },
+      {
+        "w": 7.3,
+        "ac": "H",
+        "cat": "mic Asset Allocation",
+        "name": "Edelweiss Balanced Adv Gr"
+      },
+      {
+        "w": 11.6,
+        "ac": "D",
+        "cat": "ia OE Corporate Bond",
+        "name": "DSP Corporate Bond Reg Gr"
+      },
+      {
+        "w": 11.6,
+        "ac": "D",
+        "cat": "Ultra Short Duration",
+        "name": "Bandhan Ultra Short Dur Reg Gr"
+      }
+    ]
+  },
+  "balanced": {
+    "funds": 9,
+    "E": 2,
+    "H": 5,
+    "D": 2,
+    "tol": 5.0,
+    "equity": 43.3,
+    "debt": 50.9,
+    "L": 52.1,
+    "M": 19.8,
+    "S": 16.1,
+    "holdings": [
+      {
+        "w": 12.1,
+        "ac": "E",
+        "cat": "Cat: Flexi Cap Funds",
+        "name": "Helios Flexi Cap Reg Gr"
+      },
+      {
+        "w": 12.1,
+        "ac": "E",
+        "cat": "Cat: Multi Cap Funds",
+        "name": "Nippon India Multi Cap Gr"
+      },
+      {
+        "w": 12.1,
+        "ac": "H",
+        "cat": "Savings - Aggressive",
+        "name": "HSBC Equity Savings Gr"
+      },
+      {
+        "w": 12.1,
+        "ac": "H",
+        "cat": "ggressive Allocation",
+        "name": "Bandhan Agrsv Hyb Reg Gr"
+      },
+      {
+        "w": 12.1,
+        "ac": "H",
+        "cat": " Fund Arbitrage Fund",
+        "name": "UTI Arbitrage Reg Gr"
+      },
+      {
+        "w": 8.5,
+        "ac": "H",
+        "cat": " Fund Arbitrage Fund",
+        "name": "ICICI Prudential Arbitrage Reg Gr"
+      },
+      {
+        "w": 6.9,
+        "ac": "H",
+        "cat": "ggressive Allocation",
+        "name": "Edelweiss Aggressive Hybrid B Gr"
+      },
+      {
+        "w": 12.1,
+        "ac": "D",
+        "cat": "ia OE Corporate Bond",
+        "name": "DSP Corporate Bond Reg Gr"
+      },
+      {
+        "w": 12.1,
+        "ac": "D",
+        "cat": "Ultra Short Duration",
+        "name": "Bandhan Ultra Short Dur Reg Gr"
+      }
+    ]
+  },
+  "mod_aggressive": {
+    "funds": 7,
+    "E": 3,
+    "H": 3,
+    "D": 1,
+    "tol": 5.0,
+    "equity": 67.9,
+    "debt": 27.1,
+    "L": 44.7,
+    "M": 22.5,
+    "S": 18.4,
+    "holdings": [
+      {
+        "w": 12.1,
+        "ac": "E",
+        "cat": "Fund Large & Mid-Cap",
+        "name": "Bandhan Large & Mid Cap Gr"
+      },
+      {
+        "w": 11.6,
+        "ac": "E",
+        "cat": "Cat: Flexi Cap Funds",
+        "name": "Helios Flexi Cap Reg Gr"
+      },
+      {
+        "w": 9.2,
+        "ac": "E",
+        "cat": "India Fund Small-Cap",
+        "name": "Invesco India Smallcap Reg Gr"
+      },
+      {
+        "w": 20.8,
+        "ac": "H",
+        "cat": "mic Asset Allocation",
+        "name": "Baroda BNP P Bal Advtg Reg Gr"
+      },
+      {
+        "w": 20.8,
+        "ac": "H",
+        "cat": "ggressive Allocation",
+        "name": "Edelweiss Aggressive Hybrid B Gr"
+      },
+      {
+        "w": 5.2,
+        "ac": "H",
+        "cat": "Savings - Aggressive",
+        "name": "HSBC Equity Savings Gr"
+      },
+      {
+        "w": 20.3,
+        "ac": "D",
+        "cat": "ia OE Corporate Bond",
+        "name": "DSP Corporate Bond Reg Gr"
+      }
+    ]
+  },
+  "aggressive": {
+    "funds": 10,
+    "E": 6,
+    "H": 3,
+    "D": 1,
+    "tol": 5.0,
+    "equity": 80.0,
+    "debt": 17.0,
+    "L": 34.1,
+    "M": 28.8,
+    "S": 27.0,
+    "holdings": [
+      {
+        "w": 11.1,
+        "ac": "E",
+        "cat": "Fund Large & Mid-Cap",
+        "name": "Motilal Oswal Large & Midcap Reg Gr"
+      },
+      {
+        "w": 11.1,
+        "ac": "E",
+        "cat": "Fund Large & Mid-Cap",
+        "name": "Bandhan Large & Mid Cap Gr"
+      },
+      {
+        "w": 11.1,
+        "ac": "E",
+        "cat": "Cat: Multi Cap Funds",
+        "name": "ICICI Pru Multicap Gr"
+      },
+      {
+        "w": 11.1,
+        "ac": "E",
+        "cat": "India Fund Small-Cap",
+        "name": "Invesco India Smallcap Reg Gr"
+      },
+      {
+        "w": 8.9,
+        "ac": "E",
+        "cat": "Cat: Flexi Cap Funds",
+        "name": "Motilal Oswal Flexicap Reg Gr"
+      },
+      {
+        "w": 5.7,
+        "ac": "E",
+        "cat": "India Fund Small-Cap",
+        "name": "Edelweiss Small Cap Reg Gr"
+      },
+      {
+        "w": 11.1,
+        "ac": "H",
+        "cat": "ggressive Allocation",
+        "name": "UTI Aggressive Hybrid Reg Gr"
+      },
+      {
+        "w": 10.9,
+        "ac": "H",
+        "cat": "ggressive Allocation",
+        "name": "Kotak Aggressive Hybrid Reg Gr"
+      },
+      {
+        "w": 7.9,
+        "ac": "H",
+        "cat": "mic Asset Allocation",
+        "name": "HDFC Balanced Adv Gr"
+      },
+      {
+        "w": 11.1,
+        "ac": "D",
+        "cat": "ia OE Corporate Bond",
+        "name": "DSP Corporate Bond Reg Gr"
+      }
+    ]
+  }
+}

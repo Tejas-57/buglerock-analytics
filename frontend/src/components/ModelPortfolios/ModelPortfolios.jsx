@@ -105,8 +105,7 @@ function Detail({ p }) {
   const b = p.blended;
   const eq = p.actual.equity_pct, db = p.actual.debt_pct;
   const alt = p.actual.cash_other_pct || 0;
-  const est = ((eq*15) + (db*7) + (alt*7)) / 100;
-  const dbl = est > 0 ? (72/est).toFixed(1) : '—';
+  const dbl = b.return_5y > 0 ? (72 / b.return_5y).toFixed(1) : '—';
   return (
     <div className="mp-detail">
       <div className="mp-detail-hd">
@@ -126,7 +125,7 @@ function Detail({ p }) {
           <div className="mp-chip"><b style={{ color: SLEEVE.Equity }}>{eq}%</b><span>Equity (wtd avg)</span><em>Target {p.target.eq_lo}–{p.target.eq_hi}%</em></div>
           <div className="mp-chip"><b style={{ color: SLEEVE.Debt }}>{db}%</b><span>Debt (wtd avg)</span><em>Target {p.target.debt_lo}–{p.target.debt_hi}%</em></div>
           {alt > 0.5 && <div className="mp-chip"><b style={{ color: SLEEVE.Other }}>{alt}%</b><span>Cash & Others</span><em>Cash / other</em></div>}
-          <div className="mp-chip"><b>{est.toFixed(1)}%</b><span>Est. return p.a.</span><em>Eq 15% · Debt 7%</em></div>
+          <div className="mp-chip"><b style={{ color: b.return_5y >= 0 ? '#1A7A52' : '#912F63' }}>{pct(b.return_5y)}</b><span>5Y CAGR (wtd avg)</span><em>Actual blended return</em></div>
           <div className="mp-chip"><b>{dbl} yrs</b><span>Time to double</span><em>Rule of 72</em></div>
         </div>
       </div>
@@ -138,8 +137,9 @@ function Detail({ p }) {
           ['1Y Return', pct(b.return_1y), b.return_1y >= 0 ? '#1A7A52' : '#912F63'],
           ['3Y CAGR', pct(b.return_3y), b.return_3y >= 0 ? '#1A7A52' : '#912F63'],
           ['5Y CAGR', pct(b.return_5y), b.return_5y >= 0 ? '#1A7A52' : '#912F63'],
-          ['Sharpe (3Y)', f2(b.sharpe_3y), 'var(--text-primary)'],
           ['Std Dev (3Y)', b.std_dev_3y != null ? `${f1(b.std_dev_3y)}%` : '—', 'var(--text-muted)'],
+          ['Std Dev (5Y)', b.std_dev_5y != null ? `${f1(b.std_dev_5y)}%` : '—', 'var(--text-muted)'],
+          ['Sharpe (3Y)', f2(b.sharpe_3y), 'var(--text-primary)'],
           ['Expense Ratio', b.expense_ratio != null ? `${f2(b.expense_ratio)}%` : '—', 'var(--text-muted)'],
         ].map(([l, v, c]) => (
           <div key={l} className="mp-metric"><b style={{ color: c }}>{v}</b><span>{l}</span></div>
@@ -153,7 +153,7 @@ function Detail({ p }) {
             <thead><tr>
               <th style={{ textAlign: 'left' }}>Fund</th>
               <th>Sleeve</th><th>Rank</th><th>Weight</th>
-              <th>1Y</th><th>3Y</th><th>Sharpe</th><th>ER</th><th>Cap mix</th>
+              <th>1Y</th><th>3Y</th><th>Std Dev 3Y</th><th>Std Dev 5Y</th><th>Sharpe</th><th>ER</th><th>Cap mix</th>
             </tr></thead>
             <tbody>
               {p.funds.map(f => (
@@ -167,6 +167,8 @@ function Detail({ p }) {
                   <td className="mp-wt">{f.weight}%</td>
                   <td style={{ color: f.return_1y >= 0 ? '#1A7A52' : '#912F63' }}>{pct(f.return_1y)}</td>
                   <td style={{ color: f.return_3y >= 0 ? '#1A7A52' : '#912F63' }}>{pct(f.return_3y)}</td>
+                  <td>{f.std_dev_3y != null ? `${f1(f.std_dev_3y)}%` : '—'}</td>
+                  <td>{f.std_dev_5y != null ? `${f1(f.std_dev_5y)}%` : '—'}</td>
                   <td>{f2(f.sharpe_3y)}</td>
                   <td>{f.expense_ratio ? `${f2(f.expense_ratio)}%` : '—'}</td>
                   <td>
