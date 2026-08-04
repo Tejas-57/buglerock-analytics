@@ -21,8 +21,8 @@ const NAV_SECTIONS = [
   {
     section: 'BUILD',
     items: [
-      { path: '/models',           label: 'Model Portfolios', icon: ModelsIcon },
       { path: '/portfolio',        label: 'Portfolio Builder', icon: PortfolioIcon },
+      { path: '/models',           label: 'Model Portfolios', icon: ModelsIcon },
       { path: '/simulator',        label: 'Simulator',         icon: SimulatorIcon },
       { path: '/rolling-analytics',label: 'Rolling Analytics', icon: RollingIcon },
     ],
