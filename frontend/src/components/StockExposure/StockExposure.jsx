@@ -10,6 +10,7 @@ const fmtAum = (v) => {
   return `₹${Math.round(v)} Cr`;
 };
 
+const RANK_ORDER = { R1: 1, R2: 2, R3: 3, R4: 4, R5: 5 };
 const RANK_COLORS = {
   R1: { bg: 'rgba(16,185,129,0.12)', color: '#059669', border: 'rgba(16,185,129,0.3)' },
   R2: { bg: 'rgba(16,185,129,0.08)', color: '#10B981', border: 'rgba(16,185,129,0.2)' },
@@ -28,17 +29,81 @@ function RankBadge({ ranking }) {
   );
 }
 
+// Sortable column header
+function SortTh({ col, label, sort, onSort, align = 'center' }) {
+  const active = sort.col === col;
+  const dir = active ? sort.dir : null;
+  return (
+    <th
+      onClick={() => onSort(col)}
+      style={{ textAlign: align, cursor: 'pointer', userSelect: 'none',
+        color: active ? 'var(--brand-primary)' : undefined }}
+    >
+      {label}{' '}
+      <span style={{ opacity: active ? 1 : 0.3, fontSize: 9 }}>
+        {dir === 'asc' ? '↑' : '↓'}
+      </span>
+    </th>
+  );
+}
+
+function sortData(arr, sort, getValue) {
+  return [...arr].sort((a, b) => {
+    const va = getValue(a, sort.col);
+    const vb = getValue(b, sort.col);
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    const cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+    return sort.dir === 'asc' ? cmp : -cmp;
+  });
+}
+
+function useSort(defaultCol, defaultDir = 'desc') {
+  const [sort, setSort] = useState({ col: defaultCol, dir: defaultDir });
+  const onSort = (col) => setSort(prev =>
+    prev.col === col
+      ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+      : { col, dir: 'desc' }
+  );
+  return [sort, onSort];
+}
+
 export default function StockExposure() {
-  const [query, setQuery]           = useState('');
+  const [query, setQuery]             = useState('');
   const [suggestions, setSuggestions] = useState([]);
-  const [showSugg, setShowSugg]     = useState(false);
+  const [showSugg, setShowSugg]       = useState(false);
   const [whitelisted, setWhitelisted] = useState(false);
-  const [loading, setLoading]       = useState(false);
-  const [result, setResult]         = useState(null);
-  const [error, setError]           = useState(null);
-  const [sortFunds, setSortFunds]   = useState('weight'); // weight | name | amc
-  const debounceRef = useRef(null);
-  const inputRef    = useRef(null);
+  const [loading, setLoading]         = useState(false);
+  const [result, setResult]           = useState(null);
+  const [error, setError]             = useState(null);
+
+  const [amcSort, onAmcSort]     = useSort('aum_exposed_cr', 'desc');
+  const [fundSort, onFundSort]   = useSort('weight', 'desc');
+
+  const debounceRef  = useRef(null);
+  const inputRef     = useRef(null);
+  const amcCardRef   = useRef(null);
+  const fundScrollRef = useRef(null);
+
+  // Sync fund table scroll height to AMC card height, min 260px (~5 rows)
+  useEffect(() => {
+    if (!result) return;
+    const syncHeight = () => {
+      if (amcCardRef.current && fundScrollRef.current) {
+        const amcH = amcCardRef.current.offsetHeight;
+        // Only subtract the fund card's title bar (se-card-hd) so bottoms align
+        const fundCard = fundScrollRef.current.closest('.se-card');
+        const cardHd = fundCard ? fundCard.querySelector('.se-card-hd')?.offsetHeight || 0 : 0;
+        const minH = 260;
+        const targetH = Math.max(amcH - cardHd, minH);
+        fundScrollRef.current.style.maxHeight = targetH + 'px';
+      }
+    };
+    syncHeight();
+    window.addEventListener('resize', syncHeight);
+    return () => window.removeEventListener('resize', syncHeight);
+  }, [result]);
 
   // Typeahead
   const fetchSuggestions = useCallback((q) => {
@@ -60,28 +125,20 @@ export default function StockExposure() {
 
   const runSearch = useCallback((stockName, wl) => {
     if (!stockName?.trim()) return;
-    setLoading(true);
-    setResult(null);
-    setError(null);
-    setShowSugg(false);
-    const wlParam = (wl !== undefined ? wl : whitelisted);
+    setLoading(true); setResult(null); setError(null); setShowSugg(false);
+    const wlParam = wl !== undefined ? wl : whitelisted;
     fetch(`${API}/api/holdings/stock-exposure?stock=${encodeURIComponent(stockName)}&whitelisted=${wlParam}`)
       .then(r => r.json())
       .then(d => {
-        if (!d.matched_name) {
-          setError(`No stock matching "${stockName}" found in holdings data.`);
-        } else {
-          setResult(d);
-        }
+        if (!d.matched_name) setError(`No stock matching "${stockName}" found in holdings data.`);
+        else setResult(d);
       })
       .catch(() => setError('Failed to fetch exposure data. Please try again.'))
       .finally(() => setLoading(false));
   }, [whitelisted]);
 
   const pickSuggestion = (name) => {
-    setQuery(name);
-    setSuggestions([]);
-    setShowSugg(false);
+    setQuery(name); setSuggestions([]); setShowSugg(false);
     runSearch(name, whitelisted);
   };
 
@@ -95,15 +152,24 @@ export default function StockExposure() {
     if (result) runSearch(result.matched_name, val);
   };
 
-  // Sort holders
-  const sortedHolders = result ? [...result.holders].sort((a, b) => {
-    if (sortFunds === 'weight') return b.weight - a.weight;
-    if (sortFunds === 'name') return a.fund_name.localeCompare(b.fund_name);
-    if (sortFunds === 'amc') return a.amc.localeCompare(b.amc);
-    return 0;
+  // AMC table sort
+  const sortedAmc = result ? sortData(result.amc_breakdown, amcSort, (r, col) => {
+    if (col === 'amc') return r.amc;
+    if (col === 'fund_count') return r.fund_count;
+    if (col === 'avg_weight') return r.avg_weight;
+    if (col === 'aum_exposed_cr') return r.aum_exposed_cr;
+    return null;
   }) : [];
 
-  // Click outside to close suggestions
+  // Fund table sort — rank uses numeric order R1=1...R5=5, unranked=99
+  const sortedHolders = result ? sortData(result.holders, fundSort, (h, col) => {
+    if (col === 'fund_name') return h.fund_name;
+    if (col === 'rank') return RANK_ORDER[h.ranking] ?? 99;
+    if (col === 'weight') return h.weight;
+    if (col === 'aum_exposed_cr') return h.aum_exposed_cr;
+    return null;
+  }) : [];
+
   useEffect(() => {
     const handler = (e) => { if (!e.target.closest('.se-search-wrap')) setShowSugg(false); };
     document.addEventListener('mousedown', handler);
@@ -174,11 +240,7 @@ export default function StockExposure() {
           ))}
         </div>
 
-        <button
-          className="se-search-btn"
-          onClick={() => runSearch(query, whitelisted)}
-          disabled={!query.trim() || loading}
-        >
+        <button className="se-search-btn" onClick={() => runSearch(query, whitelisted)} disabled={!query.trim() || loading}>
           {loading ? 'Searching…' : 'Search'}
         </button>
       </div>
@@ -216,9 +278,6 @@ export default function StockExposure() {
               <div className="se-stock-meta">
                 {result.sector && <span className="se-sector-chip">{result.sector}</span>}
                 {result.stock_isin && <span className="se-isin-chip">{result.stock_isin}</span>}
-                {result.other_matched_names?.length > 0 && (
-                  <span className="se-also">Also matched: {result.other_matched_names.join(', ')}</span>
-                )}
               </div>
               <div className="se-stock-desc">
                 Held by <strong>{s.fund_count} fund{s.fund_count !== 1 ? 's' : ''}</strong> across <strong>{s.amc_count} fund house{s.amc_count !== 1 ? 's' : ''}</strong>
@@ -246,25 +305,25 @@ export default function StockExposure() {
             {/* Two tables */}
             <div className="se-tables">
               {/* AMC breakdown */}
-              <div className="se-card">
-                <div className="se-card-hd">🏢 By fund house — most exposure</div>
+              <div className="se-card" ref={amcCardRef}>
+                <div className="se-card-hd">🏢 By fund house</div>
                 <div className="se-card-body">
                   <table className="se-table">
                     <thead>
                       <tr>
-                        <th style={{ textAlign: 'left' }}>AMC</th>
-                        <th>Funds</th>
-                        <th>Avg wt.</th>
-                        <th style={{ textAlign: 'right' }}>Est. AUM</th>
+                        <SortTh col="amc"           label="AMC"      sort={amcSort} onSort={onAmcSort} align="left" />
+                        <SortTh col="fund_count"    label="Funds"    sort={amcSort} onSort={onAmcSort} />
+                        <SortTh col="avg_weight"    label="Avg wt."  sort={amcSort} onSort={onAmcSort} />
+                        <SortTh col="aum_exposed_cr" label="Est. AUM" sort={amcSort} onSort={onAmcSort} />
                       </tr>
                     </thead>
                     <tbody>
-                      {result.amc_breakdown.map((r, i) => (
+                      {sortedAmc.map((r, i) => (
                         <tr key={i}>
                           <td className="se-td-name">{r.amc}</td>
-                          <td className="se-td-center se-mono">{r.fund_count}</td>
-                          <td className="se-td-right se-mono">{fmt(r.avg_weight, 2)}%</td>
-                          <td className="se-td-right se-mono se-bold">{fmtAum(r.aum_exposed_cr)}</td>
+                          <td className="se-mono">{r.fund_count}</td>
+                          <td className="se-mono">{fmt(r.avg_weight, 2)}%</td>
+                          <td className="se-mono se-bold">{fmtAum(r.aum_exposed_cr)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -274,29 +333,16 @@ export default function StockExposure() {
 
               {/* Fund breakdown */}
               <div className="se-card">
-                <div className="se-card-hd" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>📋 By fund — ranked by weight</span>
-                  <div className="se-sort-group">
-                    {[['weight', 'Weight'], ['name', 'Name'], ['amc', 'AMC']].map(([val, label]) => (
-                      <button
-                        key={val}
-                        className={`se-sort-btn${sortFunds === val ? ' active' : ''}`}
-                        onClick={() => setSortFunds(val)}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="se-card-body se-card-scroll">
+                <div className="se-card-hd">📋 By fund</div>
+                <div className="se-card-body se-card-fund-scroll" ref={fundScrollRef}>
                   <table className="se-table">
                     <thead>
                       <tr>
-                        <th style={{ textAlign: 'left' }}>#</th>
-                        <th style={{ textAlign: 'left' }}>Fund</th>
-                        <th>Rank</th>
-                        <th style={{ textAlign: 'right' }}>Weight</th>
-                        <th style={{ textAlign: 'right' }}>Est. AUM</th>
+                        <th style={{ textAlign: 'left', width: 28 }}>#</th>
+                        <SortTh col="fund_name"     label="Fund"     sort={fundSort} onSort={onFundSort} align="left" />
+                        <SortTh col="rank"          label="Rank"     sort={fundSort} onSort={onFundSort} />
+                        <SortTh col="weight"        label="Weight"   sort={fundSort} onSort={onFundSort} />
+                        <SortTh col="aum_exposed_cr" label="Est. AUM" sort={fundSort} onSort={onFundSort} />
                       </tr>
                     </thead>
                     <tbody>
@@ -307,9 +353,9 @@ export default function StockExposure() {
                             <div className="se-fund-name">{h.fund_name}</div>
                             <div className="se-fund-meta">{h.amc} · {h.category}</div>
                           </td>
-                          <td className="se-td-center"><RankBadge ranking={h.ranking} /></td>
-                          <td className="se-td-right se-mono se-bold">{fmt(h.weight, 2)}%</td>
-                          <td className="se-td-right se-mono">{fmtAum(h.aum_exposed_cr)}</td>
+                          <td><RankBadge ranking={h.ranking} /></td>
+                          <td className="se-mono se-bold">{fmt(h.weight, 2)}%</td>
+                          <td className="se-mono">{fmtAum(h.aum_exposed_cr)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -318,10 +364,12 @@ export default function StockExposure() {
               </div>
             </div>
 
-            {/* Methodology note */}
+            {/* Methodology */}
             <div className="se-methodology">
               <span className="se-meth-label">ℹ Methodology</span>
-              Holdings sourced from Morningstar's portfolio disclosure API (NewPortfolioApi). Data reflects each fund's latest disclosed portfolio — typically 1–2 months lag. Only equity holdings (holding_type = 'E') are included. AUM exposure = fund AUM × holding weight.
+              <span className="se-methodology-text">
+                Holdings sourced from Morningstar. Data reflects each fund's latest disclosed portfolio — typically with 1 month lag. Only equity holdings are included. AUM exposure = fund AUM × holding weight.
+              </span>
             </div>
           </>
         )}

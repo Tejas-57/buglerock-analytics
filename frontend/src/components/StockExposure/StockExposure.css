@@ -283,6 +283,7 @@
   grid-template-columns: 1fr 1fr;
   gap: 16px;
   margin-bottom: 16px;
+  align-items: start;
 }
 @media (max-width: 900px) { .se-tables { grid-template-columns: 1fr; } }
 
@@ -302,7 +303,7 @@
   border-bottom: 1px solid var(--border);
 }
 .se-card-body { overflow-x: auto; }
-.se-card-scroll { max-height: 420px; overflow-y: auto; }
+.se-card-fund-scroll { overflow-y: auto; min-height: 260px; }
 
 .se-table {
   width: 100%;
@@ -310,6 +311,12 @@
   font-size: 12px;
 }
 .se-table thead tr {
+  background: var(--bg-secondary);
+}
+.se-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--bg-secondary);
 }
 .se-table th {
@@ -320,21 +327,28 @@
   text-transform: uppercase;
   color: var(--text-muted);
   border-bottom: 1.5px solid var(--border);
-  text-align: right;
+  text-align: center;
   white-space: nowrap;
 }
-.se-table th:first-child { text-align: left; }
+.se-table th:first-child,
+.se-table th:nth-child(2) { text-align: left; }
 .se-table tbody tr {
   border-bottom: 1px solid var(--border-light, var(--border));
   transition: background 0.1s;
 }
 .se-table tbody tr:last-child { border-bottom: none; }
 .se-table tbody tr:hover { background: var(--bg-hover); }
-.se-table td { padding: 8px 12px; vertical-align: middle; }
+.se-table td {
+  padding: 8px 12px;
+  vertical-align: middle;
+  text-align: center;
+}
+.se-table td:first-child,
+.se-table td:nth-child(2) { text-align: left; }
 
 .se-td-name { font-size: 12px; color: var(--text-secondary); font-weight: 500; }
 .se-td-center { text-align: center; }
-.se-td-right { text-align: right; }
+.se-td-right { text-align: center; }
 .se-td-num { font-size: 10.5px; color: var(--text-muted); width: 28px; }
 .se-td-fund { max-width: 260px; }
 .se-fund-name { font-size: 11.5px; font-weight: 500; color: var(--text-secondary); }
@@ -379,11 +393,11 @@
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
 }
-.se-methodology > :last-child,
-.se-methodology p {
+.se-methodology-text {
   display: block;
   padding: 10px 14px;
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-muted);
-  line-height: 1.65;
+  line-height: 1.7;
+  margin: 0;
 }
