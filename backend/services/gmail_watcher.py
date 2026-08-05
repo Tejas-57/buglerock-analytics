@@ -301,6 +301,14 @@ def fetch_latest(check_days: int = 5, force: bool = False, skip_holdings: bool =
                     logger.error(f"New-fund holdings fetch failed (non-fatal): {e}", exc_info=True)
 
                 try:
+                    from services.morningstar_service import fetch_branding_for_new_isins
+                    branding_result = fetch_branding_for_new_isins(new_fund_isins)
+                    if branding_result.get("updated"):
+                        logger.info(f"New-fund branding fetch: {branding_result}")
+                except Exception as e:
+                    logger.error(f"New-fund branding fetch failed (non-fatal): {e}", exc_info=True)
+
+                try:
                     from services.morningstar_service import refresh_stale_holdings
                     refresh_result = refresh_stale_holdings()
                     if not refresh_result.get("skipped") and refresh_result.get("stale_found", 0) > 0:

@@ -854,3 +854,53 @@ def refresh_amc_names(force: bool = False):
         return {"fetched": len(isins), "updated": updated, "failed": failed}
     finally:
         db.close()
+
+
+def fetch_branding_for_new_isins(isins: list) -> dict:
+    """
+    For any ISINs in the list that have branding_name = NULL in daily_fund_data,
+    fetch BrandingName from FundShareClassBasicInfo API and store it.
+    Called automatically after each daily parse for new funds.
+    """
+    from models.database import SessionLocal
+    from sqlalchemy import text
+
+    db = SessionLocal()
+    try:
+        # Only fetch for ISINs that are missing branding_name
+        placeholders = ",".join([f"'{i}'" for i in isins if i])
+        if not placeholders:
+            return {"updated": 0}
+
+        rows = db.execute(text(f"""
+            SELECT DISTINCT isin FROM daily_fund_data
+            WHERE isin IN ({placeholders})
+              AND (branding_name IS NULL OR branding_name = '')
+        """)).fetchall()
+
+        missing = [r.isin for r in rows]
+        if not missing:
+            return {"updated": 0, "skipped": "all have branding_name"}
+
+        logger.info(f"fetch_branding_for_new_isins: {len(missing)} ISINs need branding name")
+        accesscode = get_valid_accesscode()
+        if not accesscode:
+            return {"error": "no_accesscode"}
+
+        updated = 0
+        for isin in missing:
+            result = fetch_amc_name(isin, accesscode)
+            amc = result.get("branding_name") or result.get("provider_name")
+            if amc:
+                db.execute(text("""
+                    UPDATE daily_fund_data SET branding_name = :amc
+                    WHERE isin = :isin AND (branding_name IS NULL OR branding_name = '')
+                """), {"amc": amc, "isin": isin})
+                db.commit()
+                updated += 1
+            time.sleep(0.5)
+
+        logger.info(f"fetch_branding_for_new_isins: updated {updated}/{len(missing)}")
+        return {"updated": updated, "checked": len(missing)}
+    finally:
+        db.close()
