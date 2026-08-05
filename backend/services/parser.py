@@ -235,6 +235,8 @@ def build_column_map(rows: list) -> dict:
             col_map.setdefault("manager_name", idx)
         elif "exit load" in hl:
             col_map.setdefault("exit_load", idx)
+        elif "branding name" in hl:
+            col_map.setdefault("branding_name", idx)
         elif "nav 52 wk high" in hl and "date" not in hl:
             col_map.setdefault("nav_52w_high", idx)
         elif "date: nav 52 wk high" in hl:
@@ -553,6 +555,7 @@ def _build_fund(row: dict, col_map: dict, asset_class: str) -> dict:
         "rta_code":          s("rta_code"),
         "manager_name":      s("manager_name"),
         "exit_load":         s("exit_load"),
+        "branding_name":     s("branding_name"),
         "nav_52w_high":      r("nav_52w_high"),
         "nav_52w_high_date": d("nav_52w_high_date"),
         "nav_52w_low":       r("nav_52w_low"),

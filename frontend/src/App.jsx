@@ -13,6 +13,7 @@ import ModelPortfolios from './components/ModelPortfolios/ModelPortfolios';
 import PeerGroupAnalytics from './components/PeerGroupAnalytics/PeerGroupAnalytics';
 import ChatButton from './components/Chat/ChatButton';
 import PortfolioBuilder from './components/PortfolioBuilder/PortfolioBuilder';
+import StockExposure from './components/StockExposure/StockExposure';
 import './styles/global.css';
 import './App.css';
 
@@ -74,6 +75,8 @@ export default function App() {
               } />
               <Route path="/watchlist" element={
                 <Watchlist selectedDate={selectedDate} setSelectedFund={handleFundSelect} />
+              } />
+              <Route path="/stock-exposure" element={<StockExposure />
               } />
               <Route path="/performance" element={
                 <Performance selectedDate={selectedDate} selectedFund={selectedFund} />

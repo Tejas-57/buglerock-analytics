@@ -146,10 +146,31 @@ async def check_parser_version():
         logger.error(f"Parser version check failed: {e}", exc_info=True)
 
 
+async def migrate_branding_name_column():
+    """Add branding_name column to daily_fund_data if it doesn't exist."""
+    from sqlalchemy import text
+    from models.database import SessionLocal
+    db = SessionLocal()
+    try:
+        db.execute(text("""
+            ALTER TABLE daily_fund_data
+            ADD COLUMN IF NOT EXISTS branding_name VARCHAR(200)
+        """))
+        db.commit()
+        logger.info("migrate_branding_name_column: done")
+    except Exception as e:
+        logger.warning(f"migrate_branding_name_column: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+
 @app.on_event("startup")
 async def startup():
     init_db()
     await migrate_benchmark_risk_columns()
+    await migrate_branding_name_column()
     await check_parser_version()
     from services.morningstar_service import seed_accesscode_from_env
     seed_accesscode_from_env()

@@ -68,6 +68,7 @@ class DailyFundData(Base):
     # Identity
     isin                 = Column(String(20), index=True)
     name                 = Column(String(255))
+    branding_name        = Column(String(200))   # "Branding Name" column from Morningstar daily Excel
     ranking              = Column(String(10))
     category             = Column(String(200))
     raw_category         = Column(String(200))

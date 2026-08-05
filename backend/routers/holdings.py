@@ -188,6 +188,374 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None):
         db.close()
 
 
+@router.get("/stock-exposure")
+def get_stock_exposure(
+    stock: str = Query(..., description="Stock name or ISIN (partial match supported)"),
+    whitelisted: bool = Query(False, description="True = R1/R2 funds only, False = all funds"),
+    portfolio_date: Optional[str] = None,
+):
+    """
+    Find all funds holding a given stock.
+    ISIN-first approach: resolves name → holding_isin, then groups all name variants
+    under the same ISIN so duplicates like 'HDFC Life' vs 'Hdfc Life Insurance Co Limited'
+    are merged. Falls back to name-only matching when holding_isin is null.
+    """
+    from models.database import SessionLocal
+    from sqlalchemy import text
+
+    if not stock or len(stock.strip()) < 2:
+        raise HTTPException(400, "Stock name must be at least 2 characters")
+
+    db = SessionLocal()
+    try:
+        query = stock.strip()
+
+        # Step 1: Find matching holding_isins and names via partial name match
+        # Group by holding_isin so all name variants of the same stock collapse into one
+        isin_rows = db.execute(text("""
+            SELECT
+                holding_isin,
+                -- pick the most-used name as canonical
+                (SELECT name FROM fund_holdings fh2
+                 WHERE fh2.holding_isin = fh.holding_isin
+                   AND fh2.holding_type = 'E'
+                 GROUP BY name ORDER BY COUNT(*) DESC LIMIT 1) AS canonical_name,
+                COUNT(DISTINCT isin) AS fund_count
+            FROM fund_holdings fh
+            WHERE holding_type = 'E'
+              AND name IS NOT NULL
+              AND LOWER(name) LIKE LOWER(:q)
+              AND holding_isin IS NOT NULL
+            GROUP BY holding_isin
+            ORDER BY fund_count DESC
+            LIMIT 20
+        """), {"q": f"%{query}%"}).fetchall()
+
+        # Also get name-only matches (no holding_isin) to avoid missing funds
+        name_only_rows = db.execute(text("""
+            SELECT DISTINCT name, COUNT(DISTINCT isin) AS fund_count
+            FROM fund_holdings
+            WHERE holding_type = 'E'
+              AND name IS NOT NULL
+              AND LOWER(name) LIKE LOWER(:q)
+              AND (holding_isin IS NULL OR holding_isin = '')
+            GROUP BY name
+            ORDER BY fund_count DESC
+            LIMIT 10
+        """), {"q": f"%{query}%"}).fetchall()
+
+        if not isin_rows and not name_only_rows:
+            return {"stock": query, "matched_name": None, "holders": [], "amc_breakdown": [], "summary": {}}
+
+        # Pick the best match — highest fund_count across isin-grouped results
+        if isin_rows:
+            best_isin_row = isin_rows[0]
+            target_isin = best_isin_row.holding_isin
+            stock_name = best_isin_row.canonical_name or query
+            other_isins = [r.holding_isin for r in isin_rows[1:5]]
+        else:
+            target_isin = None
+            stock_name = name_only_rows[0].name
+            other_isins = []
+
+        # Step 2: Portfolio date filter
+        if portfolio_date:
+            pd_filter = f"AND fh.portfolio_date = '{portfolio_date}'"
+        else:
+            pd_filter = """
+                AND fh.portfolio_date = (
+                    SELECT MAX(portfolio_date) FROM fund_holdings fh2
+                    WHERE fh2.isin = fh.isin
+                )
+            """
+
+        # Step 3: Fetch all holdings for this stock
+        # Primary: match by holding_isin (catches all name variants)
+        # Secondary: match by name for null-isin rows
+        if target_isin:
+            holdings_rows = db.execute(text(f"""
+                SELECT fh.isin, fh.name AS stock_name, fh.weighting,
+                       fh.portfolio_date, fh.sector, fh.holding_isin AS stock_isin
+                FROM fund_holdings fh
+                WHERE fh.holding_type = 'E'
+                  AND fh.holding_isin = :target_isin
+                  AND fh.weighting IS NOT NULL AND fh.weighting > 0
+                  {pd_filter}
+            """), {"target_isin": target_isin}).fetchall()
+        else:
+            # name-only fallback
+            holdings_rows = db.execute(text(f"""
+                SELECT fh.isin, fh.name AS stock_name, fh.weighting,
+                       fh.portfolio_date, fh.sector, fh.holding_isin AS stock_isin
+                FROM fund_holdings fh
+                WHERE fh.holding_type = 'E'
+                  AND fh.name = :sname
+                  AND fh.weighting IS NOT NULL AND fh.weighting > 0
+                  {pd_filter}
+            """), {"sname": stock_name}).fetchall()
+
+        if not holdings_rows:
+            return {"stock": query, "matched_name": stock_name, "holders": [], "amc_breakdown": [], "summary": {}}
+
+        fund_isins = list({r.isin for r in holdings_rows})
+
+        # Step 4: Fund metadata from DailyFundData
+        latest_date = db.execute(text("SELECT MAX(data_date) FROM daily_fund_data")).scalar()
+        fund_rows = db.execute(text("""
+            SELECT isin, name, branding_name, category, asset_class, ranking, fund_size
+            FROM daily_fund_data
+            WHERE data_date = :d AND isin = ANY(:isins)
+        """), {"d": str(latest_date), "isins": fund_isins}).fetchall() if latest_date else []
+        fund_meta = {r.isin: dict(r._mapping) for r in fund_rows}
+
+        # Step 5: Build holders — group by fund isin, take highest weight
+        fund_weights = {}
+        for r in holdings_rows:
+            fi = r.isin
+            if fi not in fund_weights or r.weighting > fund_weights[fi]["weighting"]:
+                fund_weights[fi] = {
+                    "weighting": r.weighting,
+                    "portfolio_date": str(r.portfolio_date),
+                    "sector": r.sector,
+                    "stock_isin": r.stock_isin,
+                }
+
+        holders = []
+        for fi, hw in fund_weights.items():
+            meta = fund_meta.get(fi, {})
+            ranking = meta.get("ranking") or ""
+            if whitelisted and ranking not in ("R1", "R2"):
+                continue
+            fund_name = meta.get("name") or fi
+            amc = meta.get("branding_name") or _extract_amc(fund_name)
+            holders.append({
+                "isin": fi,
+                "fund_name": fund_name,
+                "amc": amc,
+                "category": meta.get("category") or "—",
+                "asset_class": meta.get("asset_class") or "—",
+                "ranking": ranking or "—",
+                "weight": round(hw["weighting"], 4),
+                "aum_cr": meta.get("fund_size"),
+                "aum_exposed_cr": round((meta.get("fund_size") or 0) * hw["weighting"] / 100, 1),
+                "portfolio_date": hw["portfolio_date"],
+                "sector": hw["sector"],
+                "stock_isin": hw["stock_isin"],
+            })
+
+        holders.sort(key=lambda x: x["weight"], reverse=True)
+
+        # Step 6: AMC breakdown
+        amc_map = {}
+        for h in holders:
+            a = h["amc"]
+            if a not in amc_map:
+                amc_map[a] = {"amc": a, "fund_count": 0, "weight_sum": 0, "aum_exposed": 0}
+            amc_map[a]["fund_count"] += 1
+            amc_map[a]["weight_sum"] += h["weight"]
+            amc_map[a]["aum_exposed"] += h["aum_exposed_cr"]
+
+        amc_breakdown = sorted(
+            [{"amc": v["amc"], "fund_count": v["fund_count"],
+              "avg_weight": round(v["weight_sum"] / v["fund_count"], 4),
+              "aum_exposed_cr": round(v["aum_exposed"], 1)}
+             for v in amc_map.values()],
+            key=lambda x: x["aum_exposed_cr"], reverse=True
+        )
+
+        total_aum = sum(h["aum_exposed_cr"] for h in holders)
+        top3_aum = sum(r["aum_exposed_cr"] for r in amc_breakdown[:3])
+        top3_share = round(top3_aum / total_aum * 100, 1) if total_aum > 0 else 0
+
+        return {
+            "stock": query,
+            "matched_name": stock_name,
+            "stock_isin": target_isin,
+            "sector": holders[0]["sector"] if holders else None,
+            "portfolio_date": holders[0]["portfolio_date"] if holders else None,
+            "whitelisted": whitelisted,
+            "summary": {
+                "fund_count": len(holders),
+                "amc_count": len(amc_map),
+                "avg_weight": round(sum(h["weight"] for h in holders) / len(holders), 4) if holders else 0,
+                "total_aum_exposed_cr": round(total_aum, 1),
+                "top3_amc_share_pct": top3_share,
+            },
+            "holders": holders,
+            "amc_breakdown": amc_breakdown,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/stock-search")
+def search_stocks(q: str = Query(..., min_length=2), limit: int = Query(15, le=50)):
+    """
+    Typeahead — ISIN-first deduplication.
+    Groups all name variants of the same stock under one entry using holding_isin.
+    """
+    from models.database import SessionLocal
+    from sqlalchemy import text
+
+    db = SessionLocal()
+    try:
+        # ISIN-grouped results — one entry per unique stock regardless of name variants
+        isin_rows = db.execute(text("""
+            SELECT
+                holding_isin,
+                (SELECT name FROM fund_holdings fh2
+                 WHERE fh2.holding_isin = fh.holding_isin
+                   AND fh2.holding_type = 'E'
+                 GROUP BY name ORDER BY COUNT(*) DESC LIMIT 1) AS canonical_name,
+                COUNT(DISTINCT isin) AS fund_count
+            FROM fund_holdings fh
+            WHERE holding_type = 'E'
+              AND name IS NOT NULL
+              AND LOWER(name) LIKE LOWER(:q)
+              AND holding_isin IS NOT NULL
+            GROUP BY holding_isin
+            ORDER BY fund_count DESC
+            LIMIT :limit
+        """), {"q": f"%{q}%", "limit": limit}).fetchall()
+
+        # Name-only fallback for stocks without holding_isin
+        name_rows = db.execute(text("""
+            SELECT name, COUNT(DISTINCT isin) AS fund_count
+            FROM fund_holdings
+            WHERE holding_type = 'E'
+              AND name IS NOT NULL
+              AND LOWER(name) LIKE LOWER(:q)
+              AND (holding_isin IS NULL OR holding_isin = '')
+            GROUP BY name
+            ORDER BY fund_count DESC
+            LIMIT :limit
+        """), {"q": f"%{q}%", "limit": limit}).fetchall()
+
+        import re
+        def norm(n):
+            n = n.lower().strip()
+            n = re.sub(r'[\.\'\^\$]', '', n)
+            n = re.sub(r'\s+', ' ', n)
+            n = n.replace(' limited', '').replace(' ltd', '')
+            return n.strip()
+
+        results = []
+        seen_isins = set()
+        canonical_norms = set()
+        for r in isin_rows:
+            if r.holding_isin not in seen_isins and r.canonical_name:
+                seen_isins.add(r.holding_isin)
+                canonical_norms.add(norm(r.canonical_name))
+                results.append({"name": r.canonical_name, "fund_count": r.fund_count, "isin": r.holding_isin})
+
+        # For name-only entries, try to resolve their ISIN from the DB
+        # (same stock may have holding_isin populated in other funds' disclosures)
+        unresolved_names = [r.name for r in name_rows if norm(r.name) not in canonical_norms]
+        if unresolved_names:
+            resolved = db.execute(text("""
+                SELECT DISTINCT ON (n.name) n.name, fh.holding_isin
+                FROM (SELECT UNNEST(:names::text[]) AS name) n
+                JOIN fund_holdings fh
+                  ON LOWER(fh.name) LIKE LOWER(CONCAT('%', SPLIT_PART(n.name, ' ', 1), '%'))
+                 AND fh.holding_isin IS NOT NULL
+                 AND fh.holding_type = 'E'
+                ORDER BY n.name, fh.holding_isin
+            """), {"names": unresolved_names}).fetchall()
+            resolved_map = {r.name: r.holding_isin for r in resolved}
+        else:
+            resolved_map = {}
+
+        for r in name_rows:
+            n_norm = norm(r.name)
+            if n_norm in canonical_norms:
+                continue  # already covered by ISIN-grouped result
+            resolved_isin = resolved_map.get(r.name)
+            if resolved_isin and resolved_isin in seen_isins:
+                continue  # resolved to an ISIN we already have
+            results.append({"name": r.name, "fund_count": r.fund_count, "isin": resolved_isin})
+
+        results.sort(key=lambda x: x["fund_count"], reverse=True)
+        return {"results": results[:limit]}
+    finally:
+        db.close()
+
+
+
+def _extract_amc(fund_name: str) -> str:
+    """
+    Extract AMC name from fund name using a comprehensive prefix lookup.
+    Covers all active Indian AMCs as of 2026.
+    Longer prefixes checked first to avoid partial matches (e.g. "Baroda BNP Paribas" before "Baroda").
+    """
+    AMC_MAP = [
+        # Full name → canonical AMC label  (sorted longest-first inside the loop)
+        ("Aditya Birla Sun Life", "Aditya BSL"),
+        ("Aditya BSL", "Aditya BSL"),
+        ("Angel One", "Angel One"),
+        ("Axis", "Axis"),
+        ("Bajaj Finserv", "Bajaj Finserv"),
+        ("Bandhan", "Bandhan"),
+        ("Bank of India", "Bank of India"),
+        ("Baroda BNP Paribas", "Baroda BNP Paribas"),
+        ("Baroda BNP P", "Baroda BNP Paribas"),
+        ("Canara Robeco", "Canara Robeco"),
+        ("Capitalmind", "Capitalmind"),
+        ("DSP", "DSP"),
+        ("Edelweiss", "Edelweiss"),
+        ("Franklin India", "Franklin Templeton"),
+        ("Franklin", "Franklin Templeton"),
+        ("Groww", "Groww"),
+        ("HDFC", "HDFC"),
+        ("Helios", "Helios"),
+        ("HSBC", "HSBC"),
+        ("ICICI Prudential", "ICICI Prudential"),
+        ("ICICI Pru", "ICICI Prudential"),
+        ("IIFL", "IIFL"),
+        ("Invesco India", "Invesco"),
+        ("Invesco", "Invesco"),
+        ("ITI", "ITI"),
+        ("JM Financial", "JM Financial"),
+        ("JM", "JM Financial"),
+        ("Kotak", "Kotak"),
+        ("LIC", "LIC"),
+        ("Mahindra Manulife", "Mahindra Manulife"),
+        ("Mirae Asset", "Mirae Asset"),
+        ("Motilal Oswal", "Motilal Oswal"),
+        ("Navi", "Navi"),
+        ("Nippon India", "Nippon India"),
+        ("Nippon", "Nippon India"),
+        ("NJ", "NJ"),
+        ("Old Bridge", "Old Bridge"),
+        ("PGIM India", "PGIM India"),
+        ("PGIM", "PGIM India"),
+        ("Parag Parikh", "Parag Parikh"),
+        ("PPFAS", "Parag Parikh"),
+        ("Quant", "Quant"),
+        ("Quantum", "Quantum"),
+        ("Samco", "Samco"),
+        ("Sapphire", "Sapphire"),
+        ("SBI", "SBI"),
+        ("Shriram", "Shriram"),
+        ("Sundaram", "Sundaram"),
+        ("Tata", "Tata"),
+        ("Taurus", "Taurus"),
+        ("Trust", "Trust"),
+        ("Union", "Union"),
+        ("UTI", "UTI"),
+        ("WhiteOak Capital", "WhiteOak Capital"),
+        ("WhiteOak", "WhiteOak Capital"),
+        ("WSIF", "WSIF"),
+        ("Zerodha", "Zerodha"),
+    ]
+    name = fund_name.strip()
+    # Sort by prefix length descending to match longest first
+    for prefix, canonical in sorted(AMC_MAP, key=lambda x: len(x[0]), reverse=True):
+        if name.lower().startswith(prefix.lower()):
+            return canonical
+    # Fallback: return full fund name — better than a wrong truncation
+    return name
+
+
 @router.get("/{isin}")
 def get_fund_holdings(isin: str, portfolio_date: Optional[str] = None):
     """

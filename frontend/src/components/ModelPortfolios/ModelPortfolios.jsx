@@ -92,7 +92,7 @@ function OverviewCard({ p, selected, onClick }) {
       </div>
       <div className="mp-card-stats">
         <div><b style={{ color: p.blended.return_3y >= 0 ? '#1A7A52' : '#912F63' }}>{pct(p.blended.return_3y)}</b><span>3Y CAGR</span></div>
-        <div><b>{f2(p.blended.sharpe_3y)}</b><span>Sharpe</span></div>
+        <div><b>{p.blended.std_dev_3y != null ? `${f1(p.blended.std_dev_3y)}%` : '—'}</b><span>3Y SD</span></div>
         <div><b>{p.fund_count}</b><span>Funds</span></div>
       </div>
       <div className="mp-card-horizon">⏱ {p.horizon} · Vol {p.volatility}</div>
@@ -217,7 +217,7 @@ export default function ModelPortfolios({ selectedDate }) {
       <div className="mp-header">
         <div>
           <div className="mp-page-title">Model Portfolios</div>
-          <div className="mp-page-desc">BugleRock Multi-Asset DPMS · R1/R2 ranked funds · constraint-based construction (linprog)</div>
+          <div className="mp-page-desc">BugleRock Multi-Asset Model Portfolios · R1/R2 ranked funds · Constraint-based Construction</div>
         </div>
         {dataDate && <div className="mp-data-date">Data: {dataDate}</div>}
       </div>
