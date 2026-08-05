@@ -326,7 +326,10 @@ def get_stock_exposure(
             ranking = meta.get("ranking") or ""
             if whitelisted and ranking not in ("R1", "R2"):
                 continue
-            fund_name = meta.get("name") or fi
+            fund_name = meta.get("name") or ""
+            # Skip funds not in daily_fund_data (untracked ETFs, AIFs, IFSC funds)
+            if not fund_name:
+                continue
             amc = meta.get("branding_name") or _extract_amc(fund_name)
             holders.append({
                 "isin": fi,
@@ -481,6 +484,30 @@ def search_stocks(q: str = Query(..., min_length=2), limit: int = Query(15, le=5
 
 
 
+def _clean_amc_name(name: str) -> str:
+    """
+    Strips legal suffixes from ProviderCompanyName to get a clean short brand name.
+    Used when BrandingName is absent and only ProviderCompanyName is available.
+    """
+    import re
+    if not name:
+        return name
+    suffixes = [
+        r"\s+Investment\s+Managers?\s+Private\s+Limited",
+        r"\s+Asset\s+Management\s+(Company\s+)?(Private\s+)?Limited",
+        r"\s+Mutual\s+Fund",
+        r"\s+AMC\s+Ltd\.?",
+        r"\s+AMC\s+Limited",
+        r"\s+Private\s+Limited",
+        r"\s+Pvt\.?\s+Ltd\.?",
+        r"\s+Ltd\.?$",
+    ]
+    result = name
+    for suffix in suffixes:
+        result = re.sub(suffix, "", result, flags=re.IGNORECASE).strip()
+    return result or name
+
+
 def _extract_amc(fund_name: str) -> str:
     """
     Extract AMC name from fund name using a comprehensive prefix lookup.
@@ -546,14 +573,29 @@ def _extract_amc(fund_name: str) -> str:
         ("WhiteOak", "WhiteOak Capital"),
         ("WSIF", "WSIF"),
         ("Zerodha", "Zerodha"),
+        ("Unifi", "Unifi"),
+        ("Abakkus", "Abakkus"),
+        ("Aikyam", "Aikyam"),
+        ("Diviniti", "Diviniti"),
+        ("Altiva", "Altiva"),
+        ("Titanium", "Titanium"),
+        ("Arudha", "Arudha"),
+        ("360 ONE", "360 ONE"),
+        ("360 One", "360 ONE"),
+        ("CHOICE", "Choice"),
+        ("Choice", "Choice"),
+        ("qsif", "QSIF"),
+        ("QSIF", "QSIF"),
+        ("Wealth Company", "Wealth Company"),
+        ("The Wealth", "Wealth Company"),
     ]
     name = fund_name.strip()
     # Sort by prefix length descending to match longest first
     for prefix, canonical in sorted(AMC_MAP, key=lambda x: len(x[0]), reverse=True):
         if name.lower().startswith(prefix.lower()):
             return canonical
-    # Fallback: return full fund name — better than a wrong truncation
-    return name
+    # Fallback: return "Other" — better than showing full fund name or ISIN as AMC
+    return "Other"
 
 
 @router.get("/{isin}")

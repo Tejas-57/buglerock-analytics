@@ -1,5 +1,5 @@
 """
-debug_stock_exposure.py — check exact branding name column in DB.
+debug_stock_exposure.py — clean up long branding_name values to short AMC names.
 Run: cd buglerock-analytics/backend && python debug_stock_exposure.py
 """
 import os, sys
@@ -9,28 +9,31 @@ load_dotenv()
 from sqlalchemy import create_engine, text
 engine = create_engine(os.getenv("DATABASE_URL",""))
 
-with engine.connect() as db:
-    # Check exact column name
-    cols = db.execute(text("""
-        SELECT column_name, data_type
-        FROM information_schema.columns
-        WHERE table_name = 'daily_fund_data'
-          AND LOWER(column_name) LIKE '%brand%'
-    """)).fetchall()
-    print("Branding-related columns:")
-    for c in cols:
-        print(f"  column_name={repr(c.column_name)}  type={c.data_type}")
+# Map long provider names to short display names
+CLEAN_MAP = {
+    "Abakkus Investment Managers Private Limited": "Abakkus",
+    "AlphaGrep Investment Management Private Limited": "AlphaGrep",
+    "Unifi Asset Management Private Limited": "Unifi",
+}
 
-    # Sample values
-    if cols:
-        col = cols[0].column_name
-        rows = db.execute(text(f"""
-            SELECT name, "{col}"
-            FROM daily_fund_data
-            WHERE data_date = (SELECT MAX(data_date) FROM daily_fund_data)
-              AND "{col}" IS NOT NULL
-            LIMIT 10
-        """)).fetchall()
-        print(f"\nSample values for '{col}':")
-        for r in rows:
-            print(f"  {r[0][:40]:<40}  {repr(r[1])}")
+with engine.connect() as db:
+    for long_name, short_name in CLEAN_MAP.items():
+        result = db.execute(text("""
+            UPDATE daily_fund_data
+            SET branding_name = :short
+            WHERE branding_name = :long
+        """), {"short": short_name, "long": long_name})
+        db.commit()
+        print(f"  Updated {result.rowcount} rows: {repr(long_name)} → {repr(short_name)}")
+
+    # Verify
+    rows = db.execute(text("""
+        SELECT DISTINCT branding_name, COUNT(*) as cnt
+        FROM daily_fund_data
+        WHERE data_date = (SELECT MAX(data_date) FROM daily_fund_data)
+          AND branding_name IN ('Abakkus','AlphaGrep','Unifi')
+        GROUP BY branding_name
+    """)).fetchall()
+    print("\nVerification:")
+    for r in rows:
+        print(f"  {r.branding_name}: {r.cnt} funds")

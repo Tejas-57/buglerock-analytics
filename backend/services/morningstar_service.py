@@ -751,3 +751,106 @@ def refresh_stale_holdings(max_per_run: int = 2000) -> dict:
         "fetched": len(to_fetch),
         **summary,
     }
+
+# ── AMC Name Fetcher (FundShareClassBasicInfo) ──────────────────────────────
+
+FSCBI_API_CODE = "FundShareClassBasicInfo"
+
+def fetch_amc_name(isin: str, accesscode: str) -> dict:
+    """
+    Fetch BrandingName and ProviderCompanyName for a single ISIN
+    from the FundShareClassBasicInfo API.
+    Returns dict with branding_name, provider_name or empty dict on failure.
+    """
+    import xml.etree.ElementTree as ET
+    url = f"{BASE_URL}/mf/{FSCBI_API_CODE}/ISIN/{isin}?accesscode={accesscode}"
+    try:
+        r = requests.get(url, timeout=REQUEST_TIMEOUT)
+        if r.status_code != 200:
+            return {}
+        root = ET.fromstring(r.text)
+        api = root.find(".//api")
+        if api is None:
+            return {}
+        branding  = api.findtext("BrandingName")
+        provider  = api.findtext("ProviderCompanyName")
+        # Use BrandingName if available, else clean ProviderCompanyName
+        import re
+        def clean(n):
+            if not n: return n
+            for pat in [r"\s+Investment\s+Managers?\s+Private\s+Limited",
+                        r"\s+Asset\s+Management\s+(Company\s+)?(Private\s+)?Limited",
+                        r"\s+Mutual\s+Fund", r"\s+AMC\s+Ltd\.?",
+                        r"\s+AMC\s+Limited", r"\s+Private\s+Limited",
+                        r"\s+Pvt\.?\s+Ltd\.?", r"\s+Ltd\.?$"]:
+                n = re.sub(pat, "", n, flags=re.IGNORECASE).strip()
+            return n
+        display_name = branding or clean(provider)
+        return {"branding_name": display_name, "provider_name": provider}
+    except Exception as e:
+        logger.warning(f"fetch_amc_name({isin}): {e}")
+        return {}
+
+
+def refresh_amc_names(force: bool = False):
+    """
+    Fetch and store AMC names (BrandingName) for all funds in DailyFundData
+    where amc is NULL (or all funds if force=True).
+
+    Uses FundShareClassBasicInfo API. Rate-limited to RATE_LIMIT_PER_SEC.
+    Safe to call on startup — exits immediately if all AMC names are populated.
+    """
+    from models.database import SessionLocal
+    from sqlalchemy import text
+
+    db = SessionLocal()
+    try:
+        # Find ISINs needing AMC names
+        if force:
+            rows = db.execute(text("""
+                SELECT DISTINCT isin FROM daily_fund_data
+                WHERE isin IS NOT NULL
+            """)).fetchall()
+        else:
+            rows = db.execute(text("""
+                SELECT DISTINCT isin FROM daily_fund_data
+                WHERE isin IS NOT NULL AND (amc IS NULL OR amc = '')
+            """)).fetchall()
+
+        isins = [r.isin for r in rows]
+        if not isins:
+            logger.info("refresh_amc_names: all funds already have AMC names, skipping")
+            return {"fetched": 0, "updated": 0}
+
+        logger.info(f"refresh_amc_names: fetching AMC names for {len(isins)} ISINs")
+
+        accesscode = get_valid_accesscode()
+        if not accesscode:
+            logger.error("refresh_amc_names: no valid accesscode")
+            return {"error": "no_accesscode"}
+
+        updated = 0
+        failed = 0
+        for i, isin in enumerate(isins):
+            result = fetch_amc_name(isin, accesscode)
+            # Prefer BrandingName (short), fall back to ProviderCompanyName
+            amc = result.get("branding_name") or result.get("provider_name")
+            if amc:
+                db.execute(text("""
+                    UPDATE daily_fund_data SET amc = :amc
+                    WHERE isin = :isin AND (amc IS NULL OR amc = '')
+                """), {"amc": amc, "isin": isin})
+                db.commit()
+                updated += 1
+            else:
+                failed += 1
+
+            if (i + 1) % 50 == 0:
+                logger.info(f"refresh_amc_names progress: {i+1}/{len(isins)} — updated={updated} failed={failed}")
+
+            time.sleep(1 / RATE_LIMIT_PER_SEC)
+
+        logger.info(f"refresh_amc_names complete: updated={updated} failed={failed}")
+        return {"fetched": len(isins), "updated": updated, "failed": failed}
+    finally:
+        db.close()
