@@ -22,11 +22,11 @@ const NAV_SECTIONS = [
   {
     section: 'BUILD',
     items: [
-      { path: '/portfolio',        label: 'Portfolio Builder', icon: PortfolioIcon },
-      { path: '/models',           label: 'Model Portfolios', icon: ModelsIcon },
-      { path: '/simulator',        label: 'Simulator',         icon: SimulatorIcon },
-      { path: '/rolling-analytics',label: 'Rolling Analytics', icon: RollingIcon },
-      { path: '/retirement-planner', label: 'Retirement Planner', icon: RetirementIcon },
+      { path: '/portfolio',          label: 'Portfolio Builder',   icon: PortfolioIcon },
+      { path: '/models',             label: 'Model Portfolios',    icon: ModelsIcon },
+      { path: '/retirement-planner', label: 'Retirement Planner',  icon: RetirementIcon },
+      { path: '/simulator',          label: 'Simulator',           icon: SimulatorIcon },
+      { path: '/rolling-analytics',  label: 'Rolling Analytics',   icon: RollingIcon },
     ],
   },
 ];
