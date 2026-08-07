@@ -14,6 +14,7 @@ import PeerGroupAnalytics from './components/PeerGroupAnalytics/PeerGroupAnalyti
 import ChatButton from './components/Chat/ChatButton';
 import PortfolioBuilder from './components/PortfolioBuilder/PortfolioBuilder';
 import StockExposure from './components/StockExposure/StockExposure';
+import RetirementPlanner from './components/RetirementPlanner/RetirementPlanner';
 import './styles/global.css';
 import './App.css';
 
@@ -99,6 +100,7 @@ export default function App() {
               <Route path="/portfolio" element={
                 <PortfolioBuilder selectedDate={selectedDate} />
               } />
+              <Route path="/retirement-planner" element={<RetirementPlanner />} />
             </Routes>
           </main>
         </div>
