@@ -72,13 +72,12 @@ def _download_attachment(service, message_id: str, ext: str) -> Optional[bytes]:
 def fetch_nse_benchmark(check_days: int = 5) -> dict:
     """
     Search Gmail for NSE Nifty Multi Asset emails in last N days.
-    Parse each, upsert to DB, append to sheet.
-    Deduplication handled by DB ON CONFLICT and sheet existing-date check.
+    Only writes to sheet if data is genuinely new (not already in DB).
     """
     from services.gmail_watcher import get_gmail_service
     from services.benchmark_parser import parse_nse_zip
     from services.benchmark_sheet_service import append_nifty_ma_row
-    from services.benchmark_db_service import upsert_benchmark_rows
+    from services.benchmark_db_service import upsert_benchmark_rows, get_latest_value
 
     try:
         service = get_gmail_service()
@@ -102,13 +101,20 @@ def fetch_nse_benchmark(check_days: int = 5) -> dict:
                 continue
             nav_date, value = result
 
-            # Upsert to DB (dedupes automatically)
+            # Check DB first — if already there, skip sheet write entirely
+            existing = get_latest_value(NSE_INDEX_NAME)
+            already_in_db = existing and existing.get("date") == str(nav_date)
+
+            # Upsert to DB
             upsert_benchmark_rows([{"date": nav_date, "index_name": NSE_INDEX_NAME, "value": value}])
 
-            # Append to sheet (skips if date exists)
-            append_nifty_ma_row(nav_date, value)
+            # Only write to sheet if it was genuinely new data
+            if not already_in_db:
+                append_nifty_ma_row(nav_date, value)
+                logger.info(f"NSE: new data {nav_date} = {value} — written to sheet + DB")
+            else:
+                logger.info(f"NSE: {nav_date} already in DB — skipped sheet write")
 
-            logger.info(f"NSE: processed {nav_date} = {value}")
             processed += 1
         except Exception as e:
             logger.warning(f"NSE: error processing message {msg.get('id')}: {e}")
@@ -151,14 +157,26 @@ def fetch_crisil_benchmark(check_days: int = 5) -> dict:
         if not rows:
             return {"processed": 0, "error": "No data in Excel"}
 
-        # Upsert to DB (dedupes automatically)
+        # Check what's already in DB
+        from services.benchmark_db_service import get_latest_value
+        existing = get_latest_value(CRISIL_INDEX_NAME)
+        existing_date = existing.get("date") if existing else None
+
+        # Find truly new rows (not in DB yet)
+        new_rows = [(d, v) for d, v in rows if str(d) > (existing_date or "")]
+
+        # Upsert all rows to DB (handles dedup)
         db_rows = [{"date": d, "index_name": CRISIL_INDEX_NAME, "value": v} for d, v in rows]
         upsert_benchmark_rows(db_rows)
 
-        # Append only new rows to sheet
-        sheet_added = append_crisil_rows(rows)
+        # Only write to sheet if there are genuinely new rows
+        sheet_added = 0
+        if new_rows:
+            sheet_added = append_crisil_rows(new_rows)
+            logger.info(f"CRISIL: {len(new_rows)} new rows written to sheet")
+        else:
+            logger.info("CRISIL: no new rows — skipped sheet write")
 
-        logger.info(f"CRISIL: parsed {len(rows)} rows, added {sheet_added} new to sheet")
         return {"processed": len(rows), "new_to_sheet": sheet_added}
 
     except Exception as e:
