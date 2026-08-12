@@ -142,7 +142,7 @@ def fetch_crisil_benchmark(check_days: int = 5) -> bool:
     from services.db_service import get_setting, set_setting
     from services.gmail_watcher import get_gmail_service
     from services.benchmark_parser import parse_crisil_excel
-    from services.benchmark_sheet_service import upsert_crisil_rows
+    from services.benchmark_sheet_service import append_crisil_rows
     from services.benchmark_db_service import upsert_benchmark_rows
 
     INDEX_NAME   = "CRISIL Composite Bond Index"
@@ -187,8 +187,8 @@ def fetch_crisil_benchmark(check_days: int = 5) -> bool:
 
         logger.info(f"CRISIL benchmark: parsed {len(rows)} rows")
 
-        # Write to Google Sheet (upsert — only adds new dates)
-        sheet_added = upsert_crisil_rows(rows)
+        # Write to Google Sheet (only new dates)
+        sheet_added = append_crisil_rows(rows)
         logger.info(f"CRISIL benchmark: added {sheet_added} new rows to sheet")
 
         # Write to DB

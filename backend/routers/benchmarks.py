@@ -6,14 +6,16 @@ from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter()
 
+
 def trim_bm_name(name: str) -> str:
-    """Remove TR INR / PR INV suffixes for display."""
     for suffix in [' TR INR', ' PR INR', 'TR INR', 'PR INR']:
         name = name.replace(suffix, '').strip()
     return name
+
+
+# ── Existing endpoint (fund benchmarks) ───────────────────────────────────────
 
 @router.get("/benchmarks")
 def get_benchmarks(date: str = None):
@@ -39,57 +41,44 @@ def get_benchmarks(date: str = None):
         seen = set()
         results = []
         for r in rows:
-            if not r.name or r.name in seen:
-                continue
+            if not r.name or r.name in seen: continue
             seen.add(r.name)
             results.append({
-                "name":          r.name,
-                "display_name":  trim_bm_name(r.name),
-                "return_1m":     r.return_1m,
-                "return_3m":     r.return_3m,
-                "return_6m":     r.return_6m,
-                "return_1y":     r.return_1y,
-                "return_3y":     r.return_3y,
-                "return_5y":     r.return_5y,
-                "return_ytd":    r.return_ytd,
-                "return_cy2025": r.return_cy2025,
-                "return_cy2024": r.return_cy2024,
-                "return_cy2023": r.return_cy2023,
-                "return_cy2022": r.return_cy2022,
+                "name": r.name, "display_name": trim_bm_name(r.name),
+                "return_1m": r.return_1m, "return_3m": r.return_3m,
+                "return_6m": r.return_6m, "return_1y": r.return_1y,
+                "return_3y": r.return_3y, "return_5y": r.return_5y,
+                "return_ytd": r.return_ytd,
+                "return_cy2025": r.return_cy2025, "return_cy2024": r.return_cy2024,
+                "return_cy2023": r.return_cy2023, "return_cy2022": r.return_cy2022,
                 "return_cy2021": r.return_cy2021,
-                "sharpe_ratio_3y": r.sharpe_ratio_3y,
-                "std_dev_3y":    r.std_dev_3y,
+                "sharpe_ratio_3y": r.sharpe_ratio_3y, "std_dev_3y": r.std_dev_3y,
             })
-
         results.sort(key=lambda x: x["display_name"])
         return {"benchmarks": results, "count": len(results)}
     finally:
         db.close()
 
 
-# ── Benchmark NAV time series endpoints ───────────────────────────────────────
+# ── Benchmark NAV time series ─────────────────────────────────────────────────
 
 @router.get("/benchmarks/indices")
 def get_benchmark_indices():
-    """Return list of all available benchmark indices in the NAV history table."""
+    """List all benchmark indices in the NAV history table with metadata."""
     try:
         from services.benchmark_db_service import get_available_indices
-        indices = get_available_indices()
-        return {"indices": indices, "count": len(indices)}
+        return {"indices": get_available_indices()}
     except Exception as e:
         return {"indices": [], "error": str(e)}
 
 
 @router.get("/benchmarks/nav-history")
 def get_benchmark_nav_history(
-    index: str = Query(..., description="Index name, e.g. 'Nifty 50'"),
-    from_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
-    to_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+    index: str = Query(...),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
 ):
-    """
-    Return daily NAV history for a benchmark index.
-    Source: benchmark_nav table (synced from Google Sheet).
-    """
+    """Return daily NAV history for a benchmark index."""
     try:
         from services.benchmark_db_service import get_nav_history
         from datetime import date as date_type
@@ -103,11 +92,9 @@ def get_benchmark_nav_history(
 
 @router.get("/benchmarks/latest")
 def get_benchmark_latest(index: str = Query(...)):
-    """Return the most recent NAV value for an index."""
     try:
         from services.benchmark_db_service import get_latest_value
-        result = get_latest_value(index)
-        return result or {"index": index, "error": "No data found"}
+        return get_latest_value(index) or {"index": index, "error": "No data"}
     except Exception as e:
         return {"index": index, "error": str(e)}
 
@@ -115,20 +102,50 @@ def get_benchmark_latest(index: str = Query(...)):
 @router.post("/benchmarks/sync")
 async def sync_benchmarks(background_tasks: BackgroundTasks):
     """
-    Trigger a full sync from Google Sheet → DB in the background.
-    Returns immediately — check /api/benchmarks/indices after a minute to verify.
+    Poll Gmail for new NSE/CRISIL benchmark emails.
+    Appends new rows to sheet and DB.
+    Runs in background — returns immediately.
     """
-    from services.benchmark_db_service import sync_sheet_to_db
     from services.benchmark_watcher import fetch_all_benchmarks
 
-    def run_sync():
+    def run():
         try:
-            result = sync_sheet_to_db()
-            logger.info(f"Background benchmark sync: {result}")
-            bm = fetch_all_benchmarks(check_days=5)
-            logger.info(f"Background benchmark email fetch: {bm}")
+            result = fetch_all_benchmarks(check_days=5)
+            logger.info(f"sync_benchmarks: {result}")
         except Exception as e:
-            logger.error(f"Background benchmark sync failed: {e}")
+            logger.error(f"sync_benchmarks failed: {e}")
 
-    background_tasks.add_task(run_sync)
-    return {"message": "Benchmark sync started in background — check /api/benchmarks/indices in ~2 minutes"}
+    background_tasks.add_task(run)
+    return {"message": "Benchmark email check started in background"}
+
+
+@router.post("/benchmarks/load-history")
+async def load_historical(background_tasks: BackgroundTasks):
+    """
+    ONE-TIME: read entire Google Sheet → populate benchmark_nav table.
+    Takes 1-3 minutes. Runs in background. Idempotent (safe to re-run).
+    """
+    from services.benchmark_db_service import load_historical_from_sheet
+
+    def run():
+        try:
+            result = load_historical_from_sheet()
+            logger.info(f"load_historical: {result}")
+        except Exception as e:
+            logger.error(f"load_historical failed: {e}")
+
+    background_tasks.add_task(run)
+    return {"message": "Historical load started in background — check /api/benchmarks/indices in 2-3 minutes"}
+
+
+@router.get("/benchmarks/load-status")
+def load_status():
+    """Check if the historical load has completed."""
+    try:
+        from services.db_service import get_setting
+        from services.benchmark_db_service import get_available_indices
+        loaded = get_setting("benchmark_historical_loaded") == "yes"
+        indices = get_available_indices() if loaded else []
+        return {"historical_loaded": loaded, "index_count": len(indices), "indices": indices}
+    except Exception as e:
+        return {"error": str(e)}

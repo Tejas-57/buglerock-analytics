@@ -178,31 +178,29 @@ async def migrate_branding_name_column():
 
 @app.on_event("startup")
 async def startup():
+    print(">>> STARTUP: begin", flush=True)
     init_db()
+    print(">>> STARTUP: init_db done", flush=True)
     await migrate_benchmark_risk_columns()
+    print(">>> STARTUP: migrate_benchmark_risk_columns done", flush=True)
     await migrate_branding_name_column()
+    print(">>> STARTUP: migrate_branding_name_column done", flush=True)
 
     # Benchmark NAV table migration
     try:
         from services.benchmark_db_service import migrate_benchmark_nav_table
         migrate_benchmark_nav_table()
+        print(">>> STARTUP: migrate_benchmark_nav_table done", flush=True)
     except Exception as e:
         logger.warning(f"Benchmark NAV migration failed: {e}")
+        print(f">>> STARTUP: benchmark NAV migration failed: {e}", flush=True)
 
     await check_parser_version()
+    print(">>> STARTUP: check_parser_version done", flush=True)
     from services.morningstar_service import seed_accesscode_from_env
     seed_accesscode_from_env()
+    print(">>> STARTUP: seed_accesscode done", flush=True)
 
-    # Sync Google Sheet → benchmark_nav DB on startup (non-blocking)
-    async def startup_benchmark_sync():
-        await asyncio.sleep(10)  # wait for DB to be ready
-        try:
-            loop = asyncio.get_event_loop()
-            from services.benchmark_db_service import sync_sheet_to_db
-            result = await loop.run_in_executor(None, sync_sheet_to_db)
-            logger.info(f"Startup benchmark sync: {result}")
-        except Exception as e:
-            logger.warning(f"Startup benchmark sync failed: {e}")
     # Force-fetch today's email on startup so localhost is always up to date
     async def startup_fetch():
         try:
@@ -215,11 +213,12 @@ async def startup():
                 logger.info("Startup fetch: already up to date")
         except Exception as e:
             logger.warning(f"Startup fetch failed: {e}")
+
     asyncio.create_task(startup_fetch())
-    asyncio.create_task(startup_benchmark_sync())
     asyncio.create_task(gmail_poll_loop())
     asyncio.create_task(nav_daily_cron())
     asyncio.create_task(holdings_monthly_cron())
+    print(">>> STARTUP: all done, background tasks launched", flush=True)
 
 
 @app.get("/api/health")

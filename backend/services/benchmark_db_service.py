@@ -1,7 +1,6 @@
 """
 benchmark_db_service.py
 Manages benchmark_nav table in PostgreSQL.
-Syncs data from Google Sheet → DB on startup and after each email parse.
 """
 
 import logging
@@ -15,30 +14,38 @@ logger = logging.getLogger(__name__)
 def migrate_benchmark_nav_table():
     """Create benchmark_nav table if it doesn't exist."""
     from models.database import engine
-    with engine.connect() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS benchmark_nav (
-                id         SERIAL PRIMARY KEY,
-                nav_date   DATE NOT NULL,
-                index_name VARCHAR(200) NOT NULL,
-                value      NUMERIC(18,4) NOT NULL,
-                UNIQUE (nav_date, index_name)
-            )
-        """))
-        conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS idx_benchmark_nav_date_index
-            ON benchmark_nav (nav_date, index_name)
-        """))
-        conn.commit()
+    print(">>> MIGRATE: getting connection with autocommit...", flush=True)
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        print(">>> MIGRATE: creating table...", flush=True)
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS benchmark_nav (
+                    id         SERIAL PRIMARY KEY,
+                    nav_date   DATE NOT NULL,
+                    index_name VARCHAR(200) NOT NULL,
+                    value      NUMERIC(18,4) NOT NULL,
+                    UNIQUE (nav_date, index_name)
+                )
+            """))
+            print(">>> MIGRATE: table done", flush=True)
+        except Exception as e:
+            print(f">>> MIGRATE: table creation error: {e}", flush=True)
+
+        print(">>> MIGRATE: creating index...", flush=True)
+        try:
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_benchmark_nav_date_index
+                ON benchmark_nav (nav_date, index_name)
+            """))
+            print(">>> MIGRATE: index done", flush=True)
+        except Exception as e:
+            print(f">>> MIGRATE: index creation error: {e}", flush=True)
+    print(">>> MIGRATE: complete", flush=True)
     logger.info("benchmark_nav table ready")
 
 
 def upsert_benchmark_rows(rows: list[dict]) -> int:
-    """
-    Upsert rows into benchmark_nav table.
-    rows: list of {date, index_name, value} dicts.
-    Returns number of rows upserted.
-    """
+    """Upsert rows: [{date, index_name, value}]."""
     if not rows:
         return 0
     from models.database import engine
@@ -54,40 +61,66 @@ def upsert_benchmark_rows(rows: list[dict]) -> int:
                 """), {"d": r["date"], "n": r["index_name"], "v": r["value"]})
                 count += 1
             except Exception as e:
-                logger.warning(f"Upsert failed for {r}: {e}")
+                logger.warning(f"Upsert failed: {e}")
         conn.commit()
     return count
 
 
-def sync_sheet_to_db() -> dict:
+def bulk_upsert_benchmark_rows(rows: list[dict], batch_size: int = 500) -> int:
+    """Faster upsert for large historical load."""
+    if not rows:
+        return 0
+    from models.database import engine
+    total = 0
+    with engine.connect() as conn:
+        for i in range(0, len(rows), batch_size):
+            batch = rows[i:i+batch_size]
+            values = ",".join([
+                f"('{r['date']}', :n{j}, :v{j})"
+                for j, r in enumerate(batch)
+            ])
+            params = {}
+            for j, r in enumerate(batch):
+                params[f"n{j}"] = r["index_name"]
+                params[f"v{j}"] = r["value"]
+            try:
+                conn.execute(text(f"""
+                    INSERT INTO benchmark_nav (nav_date, index_name, value)
+                    VALUES {values}
+                    ON CONFLICT (nav_date, index_name)
+                    DO UPDATE SET value = EXCLUDED.value
+                """), params)
+                total += len(batch)
+                logger.info(f"bulk_upsert: {total}/{len(rows)}")
+            except Exception as e:
+                logger.warning(f"bulk_upsert batch failed: {e}")
+        conn.commit()
+    return total
+
+
+def load_historical_from_sheet() -> dict:
     """
-    Full sync: read all 3 sheet tabs → upsert into benchmark_nav table.
-    Called on startup and can be triggered manually.
+    ONE-TIME operation: read entire Google Sheet → populate benchmark_nav DB.
+    Runs in background — takes 1-3 minutes.
+    Marks completion in settings so it doesn't run twice by accident.
     """
+    from services.db_service import get_setting, set_setting
+    from services.benchmark_sheet_service import read_all_benchmarks_full
+
     try:
-        from services.benchmark_sheet_service import read_all_benchmarks
-        records = read_all_benchmarks()
+        records = read_all_benchmarks_full()
         if not records:
-            logger.warning("sync_sheet_to_db: no records read from sheet")
-            return {"synced": 0, "error": "No records from sheet"}
-
-        n = upsert_benchmark_rows(records)
-        logger.info(f"sync_sheet_to_db: upserted {n} records from {len(records)} sheet rows")
-        return {"synced": n, "total_read": len(records)}
+            return {"loaded": 0, "error": "No records from sheet"}
+        n = bulk_upsert_benchmark_rows(records)
+        set_setting("benchmark_historical_loaded", "yes")
+        logger.info(f"load_historical_from_sheet: loaded {n} records")
+        return {"loaded": n, "total_read": len(records)}
     except Exception as e:
-        logger.error(f"sync_sheet_to_db failed: {e}", exc_info=True)
-        return {"synced": 0, "error": str(e)}
+        logger.error(f"load_historical_from_sheet failed: {e}", exc_info=True)
+        return {"loaded": 0, "error": str(e)}
 
 
-def get_nav_history(
-    index_name: str,
-    from_date: Optional[date] = None,
-    to_date: Optional[date] = None,
-) -> list[dict]:
-    """
-    Query benchmark_nav for a specific index, optionally filtered by date range.
-    Returns list of {date, value} dicts sorted by date ascending.
-    """
+def get_nav_history(index_name: str, from_date: Optional[date] = None, to_date: Optional[date] = None) -> list[dict]:
     from models.database import engine
     params = {"n": index_name}
     where = "WHERE index_name = :n"
@@ -97,34 +130,35 @@ def get_nav_history(
     if to_date:
         where += " AND nav_date <= :to_date"
         params["to_date"] = to_date
-
     with engine.connect() as conn:
         rows = conn.execute(
             text(f"SELECT nav_date, value FROM benchmark_nav {where} ORDER BY nav_date ASC"),
             params,
         ).fetchall()
-
     return [{"date": str(r[0]), "value": float(r[1])} for r in rows]
 
 
-def get_available_indices() -> list[str]:
-    """Return list of all index names in the benchmark_nav table."""
+def get_available_indices() -> list[dict]:
+    """Return all indices with row counts and latest date."""
     from models.database import engine
     with engine.connect() as conn:
-        rows = conn.execute(
-            text("SELECT DISTINCT index_name FROM benchmark_nav ORDER BY index_name")
-        ).fetchall()
-    return [r[0] for r in rows]
+        rows = conn.execute(text("""
+            SELECT index_name, COUNT(*) as n, MIN(nav_date) as first_dt, MAX(nav_date) as last_dt
+            FROM benchmark_nav
+            GROUP BY index_name
+            ORDER BY index_name
+        """)).fetchall()
+    return [
+        {"index_name": r[0], "row_count": r[1], "first_date": str(r[2]), "last_date": str(r[3])}
+        for r in rows
+    ]
 
 
 def get_latest_value(index_name: str) -> Optional[dict]:
-    """Return the most recent value for an index."""
     from models.database import engine
     with engine.connect() as conn:
         row = conn.execute(
             text("SELECT nav_date, value FROM benchmark_nav WHERE index_name = :n ORDER BY nav_date DESC LIMIT 1"),
             {"n": index_name},
         ).fetchone()
-    if not row:
-        return None
-    return {"date": str(row[0]), "value": float(row[1])}
+    return {"date": str(row[0]), "value": float(row[1])} if row else None
