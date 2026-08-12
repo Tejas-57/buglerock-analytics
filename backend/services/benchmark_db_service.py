@@ -102,21 +102,26 @@ def load_historical_from_sheet() -> dict:
     """
     ONE-TIME operation: read entire Google Sheet → populate benchmark_nav DB.
     Runs in background — takes 1-3 minutes.
-    Marks completion in settings so it doesn't run twice by accident.
     """
-    from services.db_service import get_setting, set_setting
     from services.benchmark_sheet_service import read_all_benchmarks_full
+    from services.db_service import set_setting
 
     try:
+        logger.info("load_historical_from_sheet: starting sheet read...")
+        print(">>> HISTORICAL LOAD: starting sheet read...", flush=True)
         records = read_all_benchmarks_full()
+        print(f">>> HISTORICAL LOAD: got {len(records)} records from sheet", flush=True)
         if not records:
+            logger.warning("load_historical_from_sheet: no records from sheet")
             return {"loaded": 0, "error": "No records from sheet"}
         n = bulk_upsert_benchmark_rows(records)
+        print(f">>> HISTORICAL LOAD: upserted {n} rows to DB", flush=True)
         set_setting("benchmark_historical_loaded", "yes")
         logger.info(f"load_historical_from_sheet: loaded {n} records")
         return {"loaded": n, "total_read": len(records)}
     except Exception as e:
         logger.error(f"load_historical_from_sheet failed: {e}", exc_info=True)
+        print(f">>> HISTORICAL LOAD ERROR: {e}", flush=True)
         return {"loaded": 0, "error": str(e)}
 
 

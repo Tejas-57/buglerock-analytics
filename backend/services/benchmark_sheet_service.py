@@ -36,14 +36,17 @@ def _get_service_account_creds():
     json_str = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     if json_str:
         try:
+            print(f">>> SHEETS: loading creds from env var (length={len(json_str)})", flush=True)
             return sa.Credentials.from_service_account_info(
                 json.loads(json_str),
                 scopes=["https://www.googleapis.com/auth/spreadsheets"],
             )
         except Exception as e:
+            print(f">>> SHEETS: env var creds failed: {e}", flush=True)
             logger.error(f"Service account from env failed: {e}")
     for p in ["/etc/secrets/sheets_credentials.json", "credentials/sheets_credentials.json"]:
         if Path(p).exists():
+            print(f">>> SHEETS: loading creds from file: {p}", flush=True)
             return sa.Credentials.from_service_account_file(
                 p, scopes=["https://www.googleapis.com/auth/spreadsheets"],
             )
