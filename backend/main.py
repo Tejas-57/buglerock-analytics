@@ -41,7 +41,7 @@ app.include_router(models.router,      prefix="/api/models")
 
 
 async def gmail_poll_loop():
-    """Poll Gmail every 5 minutes for the latest Morningstar report."""
+    """Poll Gmail every 5 minutes for the latest Morningstar report and benchmark emails."""
     from services.gmail_watcher import fetch_latest
 
     while True:
@@ -80,6 +80,16 @@ async def gmail_poll_loop():
                     logger.warning(f"NAV update failed: {nav_err}")
             else:
                 logger.info("Gmail poll: no new data found")
+
+            # Also check for benchmark emails (NSE + CRISIL) every poll cycle
+            try:
+                from services.benchmark_watcher import fetch_all_benchmarks
+                bm_result = await loop.run_in_executor(None, fetch_all_benchmarks, 5)
+                if bm_result.get("nse") or bm_result.get("crisil"):
+                    logger.info(f"Benchmark poll: new data — {bm_result}")
+            except Exception as bm_err:
+                logger.warning(f"Benchmark poll error: {bm_err}")
+
         except Exception as e:
             logger.error(f"Gmail poll error: {e}", exc_info=True)
 
@@ -171,9 +181,28 @@ async def startup():
     init_db()
     await migrate_benchmark_risk_columns()
     await migrate_branding_name_column()
+
+    # Benchmark NAV table migration
+    try:
+        from services.benchmark_db_service import migrate_benchmark_nav_table
+        migrate_benchmark_nav_table()
+    except Exception as e:
+        logger.warning(f"Benchmark NAV migration failed: {e}")
+
     await check_parser_version()
     from services.morningstar_service import seed_accesscode_from_env
     seed_accesscode_from_env()
+
+    # Sync Google Sheet → benchmark_nav DB on startup (non-blocking)
+    async def startup_benchmark_sync():
+        await asyncio.sleep(10)  # wait for DB to be ready
+        try:
+            loop = asyncio.get_event_loop()
+            from services.benchmark_db_service import sync_sheet_to_db
+            result = await loop.run_in_executor(None, sync_sheet_to_db)
+            logger.info(f"Startup benchmark sync: {result}")
+        except Exception as e:
+            logger.warning(f"Startup benchmark sync failed: {e}")
     # Force-fetch today's email on startup so localhost is always up to date
     async def startup_fetch():
         try:
@@ -187,6 +216,7 @@ async def startup():
         except Exception as e:
             logger.warning(f"Startup fetch failed: {e}")
     asyncio.create_task(startup_fetch())
+    asyncio.create_task(startup_benchmark_sync())
     asyncio.create_task(gmail_poll_loop())
     asyncio.create_task(nav_daily_cron())
     asyncio.create_task(holdings_monthly_cron())

@@ -1,7 +1,8 @@
 # backend/routers/benchmarks.py
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from models.database import SessionLocal, DailyFundData
 from sqlalchemy import func
+from typing import Optional
 
 router = APIRouter()
 
@@ -61,3 +62,64 @@ def get_benchmarks(date: str = None):
         return {"benchmarks": results, "count": len(results)}
     finally:
         db.close()
+
+
+# ── Benchmark NAV time series endpoints ───────────────────────────────────────
+
+@router.get("/benchmarks/indices")
+def get_benchmark_indices():
+    """Return list of all available benchmark indices in the NAV history table."""
+    try:
+        from services.benchmark_db_service import get_available_indices
+        indices = get_available_indices()
+        return {"indices": indices, "count": len(indices)}
+    except Exception as e:
+        return {"indices": [], "error": str(e)}
+
+
+@router.get("/benchmarks/nav-history")
+def get_benchmark_nav_history(
+    index: str = Query(..., description="Index name, e.g. 'Nifty 50'"),
+    from_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
+    to_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+):
+    """
+    Return daily NAV history for a benchmark index.
+    Source: benchmark_nav table (synced from Google Sheet).
+    """
+    try:
+        from services.benchmark_db_service import get_nav_history
+        from datetime import date as date_type
+        fd = date_type.fromisoformat(from_date) if from_date else None
+        td = date_type.fromisoformat(to_date)   if to_date   else None
+        rows = get_nav_history(index, fd, td)
+        return {"index": index, "data": rows, "count": len(rows)}
+    except Exception as e:
+        return {"index": index, "data": [], "error": str(e)}
+
+
+@router.get("/benchmarks/latest")
+def get_benchmark_latest(index: str = Query(...)):
+    """Return the most recent NAV value for an index."""
+    try:
+        from services.benchmark_db_service import get_latest_value
+        result = get_latest_value(index)
+        return result or {"index": index, "error": "No data found"}
+    except Exception as e:
+        return {"index": index, "error": str(e)}
+
+
+@router.post("/benchmarks/sync")
+def sync_benchmarks():
+    """
+    Manually trigger a full sync from Google Sheet → DB.
+    Also polls Gmail for any unprocessed benchmark emails.
+    """
+    try:
+        from services.benchmark_db_service import sync_sheet_to_db
+        from services.benchmark_watcher import fetch_all_benchmarks
+        sheet_result = sync_sheet_to_db()
+        email_result = fetch_all_benchmarks(check_days=5)
+        return {"sheet_sync": sheet_result, "email_fetch": email_result}
+    except Exception as e:
+        return {"error": str(e)}
