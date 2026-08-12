@@ -347,4 +347,71 @@ def fetch_latest(check_days: int = 5, force: bool = False, skip_holdings: bool =
 
 
 def fetch_and_store(data_date: date) -> bool:
-    return fetch_latest(check_days=3)
+    """
+    Fetch and store data for a specific data_date.
+    - If data already exists in DB for that date → return True (already done)
+    - If email exists but not yet processed → fetch, parse and store
+    - If email not found → return False
+    """
+    from services.db_service import has_data_for_date, has_email_for_date
+
+    # If data already in DB, nothing to do — report success
+    if has_data_for_date(data_date):
+        logger.info(f"Data already exists for {data_date} — skipping fetch")
+        return True
+
+    # Email arrives the next day — search for email_date = data_date + 1
+    email_date = data_date + timedelta(days=1)
+
+    try:
+        service = get_gmail_service()
+    except Exception as e:
+        logger.error(f"Gmail auth failed: {e}")
+        return False
+
+    # Search for email on that specific date
+    messages = search_emails_for_date(service, email_date)
+    if not messages:
+        # Also try same day (some emails arrive same day)
+        messages = search_emails_for_date(service, data_date)
+        if not messages:
+            logger.info(f"No email found for data_date={data_date} (searched email_date={email_date} and {data_date})")
+            return False
+
+    file_bytes, file_name = download_attachment(service, messages[0]["id"])
+    if not file_bytes:
+        logger.warning(f"Email found but no attachment for {email_date}")
+        return False
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+    try:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
+    finally:
+        tmp.close()
+
+    try:
+        from collections import Counter
+        parsed = parse_excel_file(tmp_path, data_date)
+        if not parsed or not parsed.get("funds"):
+            logger.warning(f"Parsed but no funds found for {data_date}")
+            return False
+
+        save_parsed_data(parsed)
+        log_email_fetch(
+            email_date=str(email_date),
+            data_date=str(data_date),
+            file_name=file_name,
+            status="success",
+            message=f"Parsed {len(parsed['funds'])} funds for {data_date}",
+        )
+        logger.info(f"fetch_and_store: loaded {len(parsed['funds'])} funds for {data_date}")
+        return True
+    except Exception as e:
+        logger.error(f"fetch_and_store parse/save failed: {e}", exc_info=True)
+        return False
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
