@@ -188,6 +188,141 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None):
         db.close()
 
 
+@router.get("/portfolio-lookthrough")
+def get_portfolio_lookthrough(
+    isins: str = Query(..., description="Comma-separated fund ISINs"),
+    weights: str = Query(..., description="Comma-separated portfolio weights (0-100), aligned with isins"),
+    portfolio_date: Optional[str] = None,
+):
+    """
+    Compute portfolio-level look-through: aggregates each fund's equity holdings
+    weighted by portfolio allocation, then groups by ISIN (canonical) for stocks
+    and by sector for sector mix.
+
+    Returns:
+      - sector_breakdown: [{sector, weight_pct}] sorted desc
+      - top_stocks: [{name, isin, sector, weight_pct}] top 20 aggregated stocks
+      - fund_count: number of funds with holdings data
+      - total_effective_equity_pct: sum of weighted equity holdings
+    """
+    from models.database import SessionLocal
+    from sqlalchemy import text
+
+    isin_list = [x.strip() for x in isins.split(",") if x.strip()]
+    weight_list = [float(x.strip()) for x in weights.split(",") if x.strip()]
+
+    if len(isin_list) != len(weight_list):
+        raise HTTPException(400, "isins and weights must have same length")
+    if not isin_list:
+        raise HTTPException(400, "At least one ISIN required")
+
+    weight_map = dict(zip(isin_list, weight_list))
+    db = SessionLocal()
+    try:
+        from models.database import FundHolding
+        from datetime import date as date_type
+
+        # For each fund, get equity holdings on latest portfolio date
+        fund_holdings_per_isin = {}
+        funds_with_data = 0
+        for isin in isin_list:
+            q = db.query(FundHolding).filter(
+                FundHolding.isin == isin,
+                FundHolding.holding_type == "E",
+                FundHolding.weighting != None,
+                FundHolding.weighting > 0,
+            )
+            if portfolio_date:
+                q = q.filter(FundHolding.portfolio_date == date_type.fromisoformat(portfolio_date))
+            else:
+                latest = (
+                    db.query(FundHolding.portfolio_date)
+                    .filter(FundHolding.isin == isin)
+                    .order_by(FundHolding.portfolio_date.desc())
+                    .first()
+                )
+                if not latest:
+                    continue
+                q = q.filter(FundHolding.portfolio_date == latest[0])
+            rows = q.all()
+            if rows:
+                funds_with_data += 1
+                fund_holdings_per_isin[isin] = rows
+
+        if not fund_holdings_per_isin:
+            return {
+                "sector_breakdown": [],
+                "top_stocks": [],
+                "fund_count": 0,
+                "total_effective_equity_pct": 0.0,
+            }
+
+        # Canonicalise stocks by holding_isin (fallback to normalised name if ISIN missing)
+        # Aggregate weight = sum of (fund_weight × holding_weight_within_fund)
+        #                   where fund_weight is portfolio weight (0-100)
+        # Result is weight as % of TOTAL portfolio value
+        stock_agg = {}   # {canonical_key: {"name": ..., "isin": ..., "sector": ..., "weight_pct": ...}}
+        sector_agg = {}  # {sector: weight_pct}
+
+        for fund_isin, rows in fund_holdings_per_isin.items():
+            fund_weight = weight_map.get(fund_isin, 0) / 100.0  # 0..1
+            if fund_weight <= 0:
+                continue
+            for r in rows:
+                # Contribution to portfolio = fund_weight × holding weight (%) / 100
+                # holding.weighting is already in %, so:
+                contrib_pct = fund_weight * float(r.weighting)
+                # canonical key: prefer ISIN, fall back to normalised name
+                key = r.holding_isin or ("NAME:" + (r.name or "").strip().upper())
+                if key not in stock_agg:
+                    stock_agg[key] = {
+                        "name": r.name or "Unknown",
+                        "isin": r.holding_isin,
+                        "sector": r.global_sector or "Unclassified",
+                        "weight_pct": 0.0,
+                    }
+                stock_agg[key]["weight_pct"] += contrib_pct
+                # Sector agg
+                sector = r.global_sector or "Unclassified"
+                sector_agg[sector] = sector_agg.get(sector, 0.0) + contrib_pct
+
+        # Total effective equity exposure (sum of all contribs — bounded by portfolio equity %)
+        total_eff_equity = sum(sector_agg.values())
+
+        # Sort stocks by weight desc, take top 20
+        top_stocks = sorted(
+            stock_agg.values(),
+            key=lambda x: x["weight_pct"],
+            reverse=True,
+        )[:20]
+        top_stocks = [
+            {
+                "name": s["name"],
+                "isin": s["isin"],
+                "sector": s["sector"],
+                "weight_pct": round(s["weight_pct"], 3),
+            }
+            for s in top_stocks
+        ]
+
+        # Sort sectors by weight desc
+        sector_breakdown = sorted(
+            [{"sector": k, "weight_pct": round(v, 2)} for k, v in sector_agg.items()],
+            key=lambda x: x["weight_pct"],
+            reverse=True,
+        )
+
+        return {
+            "sector_breakdown": sector_breakdown,
+            "top_stocks": top_stocks,
+            "fund_count": funds_with_data,
+            "total_effective_equity_pct": round(total_eff_equity, 2),
+        }
+
+    finally:
+        db.close()
+
+
 @router.get("/stock-exposure")
 def get_stock_exposure(
     stock: str = Query(..., description="Stock name or ISIN (partial match supported)"),

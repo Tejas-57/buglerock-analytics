@@ -102,7 +102,8 @@ def search_funds(q: str, date: str = Query(None)):
 @router.get("/fetch")
 def manual_fetch(date: str = Query(...)):
     """Manually trigger fetch for a specific date — for testing/recovery only."""
-    d = resolve_date(date)
+    # Use raw date directly — don't resolve, we want to fetch new data
+    d = date_type.fromisoformat(date)
     success = fetch_and_store(d)
     return {
         "date": str(d),

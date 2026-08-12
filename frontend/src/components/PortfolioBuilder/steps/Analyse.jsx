@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { fp, f2 } from './BuildPortfolio';
+import AIDoctor from './analyseTabs/AIDoctor.jsx';
+import PortfolioXRay from './analyseTabs/PortfolioXRay.jsx';
 
 const TABS = [
+  { id: 'doctor', label: '🩺 AI Doctor' },
+  { id: 'xray', label: '🩻 Portfolio X-Ray' },
   { id: 'overview', label: 'Overview' },
   { id: 'returns', label: 'Returns & projections' },
   { id: 'risk', label: 'Risk metrics' },
@@ -151,7 +155,7 @@ function corrColor(v) {
 function fmtL(v) { return v >= 100000 ? '₹' + (v / 100000).toFixed(2) + 'L' : '₹' + (v / 1000).toFixed(1) + 'K'; }
 
 export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], ips, onEdit, onOptimise, onDataUpdate }) {
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('doctor');
 
   // ── Overlap state & helpers ─────────────────────────────────────────────
   const [overlapData, setOverlapData] = useState(null);
@@ -226,7 +230,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
   }
 
   useEffect(() => {
-    if (activeTab === 'overlap' && equityFundsForOverlap.length >= 2) fetchOverlap();
+    if ((activeTab === 'overlap' || activeTab === 'doctor' || activeTab === 'xray') && equityFundsForOverlap.length >= 2) fetchOverlap();
     else if (activeTab === 'overlap' && equityFundsForOverlap.length < 2) { setOverlapData(null); setOverlapError(null); }
   }, [activeTab, funds.map(f => f.isin).join(',')]);
 
@@ -592,6 +596,33 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
       </div>
 
       <div className="ptf-analytics">
+
+        {/* ── AI DOCTOR ── */}
+        {activeTab === 'doctor' && (
+          <AIDoctor
+            B={B}
+            funds={funds}
+            weights={weights}
+            snapshots={snapshots}
+            ips={ips}
+            overlapData={overlapData}
+          />
+        )}
+
+        {/* ── PORTFOLIO X-RAY ── */}
+        {activeTab === 'xray' && (
+          <PortfolioXRay
+            B={B}
+            AC={AC}
+            funds={funds}
+            weights={weights}
+            snapshots={snapshots}
+            benchmarks={benchmarks}
+            bmRets={bm?.rets}
+            ips={ips}
+            overlapData={overlapData}
+          />
+        )}
 
         {/* ── OVERVIEW ── */}
         {activeTab === 'overview' && (
