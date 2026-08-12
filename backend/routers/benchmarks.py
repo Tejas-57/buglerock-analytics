@@ -1,8 +1,11 @@
 # backend/routers/benchmarks.py
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, BackgroundTasks
 from models.database import SessionLocal, DailyFundData
 from sqlalchemy import func
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -110,16 +113,22 @@ def get_benchmark_latest(index: str = Query(...)):
 
 
 @router.post("/benchmarks/sync")
-def sync_benchmarks():
+async def sync_benchmarks(background_tasks: BackgroundTasks):
     """
-    Manually trigger a full sync from Google Sheet → DB.
-    Also polls Gmail for any unprocessed benchmark emails.
+    Trigger a full sync from Google Sheet → DB in the background.
+    Returns immediately — check /api/benchmarks/indices after a minute to verify.
     """
-    try:
-        from services.benchmark_db_service import sync_sheet_to_db
-        from services.benchmark_watcher import fetch_all_benchmarks
-        sheet_result = sync_sheet_to_db()
-        email_result = fetch_all_benchmarks(check_days=5)
-        return {"sheet_sync": sheet_result, "email_fetch": email_result}
-    except Exception as e:
-        return {"error": str(e)}
+    from services.benchmark_db_service import sync_sheet_to_db
+    from services.benchmark_watcher import fetch_all_benchmarks
+
+    def run_sync():
+        try:
+            result = sync_sheet_to_db()
+            logger.info(f"Background benchmark sync: {result}")
+            bm = fetch_all_benchmarks(check_days=5)
+            logger.info(f"Background benchmark email fetch: {bm}")
+        except Exception as e:
+            logger.error(f"Background benchmark sync failed: {e}")
+
+    background_tasks.add_task(run_sync)
+    return {"message": "Benchmark sync started in background — check /api/benchmarks/indices in ~2 minutes"}
