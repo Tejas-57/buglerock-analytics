@@ -61,6 +61,7 @@ export default function PortfolioBuilder({ selectedDate }) {
   });
   const [ips, setIps] = useState(() => load('br_ptf_ips', DEFAULT_IPS));
   const [ipsSaved, setIpsSaved] = useState(false);
+  const [ipsSkipped, setIpsSkipped] = useState(false);
   const [funds, setFunds] = useState(() => load('br_ptf_funds', []));
   const [weights, setWeights] = useState(() => load('br_ptf_weights', {}));
   const [originalWeights, setOriginalWeights] = useState(() => load('br_ptf_original_weights', {}));
@@ -140,11 +141,12 @@ export default function PortfolioBuilder({ selectedDate }) {
     save('br_ptf_ips', ips);
     markDone(1);
     setIpsSaved(true);
+    setIpsSkipped(false);
     // Benchmarks are stored in ips.benchmarks — no separate sync needed
     setActiveStep(2);
   }
 
-  function skipIPS() { setActiveStep(2); }
+  function skipIPS() { setIpsSkipped(true); setIpsSaved(false); setActiveStep(2); }
 
   // IPS chips
   const ipsChips = ipsSaved && ips.name ? [
@@ -213,6 +215,8 @@ export default function PortfolioBuilder({ selectedDate }) {
               snapshots={snapshots}
               setSnapshots={setSnapshots}
               benchmarks={ips.benchmarks || []}
+              onBenchmarksChange={v => setIps(prev => ({ ...prev, benchmarks: v }))}
+              ipsSkipped={ipsSkipped}
               onAnalyse={() => { markDone(2); setActiveStep(3); }}
               ips={ips}
               selectedDate={selectedDate}

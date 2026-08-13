@@ -1,6 +1,80 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 const API = process.env.REACT_APP_API_URL || '';
+function BenchmarkPicker({ selectedDate, value, onChange }) {
+  const [allBMs, setAllBMs] = React.useState([]);
+  const [open, setOpen] = React.useState(false);
+  const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().slice(0, 10) : (selectedDate || '');
+  const [rawBmWeights, setRawBmWeights] = React.useState({});
+
+  React.useEffect(() => {
+    const url = dateStr ? API+'/api/benchmarks/returns?date='+dateStr : API+'/api/benchmarks/returns';
+    fetch(url).then(r=>r.json()).then(d=>{
+      setAllBMs((d.benchmarks||[]).map(b=>({
+        name:b.index_name,display_name:b.index_name,
+        return_1y:b.return_1y,return_3y:b.return_3y,return_5y:b.return_5y,
+        return_1m:b.return_1m,return_3m:b.return_3m,return_6m:b.return_6m,
+        return_ytd:b.return_ytd,return_cy2025:b.return_cy2025,
+        return_cy2024:b.return_cy2024,return_cy2023:b.return_cy2023,
+        return_cy2022:b.return_cy2022,return_cy2021:b.return_cy2021,
+      })));
+    }).catch(()=>{});
+  }, [dateStr]);
+
+  const selected = value || [];
+  function toggleBM(bm) {
+    const exists = selected.find(s=>s.name===bm.name);
+    if (exists) {
+      const remaining = selected.filter(s=>s.name!==bm.name);
+      if (remaining.length>0) { const eq=Math.floor(100/remaining.length); onChange(remaining.map((s,i)=>({...s,weight:i===remaining.length-1?100-eq*(remaining.length-1):eq}))); } else onChange([]);
+    } else {
+      const newSel=[...selected,{...bm,weight:0}]; const eq=Math.floor(100/newSel.length);
+      onChange(newSel.map((s,i)=>({...s,weight:i===newSel.length-1?100-eq*(newSel.length-1):eq})));
+    }
+  }
+  function handleBmWeightChange(name,val){ setRawBmWeights(prev=>({...prev,[name]:val})); }
+  function handleBmWeightBlur(name,val){
+    const v=Math.max(0,Math.min(100,parseInt(val)||0));
+    onChange(selected.map(s=>s.name===name?{...s,weight:v}:s));
+    setRawBmWeights(prev=>{const n={...prev};delete n[name];return n;});
+  }
+  const totalW=selected.reduce((s,b)=>s+(b.weight||0),0);
+  return (
+    <div style={{position:'relative',minWidth:220}}>
+      {selected.length>0&&(<div style={{marginBottom:4,display:'flex',flexDirection:'column',gap:3}}>
+        {selected.map(bm=>(<div key={bm.name} style={{display:'flex',alignItems:'center',gap:6,padding:'3px 8px',background:'var(--bg-secondary)',borderRadius:6,border:'1px solid var(--border)'}}>
+          <div style={{flex:1,fontSize:11,fontWeight:500,color:'var(--brand-dark)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bm.display_name}</div>
+          <input type="number" min="0" max="100"
+            value={rawBmWeights[bm.name]!==undefined?rawBmWeights[bm.name]:(bm.weight||0)}
+            onChange={e=>handleBmWeightChange(bm.name,e.target.value)}
+            onBlur={e=>handleBmWeightBlur(bm.name,e.target.value)}
+            style={{width:42,padding:'2px 4px',border:'1px solid '+(totalW===100?'var(--border)':'var(--brand-primary)'),borderRadius:4,fontFamily:'var(--font-mono)',fontSize:11,fontWeight:600,textAlign:'center'}}/>
+          <span style={{fontSize:10,color:'var(--text-muted)'}}>%</span>
+          <button onClick={()=>toggleBM(bm)} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',fontSize:13,padding:'0 2px'}}>✕</button>
+        </div>))}
+        <div style={{fontSize:9,color:totalW===100?'var(--pos)':'var(--brand-primary)',fontWeight:600,paddingLeft:2}}>{totalW===100?'✓ 100%':'⚠ '+totalW+'%'}</div>
+      </div>)}
+      <button onClick={()=>setOpen(v=>!v)} style={{padding:'4px 10px',border:'1px dashed var(--brand-primary)',borderRadius:6,background:'rgba(145,47,99,.04)',color:'var(--brand-primary)',fontSize:10,fontWeight:500,cursor:'pointer',width:'100%'}}>
+        {open?'✕ Close':'+ '+(selected.length>0?'Change':'Set benchmark')}{allBMs.length>0&&!open&&<span style={{marginLeft:4,fontSize:9,color:'var(--text-muted)',fontWeight:400}}>({allBMs.length} available)</span>}
+      </button>
+      {open&&(<div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:999,background:'#fff',border:'1px solid var(--border)',borderRadius:8,boxShadow:'0 8px 24px rgba(62,52,82,.12)',maxHeight:220,overflowY:'auto',marginTop:4}}>
+        {allBMs.length===0?<div style={{padding:12,textAlign:'center',fontSize:11,color:'var(--text-muted)'}}>Loading…</div>
+        :allBMs.map(bm=>{const isSel=selected.some(s=>s.name===bm.name);return(
+          <div key={bm.name} onClick={()=>toggleBM(bm)} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 10px',cursor:'pointer',borderBottom:'1px solid var(--border)',background:isSel?'rgba(145,47,99,.04)':'#fff'}}>
+            <div style={{width:14,height:14,borderRadius:3,border:'1.5px solid '+(isSel?'var(--brand-primary)':'var(--border)'),background:isSel?'var(--brand-primary)':'#fff',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              {isSel&&<svg width="9" height="9" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:11,fontWeight:500,color:'var(--text-primary)'}}>{bm.display_name}</div>
+              <div style={{fontSize:9,color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>1Y {bm.return_1y!=null?(bm.return_1y>=0?'+':'')+bm.return_1y.toFixed(1)+'%':'—'} · 3Y {bm.return_3y!=null?(bm.return_3y>=0?'+':'')+bm.return_3y.toFixed(1)+'%':'—'}</div>
+            </div>
+          </div>
+        );})}
+      </div>)}
+    </div>
+  );
+}
+
 const COLORS = ['#912F63','#3E3452','#1558A8','#1A7A52','#C46985','#6D5479','#B46B10','#0F6E56'];
 const BM_DATA = {
   nifty50:    {name:'Nifty 50 TRI',            rets:{r1y:16.3,r3y:13.2,r5y:14.8,cy25:11.88,cy24:10.09,cy23:21.30,cy22:5.69,cy21:25.59}},
@@ -43,7 +117,7 @@ function equaliseWeights(fundList) {
   return nw;
 }
 
-export default function BuildPortfolio({ funds, weights, setFunds, setWeights, snapshots={}, setSnapshots, benchmarks=[], onAnalyse, ips, selectedDate }) {
+export default function BuildPortfolio({ funds, weights, setFunds, setWeights, snapshots={}, setSnapshots, benchmarks=[], onBenchmarksChange, ipsSkipped=false, onAnalyse, ips, selectedDate }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [ddOpen, setDdOpen] = useState(false);
@@ -111,7 +185,8 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
     const coloredFund = { ...fund, color: COLORS[funds.length % COLORS.length] };
     const newFunds = [...funds, coloredFund];
     setFunds(newFunds);
-    setWeights(equaliseWeights(newFunds));
+    // Preserve existing weights — new fund starts at 0 (user sets manually)
+    setWeights(prev => ({ ...prev, [fund.isin]: 0 }));
     setQuery(''); setDdOpen(false);
     // Fetch snapshot immediately
     const snap = await fetchSnapshot(fund.isin, dateStr);
@@ -123,7 +198,8 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
     const coloredFund = { ...fund, color: COLORS[funds.length % COLORS.length] };
     const newFunds = [...funds, coloredFund];
     setFunds(newFunds);
-    setWeights(equaliseWeights(newFunds));
+    // Preserve existing weights — new fund starts at 0 (user sets manually)
+    setWeights(prev => ({ ...prev, [fund.isin]: 0 }));
     const snap = await fetchSnapshot(fund.isin, dateStr);
     if (snap) setSnapshots(prev => ({ ...prev, [fund.isin]: snap }));
   }
@@ -132,8 +208,20 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
     const remaining = funds.filter(f => f.isin!==isin);
     setFunds(remaining);
     setSnapshots(prev => { const n={...prev}; delete n[isin]; return n; });
-    if (!remaining.length) { setWeights({}); return; }
-    setWeights(equaliseWeights(remaining));
+    // Preserve remaining weights — just remove the deleted fund
+    setWeights(prev => { const n={...prev}; delete n[isin]; return n; });
+  }
+
+  const [rawWeights, setRawWeights] = React.useState({});
+
+  function handleWeightChange(isin, val) {
+    setRawWeights(prev => ({ ...prev, [isin]: val }));
+  }
+
+  function handleWeightBlur(isin, val) {
+    const v = Math.max(0, Math.min(100, parseFloat(val) || 0));
+    setWeights(prev => ({ ...prev, [isin]: parseFloat(v.toFixed(2)) }));
+    setRawWeights(prev => { const n = { ...prev }; delete n[isin]; return n; });
   }
 
   function updateWeight(isin, val) {
@@ -284,14 +372,17 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
             )}
           </div>
 
-          {/* Benchmark display */}
-          <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0, maxWidth:280 }}>
+          {/* Benchmark display / picker */}
+          <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0, maxWidth: ipsSkipped ? 340 : 280 }}>
             <label style={{ fontSize:10, fontWeight:500, color:'var(--text-muted)', flexShrink:0 }}>Benchmark</label>
-            <div style={{ fontSize:11, color:'var(--brand-dark)', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-              {benchmarks.length > 0
-                ? benchmarks.map(b => `${b.display_name} (${b.weight}%)`).join(' + ')
-                : <span style={{ color:'var(--text-muted)', fontStyle:'italic' }}>Set in Client & IPS</span>}
-            </div>
+            {ipsSkipped
+              ? <BenchmarkPicker selectedDate={selectedDate} value={benchmarks} onChange={onBenchmarksChange} />
+              : <div style={{ fontSize:11, color:'var(--brand-dark)', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {benchmarks.length > 0
+                    ? benchmarks.map(b => `${b.display_name} (${b.weight}%)`).join(' + ')
+                    : <span style={{ color:'var(--text-muted)', fontStyle:'italic' }}>Set in Client & IPS</span>}
+                </div>
+            }
           </div>
         </div>
       </div>
@@ -368,7 +459,10 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
               <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0 }}>
                 <input type="range" min="0" max="100" step="0.5" value={w} onChange={e=>updateWeight(f.isin,e.target.value)}
                   style={{ WebkitAppearance:'none', width:110, height:4, borderRadius:2, background:'var(--border)', outline:'none', cursor:'pointer' }} />
-                <input type="number" min="0" max="100" step="0.5" value={w} onChange={e=>updateWeight(f.isin,e.target.value)}
+                <input type="number" min="0" max="100" step="0.5"
+                  value={rawWeights[f.isin] !== undefined ? rawWeights[f.isin] : (w === 0 ? "" : w)}
+                  onChange={e => handleWeightChange(f.isin, e.target.value)}
+                  onBlur={e => handleWeightBlur(f.isin, e.target.value)}
                   style={{ width:58, border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', padding:'3px 5px', font:'11px var(--font-mono)', fontWeight:600, textAlign:'center', outline:'none' }} />
                 <span style={{ fontSize:11, color:'var(--text-muted)' }}>%</span>
                 <button onClick={()=>removeFund(f.isin)}
