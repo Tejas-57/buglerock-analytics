@@ -135,23 +135,7 @@ def main():
         """)).rowcount
         print(f"  daily_fund_data (benchmarks): deleted {bm_deleted:,} duplicate rows")
 
-        # Also clean benchmark_data table (backward-compat table)
-        bmt_deleted = conn.execute(text("""
-            DELETE FROM benchmark_data
-            WHERE id IN (
-                SELECT id FROM (
-                    SELECT id,
-                           ROW_NUMBER() OVER (
-                             PARTITION BY data_date, name
-                             ORDER BY id DESC
-                           ) AS rn
-                    FROM benchmark_data
-                    WHERE name IS NOT NULL AND name != ''
-                ) sub
-                WHERE rn > 1
-            )
-        """)).rowcount
-        print(f"  benchmark_data (backward-compat): deleted {bmt_deleted:,} duplicate rows")
+        # benchmark_data (backward-compat) is already clean — skip
 
     # Verify
     print("\n" + "=" * 80)
