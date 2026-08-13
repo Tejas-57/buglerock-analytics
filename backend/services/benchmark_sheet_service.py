@@ -2,11 +2,15 @@
 benchmark_sheet_service.py
 Reads and writes benchmark NAV data to/from Google Sheets via Service Account.
 
-Two modes of use:
+Three modes of use:
   - APPEND (daily, fast) — new email → append one/few rows to sheet + DB
+  - TAIL READ (5-min poll, fast) — read last N rows from a tab → upsert to DB
+                                   (used for Nifty Indices which is written by Apps Script)
   - HISTORICAL LOAD (one-time, slow) — read entire sheet → populate DB
 
 The daily/append operations only touch column A (existing dates) — fast.
+The tail read pulls the whole tab in one API call, then slices client-side — fine
+because the sheet is small (~500 rows × 11 cols).
 The historical load is a manual endpoint that runs in background, not on startup.
 """
 
@@ -121,6 +125,65 @@ def append_crisil_rows(rows: list[tuple[date, float]]) -> int:
     except Exception as e:
         logger.error(f"append_crisil_rows failed: {e}")
         return 0
+
+
+# ── TAIL READ (5-min poll, for Apps-Script-populated tabs) ───────────────────
+
+def read_nifty_indices_tail(n_rows: int = 20) -> list[dict]:
+    """
+    Read the last n_rows of data from the 'Nifty Indices' tab and return
+    records as [{date, index_name, value}, ...].
+
+    Called from the 5-min benchmark poll. Apps Script (Yahoo Finance) writes
+    to this tab throughout the day via 5 daily triggers; this function keeps
+    the benchmark_nav table in sync without needing a separate daily cron.
+
+    Uses a single get_all_values() API call — sheet is small (~500 rows × 11
+    cols ≈ 50KB payload). Client-side slice of the tail.
+
+    Returns [] on error or empty sheet — never raises.
+    """
+    if not SHEET_ID:
+        return []
+    try:
+        gc = _get_sheets_client()
+        ws = gc.open_by_key(SHEET_ID).worksheet(SHEET_NIFTY_INDICES)
+        all_rows = ws.get_all_values()
+    except Exception as e:
+        logger.error(f"read_nifty_indices_tail: sheet read failed: {e}")
+        return []
+
+    if not all_rows or len(all_rows) < 2:
+        return []
+
+    header = all_rows[0]
+    index_names = [INDEX_NAME_MAP.get(h.strip(), h.strip()) for h in header[1:]]
+
+    # Take the last n_rows data rows (skip header)
+    data_rows = all_rows[1:]
+    tail = data_rows[-n_rows:] if len(data_rows) > n_rows else data_rows
+
+    records = []
+    for row in tail:
+        if not row or not row[0]:
+            continue
+        d = _parse_date(row[0])
+        if not d:
+            continue
+        for i, name in enumerate(index_names):
+            col = i + 1
+            if col >= len(row) or row[col] == "":
+                continue
+            try:
+                val = float(str(row[col]).replace(",", ""))
+                records.append({"date": d, "index_name": name, "value": val})
+            except (ValueError, TypeError):
+                continue
+    logger.info(
+        f"read_nifty_indices_tail: {len(records)} records from last {len(tail)} rows "
+        f"(across {len(index_names)} indices)"
+    )
+    return records
 
 
 # ── HISTORICAL LOAD (one-time, slow, background only) ────────────────────────

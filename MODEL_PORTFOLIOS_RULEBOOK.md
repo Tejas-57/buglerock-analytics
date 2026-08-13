@@ -477,3 +477,4 @@ python debug_categories.py      # print all distinct category strings in DB
 | 2026-08-04 | Time to double: `72 / assumed_return → 72 / blended_5Y_CAGR` | `ModelPortfolios.jsx` | Consistent with 5Y CAGR chip; no more hardcoded assumptions |
 | 2026-08-04 | Portfolio metrics row: added Std Dev (3Y) and Std Dev (5Y) | `ModelPortfolios.jsx` | Requested by user |
 | 2026-08-04 | Fund table: added Std Dev 3Y and Std Dev 5Y columns | `ModelPortfolios.jsx` | Requested by user |
+| 2026-08-13 | No model portfolio logic changes this session — all changes were in other components | — | See SESSION_SUMMARY_AUG13.md for full session changes |

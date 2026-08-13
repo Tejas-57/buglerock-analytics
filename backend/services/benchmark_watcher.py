@@ -1,12 +1,13 @@
 """
 benchmark_watcher.py
-Polls Gmail for benchmark NAV emails:
+Polls Gmail for benchmark NAV emails and syncs Apps-Script-populated tabs to DB:
   - NSE Nifty Multi Asset ZIP (from indices@nse.co.in, ~7:30 PM IST daily)
   - CRISIL Composite Bond Index Excel (from Crisil.Indices@crisil.com, variable time)
+  - Nifty Indices tab (Yahoo Finance via Apps Script — 5 daily triggers)
 
 STATELESS DESIGN:
   - No settings flags tracking "already processed"
-  - Every poll searches Gmail for recent emails
+  - Every poll searches Gmail for recent emails and reads sheet tail
   - DB upsert (ON CONFLICT DO UPDATE) handles deduplication automatically
   - Sheet append checks existing dates before writing
   - Self-healing: delete any row and it re-fetches within 5 minutes
@@ -27,6 +28,11 @@ CRISIL_SUBJECT_KEYWORD = "CRISIL Indices"
 
 NSE_INDEX_NAME    = "Nifty Multi Asset 50:40:10"
 CRISIL_INDEX_NAME = "CRISIL Composite Bond Index"
+
+# How many recent rows to read from the Nifty Indices tab on each poll.
+# 20 rows ≈ 4 trading weeks of safety margin — well beyond anything Apps Script
+# could conceivably backfill in one shot.
+NIFTY_INDICES_TAIL_ROWS = 20
 
 
 def _search_gmail_range(service, sender: str, subject_kw: str, days_back: int) -> list:
@@ -184,10 +190,58 @@ def fetch_crisil_benchmark(check_days: int = 5) -> dict:
         return {"processed": 0, "error": str(e)}
 
 
+# ── Nifty Indices (Apps-Script-populated → DB sync) ──────────────────────────
+
+def sync_nifty_indices_from_sheet(n_rows: int = NIFTY_INDICES_TAIL_ROWS) -> dict:
+    """
+    Read the tail of the 'Nifty Indices' sheet tab (written by Apps Script from
+    Yahoo Finance via 5 daily triggers) and upsert to the benchmark_nav table.
+
+    Stateless: DB dedup handles the "already there" case, so this is safe to
+    run every 5 minutes. Self-healing: delete a row from the DB and it comes
+    back within 5 minutes as long as it's still in the recent sheet tail.
+
+    Returns {"rows_read": N, "records_upserted": M, "new_dates": D} where D is
+    the number of distinct new dates upserted (roughly).
+    """
+    from services.benchmark_sheet_service import read_nifty_indices_tail
+    from services.benchmark_db_service import upsert_benchmark_rows, get_available_indices
+
+    try:
+        # Snapshot the latest_date per index BEFORE the read, so we can log
+        # how many rows are genuinely new vs re-writes.
+        try:
+            pre = {r["index_name"]: r["last_date"] for r in get_available_indices()}
+        except Exception:
+            pre = {}
+
+        records = read_nifty_indices_tail(n_rows=n_rows)
+        if not records:
+            return {"rows_read": 0, "records_upserted": 0, "new_dates": 0}
+
+        # Count "genuinely new" records — date > known last_date for that index
+        new_count = 0
+        for r in records:
+            last = pre.get(r["index_name"])
+            if not last or str(r["date"]) > last:
+                new_count += 1
+
+        upserted = upsert_benchmark_rows(records)
+        logger.info(
+            f"Nifty Indices sync: read {len(records)} records from tail, "
+            f"upserted {upserted}, {new_count} were newer than prior latest"
+        )
+        return {"rows_read": len(records), "records_upserted": upserted, "new_dates": new_count}
+    except Exception as e:
+        logger.error(f"sync_nifty_indices_from_sheet failed: {e}", exc_info=True)
+        return {"rows_read": 0, "records_upserted": 0, "new_dates": 0, "error": str(e)}
+
+
 # ── Combined ──────────────────────────────────────────────────────────────────
 
 def fetch_all_benchmarks(check_days: int = 5) -> dict:
     """Called from main Gmail poll loop every 5 minutes."""
     nse    = fetch_nse_benchmark(check_days=check_days)
     crisil = fetch_crisil_benchmark(check_days=check_days)
-    return {"nse": nse, "crisil": crisil}
+    nifty  = sync_nifty_indices_from_sheet()
+    return {"nse": nse, "crisil": crisil, "nifty_indices": nifty}
