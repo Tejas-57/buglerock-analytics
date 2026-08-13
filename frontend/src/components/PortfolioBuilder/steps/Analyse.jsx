@@ -847,7 +847,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
               <div className="ptf-card-hd">Return contribution per fund</div>
               <div style={{ overflowX: 'auto' }}>
                 <table className="ptf-analytics-tbl">
-                  <thead><tr><th style={{ textAlign: 'left' }}>Fund</th><th>Weight</th><th>1M</th><th>3M</th><th>6M</th><th>1Y</th><th>3Y CAGR</th><th>5Y CAGR</th><th>YTD</th><th>1Y contrib</th></tr></thead>
+                  <thead><tr><th style={{ textAlign: 'left' }}>Fund</th><th>Weight</th><th>1M</th><th>3M</th><th>1Y</th><th>3Y CAGR</th><th>5Y CAGR</th><th>YTD</th><th>1Y contrib</th></tr></thead>
                   <tbody>
                     {funds.map(f => {
                       const w = weights[f.isin] || 0;
@@ -864,7 +864,6 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                           <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{w}%</td>
                           <td style={{ fontFamily: 'var(--font-mono)', color: (fsnap?.returns?.['1m'] || 0) >= 0 ? 'var(--pos)' : 'var(--brand-primary)' }}>{fp(fsnap?.returns?.['1m'])}</td>
                           <td style={{ fontFamily: 'var(--font-mono)', color: (fsnap?.returns?.['3m'] || 0) >= 0 ? 'var(--pos)' : 'var(--brand-primary)' }}>{fp(fsnap?.returns?.['3m'])}</td>
-                          <td style={{ fontFamily: 'var(--font-mono)', color: (fsnap?.returns?.['6m'] || 0) >= 0 ? 'var(--pos)' : 'var(--brand-primary)' }}>{fp(fsnap?.returns?.['6m'])}</td>
                           <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: (fsnap?.returns?.['1y'] || 0) >= 0 ? 'var(--pos)' : 'var(--brand-primary)' }}>{fp(fsnap?.returns?.['1y'])}</td>
                           <td style={{ fontFamily: 'var(--font-mono)', color: (fsnap?.returns?.['3y'] || 0) >= 0 ? 'var(--pos)' : 'var(--brand-primary)' }}>{fp(fsnap?.returns?.['3y'])}</td>
                           <td style={{ fontFamily: 'var(--font-mono)', color: (fsnap?.returns?.['5y'] || 0) >= 0 ? 'var(--pos)' : 'var(--brand-primary)' }}>{fp(fsnap?.returns?.['5y'])}</td>
@@ -877,10 +876,9 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                   <tfoot>
                     <tr>
                       <td>Blended portfolio</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{total}%</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{total >= 99.8 ? Math.round(total) : total.toFixed(2)}%</td>
                       <td style={{ fontFamily: 'var(--font-mono)' }}>{fp(B.return_1m)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)' }}>{fp(B.return_3m)}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)' }}>{fp(B.return_6m)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fp(B.return_1y)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fp(B.return_3y)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fp(B.return_5y)}</td>
@@ -892,7 +890,6 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                       <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>BM</td>
                       <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>{bmMeta['1M'].partial ? '~' : ''}{fp(bm.rets.r1m)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>{bmMeta['3M'].partial ? '~' : ''}{fp(bm.rets.r3m)}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>{bmMeta['6M'].partial ? '~' : ''}{fp(bm.rets.r6m)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#fff' }}>{bmMeta['1Y'].partial ? '~' : ''}{fp(bm.rets.r1y)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#fff' }}>{bmMeta['3Y'].partial ? '~' : ''}{fp(bm.rets.r3y)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#fff' }}>{bmMeta['5Y'].partial ? '~' : ''}{fp(bm.rets.r5y)}</td>
@@ -1780,7 +1777,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                   <tfoot>
                     <tr>
                       <td>Blended portfolio</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{total}%</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{total >= 99.8 ? Math.round(total) : total.toFixed(2)}%</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fp(B.return_1y)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fp(B.return_3y)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fp(B.return_5y)}</td>
