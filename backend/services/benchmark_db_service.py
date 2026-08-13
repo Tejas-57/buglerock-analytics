@@ -240,6 +240,28 @@ def compute_and_store_benchmark_returns(period_dates: dict, data_date: str) -> d
     computed = 0
     skipped = 0
 
+    # Fields that use CAGR (annualised) — anything with holding period > 1 year.
+    # Calendar year returns (cy20xx) are always absolute (single-year return).
+    # Periods <= 1Y (1d, 1w, 1m, 3m, 6m, 1y, ytd) stay as absolute % return.
+    CAGR_FIELDS = {
+        "return_2y":  2,
+        "return_3y":  3,
+        "return_5y":  5,
+        "return_7y":  7,
+        "return_10y": 10,
+    }
+
+    def compute_return(db_field: str, start_val: float, end_val: float) -> float:
+        """
+        For CAGR fields: annualise using fixed N years.
+        For all other fields: simple point-to-point absolute return.
+        """
+        if db_field in CAGR_FIELDS:
+            n = CAGR_FIELDS[db_field]
+            return round(((end_val / start_val) ** (1 / n) - 1) * 100, 4)
+        else:
+            return round((end_val / start_val - 1) * 100, 4)
+
     with engine.connect() as conn:
         for index_name in indices:
             returns = {}
@@ -251,7 +273,9 @@ def compute_and_store_benchmark_returns(period_dates: dict, data_date: str) -> d
                 start_val = _get_nav_on_or_before(conn, index_name, start_date)
                 end_val   = _get_nav_on_or_before(conn, index_name, end_date)
                 if start_val and end_val and start_val != 0:
-                    returns[db_field] = round((end_val / start_val - 1) * 100, 4)
+                    val = compute_return(db_field, start_val, end_val)
+                    if val is not None:
+                        returns[db_field] = val
                 # else: leave as NULL — index didn't exist yet for that period
 
             if not returns:
