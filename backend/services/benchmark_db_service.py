@@ -12,36 +12,29 @@ logger = logging.getLogger(__name__)
 
 
 def migrate_benchmark_nav_table():
-    """Create benchmark_nav table if it doesn't exist."""
+    """Create benchmark_nav table if it doesn't exist. Skips immediately if already there."""
     from models.database import engine
-    print(">>> MIGRATE: getting connection with autocommit...", flush=True)
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        print(">>> MIGRATE: creating table...", flush=True)
-        try:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS benchmark_nav (
-                    id         SERIAL PRIMARY KEY,
-                    nav_date   DATE NOT NULL,
-                    index_name VARCHAR(200) NOT NULL,
-                    value      NUMERIC(18,4) NOT NULL,
-                    UNIQUE (nav_date, index_name)
-                )
-            """))
-            print(">>> MIGRATE: table done", flush=True)
-        except Exception as e:
-            print(f">>> MIGRATE: table creation error: {e}", flush=True)
-
-        print(">>> MIGRATE: creating index...", flush=True)
-        try:
-            conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_benchmark_nav_date_index
-                ON benchmark_nav (nav_date, index_name)
-            """))
-            print(">>> MIGRATE: index done", flush=True)
-        except Exception as e:
-            print(f">>> MIGRATE: index creation error: {e}", flush=True)
-    print(">>> MIGRATE: complete", flush=True)
-    logger.info("benchmark_nav table ready")
+        # Fast check — skip all DDL if table already exists
+        exists = conn.execute(text(
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'benchmark_nav')"
+        )).scalar()
+        if exists:
+            return  # already set up — nothing to do
+        # First-time only
+        conn.execute(text("""
+            CREATE TABLE benchmark_nav (
+                id         SERIAL PRIMARY KEY,
+                nav_date   DATE NOT NULL,
+                index_name VARCHAR(200) NOT NULL,
+                value      NUMERIC(18,4) NOT NULL,
+                UNIQUE (nav_date, index_name)
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX idx_benchmark_nav_date_index ON benchmark_nav (nav_date, index_name)"
+        ))
+    logger.info("benchmark_nav table created")
 
 
 def upsert_benchmark_rows(rows: list[dict]) -> int:
@@ -108,20 +101,16 @@ def load_historical_from_sheet() -> dict:
 
     try:
         logger.info("load_historical_from_sheet: starting sheet read...")
-        print(">>> HISTORICAL LOAD: starting sheet read...", flush=True)
         records = read_all_benchmarks_full()
-        print(f">>> HISTORICAL LOAD: got {len(records)} records from sheet", flush=True)
         if not records:
             logger.warning("load_historical_from_sheet: no records from sheet")
             return {"loaded": 0, "error": "No records from sheet"}
         n = bulk_upsert_benchmark_rows(records)
-        print(f">>> HISTORICAL LOAD: upserted {n} rows to DB", flush=True)
         set_setting("benchmark_historical_loaded", "yes")
         logger.info(f"load_historical_from_sheet: loaded {n} records")
         return {"loaded": n, "total_read": len(records)}
     except Exception as e:
         logger.error(f"load_historical_from_sheet failed: {e}", exc_info=True)
-        print(f">>> HISTORICAL LOAD ERROR: {e}", flush=True)
         return {"loaded": 0, "error": str(e)}
 
 
