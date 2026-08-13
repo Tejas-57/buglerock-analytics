@@ -186,8 +186,8 @@ def get_effective_asset_class(display_cat: str, raw_cat: str, default_asset_clas
 # ── Column map builder ───────────────────────────────────────────────────────
 
 def build_column_map(rows: list) -> dict:
-    metric_row_idx = None
-    isin_row_idx = None
+    metric_row_idx = None   # row with "1 Day", "1 Month" labels (Row 0)
+    isin_row_idx = None     # row with "ISIN" header (Row 3)
 
     for i, row in enumerate(rows[:10]):
         cells = [cell_str(c).lower() for c in row]
@@ -201,6 +201,50 @@ def build_column_map(rows: list) -> dict:
 
     isin_row = [cell_str(c) for c in rows[isin_row_idx]]
     col_map = {}
+
+    # ── Extract period dates from rows immediately after metric_row ────────────
+    # Row 0 (metric_row_idx)     : period labels — "1 Month", "3 Months", etc.
+    # Row metric_row_idx + 1     : period START dates — "13/07/2026"
+    # Row metric_row_idx + 2     : period END dates   — "12/08/2026"
+    # These are used later to compute benchmark returns on the exact same
+    # date range as Morningstar uses for fund returns.
+    period_dates = {}  # db_field → {"start": date, "end": date}
+    if metric_row_idx is not None and metric_row_idx + 2 < len(rows):
+        label_row  = [cell_str(c) for c in rows[metric_row_idx]]
+        start_row  = [cell_str(c) for c in rows[metric_row_idx + 1]]
+        end_row    = [cell_str(c) for c in rows[metric_row_idx + 2]]
+
+        def parse_dd_mm_yyyy(s: str):
+            """Parse DD/MM/YYYY or similar into a date string YYYY-MM-DD."""
+            if not s:
+                return None
+            for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%b-%Y", "%d-%b-%y"):
+                try:
+                    from datetime import datetime
+                    return datetime.strptime(s.strip(), fmt).strftime("%Y-%m-%d")
+                except ValueError:
+                    continue
+            return None
+
+        # Forward-fill label row (same as metric_filled logic below)
+        label_filled = []
+        last_label = ""
+        for c in label_row:
+            if c:
+                last_label = c
+            label_filled.append(last_label)
+
+        seen_fields = set()
+        for col_idx, label in enumerate(label_filled):
+            label_lower = label.lower()
+            for keyword, db_field in RETURN_METRIC_MAP:
+                if keyword in label_lower and db_field not in seen_fields:
+                    s = parse_dd_mm_yyyy(start_row[col_idx] if col_idx < len(start_row) else "")
+                    e = parse_dd_mm_yyyy(end_row[col_idx]   if col_idx < len(end_row)   else "")
+                    if s or e:
+                        period_dates[db_field] = {"start": s, "end": e}
+                        seen_fields.add(db_field)
+                    break
 
     for idx, h in enumerate(isin_row):
         hl = h.lower()
@@ -370,7 +414,7 @@ def build_column_map(rows: list) -> dict:
                         break
                 break
 
-    return {"isin_row_idx": isin_row_idx, "col_map": col_map}
+    return {"isin_row_idx": isin_row_idx, "col_map": col_map, "period_dates": period_dates}
 
 
 # ── Row extraction ───────────────────────────────────────────────────────────
@@ -391,6 +435,7 @@ def parse_excel_file(file_path: str, data_date: str, email_date: str, file_name:
     all_funds = []
     all_benchmarks = []
     parsed_categories = {}
+    all_period_dates = {}  # collected from whichever sheet yields them first
 
     for sheet_name, config in SHEET_CONFIG.items():
         actual = next((s for s in wb.sheetnames if s.strip() == sheet_name.strip()), None)
@@ -399,7 +444,7 @@ def parse_excel_file(file_path: str, data_date: str, email_date: str, file_name:
             continue
 
         try:
-            funds, benchmarks, categories = _parse_sheet(
+            funds, benchmarks, categories, period_dates = _parse_sheet(
                 ws=wb[actual],
                 asset_class=config["asset_class"],
                 sheet_name=actual,
@@ -412,15 +457,21 @@ def parse_excel_file(file_path: str, data_date: str, email_date: str, file_name:
             all_funds.extend(funds)
             all_benchmarks.extend(benchmarks)
             parsed_categories[config["asset_class"]] = categories
+            if not all_period_dates and period_dates:
+                all_period_dates = period_dates
         except Exception as e:
             logger.error(f"Error parsing sheet {sheet_name}: {e}", exc_info=True)
 
-    logger.info(f"Parsed {len(all_funds)} funds and {len(all_benchmarks)} benchmarks for {data_date}")
+    logger.info(
+        f"Parsed {len(all_funds)} funds, {len(all_benchmarks)} benchmarks, "
+        f"{len(all_period_dates)} period dates for {data_date}"
+    )
     return {
         "funds": all_funds,
         "benchmarks": all_benchmarks,
         "data_date": data_date,
         "parsed_categories": parsed_categories,
+        "period_dates": all_period_dates,
     }
 
 
@@ -430,10 +481,11 @@ def _parse_sheet(ws, asset_class, sheet_name, data_date, email_date,
     mapping = build_column_map(rows)
     if not mapping:
         logger.warning(f"Could not build column map for {sheet_name}")
-        return [], [], []
+        return [], [], [], {}
 
-    isin_row_idx = mapping["isin_row_idx"]
-    col_map = mapping["col_map"]
+    isin_row_idx  = mapping["isin_row_idx"]
+    col_map       = mapping["col_map"]
+    period_dates  = mapping.get("period_dates", {})
 
     segments = []
     current_seg = None
@@ -523,7 +575,7 @@ def _parse_sheet(ws, asset_class, sheet_name, data_date, email_date,
                                   sheet_name, data_date, email_date)
             benchmarks.append(bm)
 
-    return funds, benchmarks, categories_seen
+    return funds, benchmarks, categories_seen, period_dates
 
 
 def _build_fund(row: dict, col_map: dict, asset_class: str) -> dict:

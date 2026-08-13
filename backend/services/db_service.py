@@ -161,6 +161,16 @@ def save_parsed_data(parsed: dict):
 
         db.commit()
         logger.info(f"Saved {len(parsed['funds'])} funds for {data_date}")
+
+        # Compute and store benchmark returns using period dates from the Excel
+        period_dates = parsed.get("period_dates", {})
+        if period_dates:
+            try:
+                from services.benchmark_db_service import compute_and_store_benchmark_returns
+                result = compute_and_store_benchmark_returns(period_dates, str(data_date))
+                logger.info(f"Benchmark returns computed: {result}")
+            except Exception as e:
+                logger.warning(f"compute_and_store_benchmark_returns failed (non-fatal): {e}")
     except Exception as e:
         db.rollback()
         logger.error(f"Error saving data: {e}", exc_info=True)

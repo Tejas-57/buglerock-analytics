@@ -156,3 +156,182 @@ def get_latest_value(index_name: str) -> Optional[dict]:
             {"n": index_name},
         ).fetchone()
     return {"date": str(row[0]), "value": float(row[1])} if row else None
+
+
+# ── Benchmark Returns Table ───────────────────────────────────────────────────
+
+RETURN_FIELDS = [
+    "return_1d", "return_1w", "return_1m", "return_3m", "return_6m",
+    "return_1y", "return_2y", "return_3y", "return_5y", "return_7y", "return_10y",
+    "return_ytd",
+    "return_cy2025", "return_cy2024", "return_cy2023", "return_cy2022", "return_cy2021",
+]
+
+
+def migrate_benchmark_returns_table():
+    """Create benchmark_returns table if it doesn't exist."""
+    from models.database import engine
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        exists = conn.execute(text(
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'benchmark_returns')"
+        )).scalar()
+        if exists:
+            return
+        cols = ",\n".join([f"    {f} NUMERIC(10,4)" for f in RETURN_FIELDS])
+        conn.execute(text(f"""
+            CREATE TABLE benchmark_returns (
+                id         SERIAL PRIMARY KEY,
+                data_date  DATE NOT NULL,
+                index_name VARCHAR(200) NOT NULL,
+                {cols},
+                UNIQUE (data_date, index_name)
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX idx_bm_returns_date_index ON benchmark_returns (data_date, index_name)"
+        ))
+    logger.info("benchmark_returns table created")
+
+
+def _get_nav_on_or_before(conn, index_name: str, target_date: str) -> Optional[float]:
+    """
+    Get the closing NAV for index_name on target_date, or the nearest
+    available date before it (handles holidays/weekends).
+    Returns None if no data exists within 7 calendar days before target_date.
+    """
+    row = conn.execute(text("""
+        SELECT value FROM benchmark_nav
+        WHERE index_name = :n
+          AND nav_date <= :d
+          AND nav_date >= CAST(:d AS DATE) - INTERVAL '7 days'
+        ORDER BY nav_date DESC
+        LIMIT 1
+    """), {"n": index_name, "d": target_date}).fetchone()
+    return float(row[0]) if row else None
+
+
+def compute_and_store_benchmark_returns(period_dates: dict, data_date: str) -> dict:
+    """
+    Compute point-to-point returns for all indices in benchmark_nav using
+    the exact period start/end dates extracted from the Morningstar Excel.
+
+    Called from save_parsed_data after fund rows are inserted.
+
+    period_dates: dict from parser — {db_field: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}}
+    data_date:    the Morningstar data_date string (YYYY-MM-DD)
+
+    Returns {"computed": N, "indices": M, "skipped": K}
+    """
+    if not period_dates:
+        logger.warning("compute_and_store_benchmark_returns: no period_dates provided — skipping")
+        return {"computed": 0, "indices": 0, "skipped": 0}
+
+    from models.database import engine
+
+    # Get all available indices
+    with engine.connect() as conn:
+        index_rows = conn.execute(text(
+            "SELECT DISTINCT index_name FROM benchmark_nav"
+        )).fetchall()
+    indices = [r[0] for r in index_rows]
+    if not indices:
+        return {"computed": 0, "indices": 0, "skipped": 0}
+
+    computed = 0
+    skipped = 0
+
+    with engine.connect() as conn:
+        for index_name in indices:
+            returns = {}
+            for db_field, dates in period_dates.items():
+                start_date = dates.get("start")
+                end_date   = dates.get("end")
+                if not start_date or not end_date:
+                    continue
+                start_val = _get_nav_on_or_before(conn, index_name, start_date)
+                end_val   = _get_nav_on_or_before(conn, index_name, end_date)
+                if start_val and end_val and start_val != 0:
+                    returns[db_field] = round((end_val / start_val - 1) * 100, 4)
+                # else: leave as NULL — index didn't exist yet for that period
+
+            if not returns:
+                skipped += 1
+                continue
+
+            # Build upsert
+            set_clause = ", ".join([f"{f} = :{f}" for f in returns])
+            col_names  = ", ".join(returns.keys())
+            placeholders = ", ".join([f":{f}" for f in returns.keys()])
+            params = {"data_date": data_date, "index_name": index_name, **returns}
+
+            try:
+                conn.execute(text(f"""
+                    INSERT INTO benchmark_returns (data_date, index_name, {col_names})
+                    VALUES (:data_date, :index_name, {placeholders})
+                    ON CONFLICT (data_date, index_name)
+                    DO UPDATE SET {set_clause}
+                """), params)
+                computed += 1
+            except Exception as e:
+                logger.warning(f"benchmark_returns upsert failed for {index_name}: {e}")
+                skipped += 1
+
+        conn.commit()
+
+    logger.info(
+        f"compute_and_store_benchmark_returns: {computed} indices computed, "
+        f"{skipped} skipped, data_date={data_date}"
+    )
+    return {"computed": computed, "indices": len(indices), "skipped": skipped}
+
+
+def get_benchmark_returns(index_name: str, data_date: str) -> Optional[dict]:
+    """Return stored returns for one index on a given data_date."""
+    from models.database import engine
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT index_name, data_date,
+                   return_1d, return_1w, return_1m, return_3m, return_6m,
+                   return_1y, return_2y, return_3y, return_5y, return_7y, return_10y,
+                   return_ytd,
+                   return_cy2025, return_cy2024, return_cy2023, return_cy2022, return_cy2021
+            FROM benchmark_returns
+            WHERE index_name = :n AND data_date = :d
+        """), {"n": index_name, "d": data_date}).fetchone()
+    if not row:
+        return None
+    keys = ["index_name", "data_date",
+            "return_1d", "return_1w", "return_1m", "return_3m", "return_6m",
+            "return_1y", "return_2y", "return_3y", "return_5y", "return_7y", "return_10y",
+            "return_ytd",
+            "return_cy2025", "return_cy2024", "return_cy2023", "return_cy2022", "return_cy2021"]
+    result = dict(zip(keys, row))
+    result["data_date"] = str(result["data_date"])
+    return result
+
+
+def get_all_benchmark_returns(data_date: str) -> list[dict]:
+    """Return stored returns for ALL indices on a given data_date."""
+    from models.database import engine
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT index_name, data_date,
+                   return_1d, return_1w, return_1m, return_3m, return_6m,
+                   return_1y, return_2y, return_3y, return_5y, return_7y, return_10y,
+                   return_ytd,
+                   return_cy2025, return_cy2024, return_cy2023, return_cy2022, return_cy2021
+            FROM benchmark_returns
+            WHERE data_date = :d
+            ORDER BY index_name
+        """), {"d": data_date}).fetchall()
+    keys = ["index_name", "data_date",
+            "return_1d", "return_1w", "return_1m", "return_3m", "return_6m",
+            "return_1y", "return_2y", "return_3y", "return_5y", "return_7y", "return_10y",
+            "return_ytd",
+            "return_cy2025", "return_cy2024", "return_cy2023", "return_cy2022", "return_cy2021"]
+    results = []
+    for row in rows:
+        d = dict(zip(keys, row))
+        d["data_date"] = str(d["data_date"])
+        results.append(d)
+    return results

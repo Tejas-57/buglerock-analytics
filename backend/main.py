@@ -189,6 +189,13 @@ async def startup():
     except Exception as e:
         logger.warning(f"Benchmark NAV migration failed: {e}")
 
+    # Benchmark Returns table migration (new)
+    try:
+        from services.benchmark_db_service import migrate_benchmark_returns_table
+        migrate_benchmark_returns_table()
+    except Exception as e:
+        logger.warning(f"Benchmark Returns migration failed: {e}")
+
     await check_parser_version()
     from services.morningstar_service import seed_accesscode_from_env
     seed_accesscode_from_env()

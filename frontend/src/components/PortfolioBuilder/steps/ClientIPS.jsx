@@ -8,8 +8,33 @@ function BenchmarkPicker({ selectedDate, value, onChange }) {
   const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().slice(0, 10) : (selectedDate || '');
 
   useEffect(() => {
-    const url = dateStr ? `${API}/api/benchmarks?date=${dateStr}` : `${API}/api/benchmarks`;
-    fetch(url).then(r => r.json()).then(d => setAllBMs(d.benchmarks || [])).catch(() => {});
+    // Use our NAV-computed benchmark returns (12 indices from benchmark_nav)
+    // instead of the old Morningstar benchmark list
+    const url = dateStr
+      ? `${API}/api/benchmarks/returns?date=${dateStr}`
+      : `${API}/api/benchmarks/returns`;
+    fetch(url)
+      .then(r => r.json())
+      .then(d => {
+        const bms = (d.benchmarks || []).map(b => ({
+          name: b.index_name,
+          display_name: b.index_name,
+          return_1y:  b.return_1y,
+          return_3y:  b.return_3y,
+          return_5y:  b.return_5y,
+          return_1m:  b.return_1m,
+          return_3m:  b.return_3m,
+          return_6m:  b.return_6m,
+          return_ytd: b.return_ytd,
+          return_cy2025: b.return_cy2025,
+          return_cy2024: b.return_cy2024,
+          return_cy2023: b.return_cy2023,
+          return_cy2022: b.return_cy2022,
+          return_cy2021: b.return_cy2021,
+        }));
+        setAllBMs(bms);
+      })
+      .catch(() => {});
   }, [dateStr]);
 
   const selected = value || [];

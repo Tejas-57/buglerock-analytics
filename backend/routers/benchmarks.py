@@ -138,6 +138,47 @@ async def load_historical(background_tasks: BackgroundTasks):
     return {"message": "Historical load started in background — check /api/benchmarks/indices in 2-3 minutes"}
 
 
+@router.get("/benchmarks/returns")
+def get_benchmark_returns_endpoint(
+    index: Optional[str] = Query(None),
+    date: Optional[str] = Query(None),
+):
+    """
+    Returns computed point-to-point returns for benchmark indices.
+    - If index + date: returns one index's returns for that date.
+    - If only date: returns all indices' returns for that date.
+    - If neither: uses latest available date, returns all indices.
+    """
+    try:
+        from services.benchmark_db_service import (
+            get_benchmark_returns, get_all_benchmark_returns
+        )
+        from sqlalchemy import text
+        from models.database import engine
+
+        # Resolve date — use latest available if not provided
+        if not date:
+            with engine.connect() as conn:
+                latest = conn.execute(text(
+                    "SELECT MAX(data_date) FROM benchmark_returns"
+                )).scalar()
+            if not latest:
+                return {"benchmarks": [], "count": 0, "date": None}
+            date = str(latest)
+
+        if index:
+            result = get_benchmark_returns(index, date)
+            if not result:
+                return {"benchmarks": [], "count": 0, "date": date}
+            return {"benchmarks": [result], "count": 1, "date": date}
+        else:
+            results = get_all_benchmark_returns(date)
+            return {"benchmarks": results, "count": len(results), "date": date}
+    except Exception as e:
+        logger.error(f"get_benchmark_returns_endpoint failed: {e}")
+        return {"benchmarks": [], "count": 0, "error": str(e)}
+
+
 @router.get("/benchmarks/load-status")
 def load_status():
     """Check if the historical load has completed."""

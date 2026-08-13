@@ -392,7 +392,7 @@ def fetch_and_store(data_date: date) -> bool:
 
     try:
         from collections import Counter
-        parsed = parse_excel_file(tmp_path, data_date)
+        parsed = parse_excel_file(tmp_path, str(data_date), str(email_date), file_name)
         if not parsed or not parsed.get("funds"):
             logger.warning(f"Parsed but no funds found for {data_date}")
             return False
