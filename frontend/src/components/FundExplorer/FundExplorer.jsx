@@ -93,10 +93,10 @@ const MERGED_CATEGORIES = {
 const RANK_ORDER = { R1:1, R2:2, R3:3, R4:4, R5:5 };
 const RANK_COLORS = {
   R1:{ bg:'rgba(16,185,129,0.12)', color:'#059669', border:'rgba(16,185,129,0.3)' },
-  R2:{ bg:'rgba(16,185,129,0.08)', color:'#10B981', border:'rgba(16,185,129,0.2)' },
+  R2:{ bg:'rgba(16,185,129,0.12)', color:'#059669', border:'rgba(16,185,129,0.3)' },
   R3:{ bg:'rgba(45,31,43,0.06)',   color:'#2D1F2B', border:'rgba(45,31,43,0.15)' },
   R4:{ bg:'rgba(239,68,68,0.08)',  color:'#EF4444', border:'rgba(239,68,68,0.2)' },
-  R5:{ bg:'rgba(239,68,68,0.06)',  color:'#F87171', border:'rgba(239,68,68,0.15)' },
+  R5:{ bg:'rgba(239,68,68,0.08)',  color:'#EF4444', border:'rgba(239,68,68,0.2)' },
 };
 const PIP_COLORS = { R1:'#059669', R2:'#10B981', R3:'#6D5479', R4:'#F59E0B', R5:'#EF4444', default:'#A795AE' };
 

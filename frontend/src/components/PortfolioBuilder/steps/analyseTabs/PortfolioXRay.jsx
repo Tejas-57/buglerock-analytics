@@ -92,7 +92,15 @@ const SECTOR_COLORS = {
   'Real Estate': '#8E5A3E', 'Utilities': '#616161', 'Unclassified': '#A2A0A0',
 };
 
-export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, benchmarks = [], bmRets, ips, overlapData }) {
+const RANK_STYLE = {
+  R1: { bg:'rgba(16,185,129,0.12)', color:'#059669', border:'rgba(16,185,129,0.3)' },
+  R2: { bg:'rgba(16,185,129,0.12)', color:'#059669', border:'rgba(16,185,129,0.3)' },
+  R3: { bg:'rgba(45,31,43,0.06)',   color:'#2D1F2B', border:'rgba(45,31,43,0.15)' },
+  R4: { bg:'rgba(239,68,68,0.08)',  color:'#EF4444', border:'rgba(239,68,68,0.2)'  },
+  R5: { bg:'rgba(239,68,68,0.08)',  color:'#EF4444', border:'rgba(239,68,68,0.2)'  },
+};
+
+export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, benchmarks = [], bmRets, ips, overlapData, histVar, histVarLoading }) {
   const [lookthrough, setLookthrough] = useState(null);
   const [ltLoading, setLtLoading] = useState(false);
   const [ltError, setLtError] = useState(null);
@@ -165,6 +173,10 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
   }
 
   const bm = bmRets || {};
+
+  // Dynamic section numbering — hidden sections don't count
+  let _sec = 0;
+  const sn = () => ++_sec;
   const cyKeys = ['cy2021', 'cy2022', 'cy2023', 'cy2024', 'cy2025'];
   const cyBmKeys = ['cy21', 'cy22', 'cy23', 'cy24', 'cy25'];
   const cyLbls = ['2021', '2022', '2023', '2024', '2025'];
@@ -188,12 +200,12 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
   return (
     <div>
       {/* Section 1: Overview */}
-      <SectionH n={1} title="Composition overview" sub="What this portfolio actually holds — funds, categories, weights and one-year performance at a glance." />
+      <SectionH n={sn()} title="Composition overview" sub="What this portfolio actually holds — funds, categories, weights and one-year performance at a glance." />
       <div className="ptf-card" style={{ marginBottom: 14 }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr>
-              {['Fund', 'Category', 'Weight', '1Y return', 'Rating'].map((h, i) => (
+              {['Fund', 'Category', 'Weight', '1Y return', 'BR Rank'].map((h, i) => (
                 <th key={i} style={{
                   textAlign: i === 0 || i === 1 ? 'left' : 'center',
                   padding: '8px 12px',
@@ -209,7 +221,7 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
                 const w = weights[f.isin] || 0;
                 const snap = snapshots[f.isin] || {};
                 const r1y = snap.returns?.['1y'];
-                const rating = parseInt(snap.rating || snap.br_rating || 0, 10);
+                const ranking = snap?.ranking || "-";
                 return (
                   <tr key={f.isin} style={{ borderBottom: '1px solid var(--border)' }}>
                     <td style={{ padding: '7px 10px' }}>
@@ -222,11 +234,15 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
                       {r1y != null ? fp(r1y) : '—'}
                     </td>
                     <td style={{ padding: '7px 10px', textAlign: 'center' }}>
-                      {rating > 0 ? (
-                        <span style={{ color: '#B46B10', fontSize: 10, letterSpacing: '-1px' }}>
-                          {'★'.repeat(rating)}{'☆'.repeat(5 - rating)}
-                        </span>
-                      ) : '—'}
+                      {ranking && ranking !== '-' && RANK_STYLE[ranking] ? (
+                        <span style={{
+                          display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+                          fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)',
+                          background: RANK_STYLE[ranking].bg,
+                          color: RANK_STYLE[ranking].color,
+                          border: '1px solid ' + RANK_STYLE[ranking].border,
+                        }}>{ranking}</span>
+                      ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
                   </tr>
                 );
@@ -237,7 +253,7 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
       </div>
 
       {/* Section 2: Performance */}
-      <SectionH n={2} title="Performance" sub="Point-to-point returns and year-by-year performance relative to the benchmark." />
+      <SectionH n={sn()} title="Performance" sub="Point-to-point returns and year-by-year performance relative to the benchmark." />
       <div className="ptf-card" style={{ marginBottom: 14, padding: '4px 16px' }}>
         {periods.map((p) => {
           const v = B[p.k];
@@ -260,7 +276,7 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
                 </div>
                 {diff != null && (
                   <div style={{ fontSize: 9, color: diff >= 0 ? 'var(--pos)' : 'var(--neg)', marginTop: 2 }}>
-                    {diff >= 0 ? '+' : ''}{diff.toFixed(1)}pp vs bm
+                    {diff >= 0 ? '+' : ''}{diff.toFixed(1)}% vs bm
                   </div>
                 )}
               </div>
@@ -272,10 +288,23 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
             Beat benchmark in <strong>{cyBeat}</strong> of <strong>{cyTotal}</strong> calendar years.
           </div>
         )}
+        {benchmarks && benchmarks.length > 0 && (
+          <div style={{ fontSize: 10.5, color: 'var(--text-muted)', padding: '6px 0 4px', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>
+            Benchmark: {benchmarks.length === 1
+              ? benchmarks[0].display_name
+              : benchmarks.map(b => `${b.display_name} (${b.weight}%)`).join(' + ')}
+            {benchmarks.length > 1 && ' — blended weighted by IPS allocation'}
+          </div>
+        )}
+        {(!benchmarks || benchmarks.length === 0) && (
+          <div style={{ fontSize: 10.5, color: 'var(--text-muted)', padding: '6px 0 4px', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>
+            No benchmark set — configure in Client &amp; IPS → Section E.
+          </div>
+        )}
       </div>
 
       {/* Section 3: Risk */}
-      <SectionH n={3} title="Risk metrics" sub="Volatility, risk-adjusted returns, drawdown potential and distribution shape — everything in one place." />
+      <SectionH n={sn()} title="Risk metrics" sub="Volatility, risk-adjusted returns, drawdown potential and distribution shape — everything in one place." />
       <div className="ptf-card" style={{ marginBottom: 14, padding: '4px 16px' }}>
         <MetricRow label="Volatility (3Y annualised)" plainDesc="How much the portfolio's value swings around from year to year — higher means bumpier." value={B.std_dev_3y != null ? f2(B.std_dev_3y) + '%' : '—'} />
         <MetricRow label="Sharpe ratio (3Y)" plainDesc="Return per unit of risk. Above 1.0 is genuinely good; below 0.5 means returns aren't compensating for the risk." value={f2(B.sharpe_ratio_3y)} verdict={B.sharpe_ratio_3y != null ? (B.sharpe_ratio_3y >= 0.8 ? 'Strong' : B.sharpe_ratio_3y >= 0.5 ? 'Adequate' : 'Weak') : null} verdictColor={B.sharpe_ratio_3y != null ? (B.sharpe_ratio_3y >= 0.5 ? 'var(--pos)' : 'var(--neg)') : null} />
@@ -284,15 +313,25 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
         <MetricRow label="Alpha (3Y, vs. benchmark)" plainDesc="Extra return (or shortfall) after adjusting for risk — the value a manager genuinely added." value={fp(B.alpha_3y)} verdict={B.alpha_3y != null ? (B.alpha_3y >= 0 ? 'Outperforming' : 'Lagging') : null} verdictColor={B.alpha_3y != null ? (B.alpha_3y >= 0 ? 'var(--pos)' : 'var(--neg)') : null} />
         <MetricRow label="Upside / downside capture" plainDesc="% of the market's gain (or fall) the portfolio experiences. Below 100% on the downside is genuinely valuable." value={(B.up_capture_3y != null && B.down_capture_3y != null) ? `${f2(B.up_capture_3y)}% / ${f2(B.down_capture_3y)}%` : '—'} verdict={B.down_capture_3y != null ? (B.down_capture_3y <= 100 ? 'Protected' : 'Exposed') : null} verdictColor={B.down_capture_3y != null ? (B.down_capture_3y <= 100 ? 'var(--pos)' : 'var(--neg)') : null} />
         <div style={{ padding: '12px 0 8px', borderTop: '1px solid var(--border)', marginTop: 8, fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-mid, #A795AE)' }}>
-          Drawdown & tail risk (estimated from volatility)
+          Drawdown & tail risk {histVar ? '(CVaR/ES from historical simulation)' : '(estimated from volatility)'}
         </div>
         {adv ? (
           <>
             <MetricRow label="Maximum drawdown (est.)" plainDesc="The largest peak-to-trough decline this portfolio could plausibly have seen." value={adv.maxDD.toFixed(1) + '%'} />
             <MetricRow label="Ulcer Index (est.)" plainDesc="Captures both how deep AND how long a drawdown runs — a more complete stress measure than drawdown alone." value={adv.ulcer.toFixed(1) + '%'} />
             <MetricRow label="Recovery period (est.)" plainDesc="Estimated months to climb back to the previous peak after a drawdown." value={Math.round(adv.recoveryMonths) + ' months'} />
-            <MetricRow label="CVaR 95% (est.)" plainDesc="If a month is bad, how bad on average — more informative than a single cutoff." value={adv.cvar95.toFixed(1) + '%'} />
-            <MetricRow label="Expected Shortfall 99% (est.)" plainDesc="The same idea as CVaR, at a more conservative 99% confidence level." value={adv.es99.toFixed(1) + '%'} />
+            {(() => {
+              const hMonth = histVar?.var?.find(r => r.horizon === '1 month');
+              const hYear  = histVar?.var?.find(r => r.horizon === '1 year');
+              const cvar95Val = hMonth?.es_95 != null ? hMonth.es_95.toFixed(1) + '% (1M, historical)' : adv.cvar95.toFixed(1) + '% (est.)';
+              const es99Val   = hYear?.es_99  != null ? hYear.es_99.toFixed(1)  + '% (1Y, historical)' : adv.es99.toFixed(1)   + '% (est.)';
+              const cvar95Lbl = hMonth?.es_95 != null ? 'CVaR 95%' : 'CVaR 95% (est.)';
+              const es99Lbl   = hYear?.es_99  != null ? 'Expected Shortfall 99%' : 'Expected Shortfall 99% (est.)';
+              return <>
+                <MetricRow label={cvar95Lbl} plainDesc="If a month is bad, how bad on average — more informative than a single cutoff." value={histVarLoading ? 'Loading…' : cvar95Val} />
+                <MetricRow label={es99Lbl} plainDesc="The same idea as CVaR, at a more conservative 99% confidence level." value={histVarLoading ? 'Loading…' : es99Val} />
+              </>;
+            })()}
             <MetricRow label="Probability of loss, per month" plainDesc="Estimated chance of a negative return in any given month." value={adv.probLoss.toFixed(0) + '%'} />
             <MetricRow label="Worst 3 months / 6 months (est.)" plainDesc="A statistically plausible worst stretch at 95% confidence." value={adv.worst3m.toFixed(1) + '% / ' + adv.worst6m.toFixed(1) + '%'} />
             <MetricRow label="Worst 1 year (actual)" plainDesc="The real lowest calendar-year return on file — the one figure here drawn from history." value={adv.worst1y != null ? adv.worst1y.toFixed(1) + '%' : '—'} verdictColor={adv.worst1y != null ? (adv.worst1y >= 0 ? 'var(--pos)' : 'var(--neg)') : null} />
@@ -303,7 +342,7 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
       </div>
 
       {/* Section 4: Diversification */}
-      <SectionH n={4} title="Diversification & concentration" sub="Where the money actually sits once you look through the fund wrappers to the underlying companies." />
+      <SectionH n={sn()} title="Diversification & concentration" sub="Where the money actually sits once you look through the fund wrappers to the underlying companies." />
       <div className="ptf-card" style={{ marginBottom: 14, padding: '4px 16px' }}>
         <MetricRow label="Average overlap between any two holdings" plainDesc="How much any two funds' top holdings duplicate each other, on average. High overlap means paying two sets of fees for a similar bet." value={avgOverlap != null ? avgOverlap.toFixed(1) + '%' : '—'} verdict={avgOverlap != null ? (avgOverlap >= 15 ? 'Elevated' : 'Healthy') : null} verdictColor={avgOverlap != null ? (avgOverlap >= 15 ? '#D97706' : 'var(--pos)') : null} />
         <MetricRow label="Highest overlapping pair" plainDesc={highestPair ? `Between two funds in this portfolio` : ''} value={highestPair ? highestPair.overlap_pct.toFixed(0) + '%' : '—'} verdict={highestPair ? (highestPair.overlap_pct >= 25 ? 'Review' : 'Fine') : null} verdictColor={highestPair ? (highestPair.overlap_pct >= 25 ? 'var(--neg)' : 'var(--pos)') : null} />
@@ -358,8 +397,11 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
         </div>
       )}
 
+      {/* Section 5: Style & mandate — hidden until data available, re-enable by removing false && */}
+      {false && (
+      <>
       {/* Section 5: Style & mandate */}
-      <SectionH n={5} title="Style & mandate alignment" sub="Whether each fund's actual cap mix still matches what its category label promises." />
+      <SectionH n={sn()} title="Style & mandate alignment" sub="Whether each fund's actual cap mix still matches what its category label promises." />
       {driftRows.length > 0 ? (
         <div className="ptf-card" style={{ marginBottom: 14 }}>
           <div style={{ overflowX: 'auto' }}>
@@ -389,8 +431,10 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
         <div style={{ padding: 10, color: 'var(--text-muted)', fontSize: 11.5, marginBottom: 14 }}>No holdings with a defined category norm to check.</div>
       )}
 
+      </>
+      )}
       {/* Section 6: Stress testing */}
-      <SectionH n={6} title="Stress testing" sub={`Estimated impact on this portfolio under historical shocks, scaled to its actual equity weight (${eqShare.toFixed(0)}%).`} />
+      <SectionH n={sn()} title="Stress testing" sub={`Estimated impact on this portfolio under historical shocks, scaled to its actual equity weight (${eqShare.toFixed(0)}%).`} />
       <div className="ptf-card" style={{ marginBottom: 14 }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -412,8 +456,11 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
         </div>
       </div>
 
+      {/* Section 7: Compliance — hidden until ready */}
+      {false && (
+      <>
       {/* Section 7: Compliance */}
-      <SectionH n={7} title="Compliance" sub="Whether the portfolio, as it stands today, still sits inside the boundaries agreed with the client." />
+      <SectionH n={sn()} title="Compliance" sub="Whether the portfolio, as it stands today, still sits inside the boundaries agreed with the client." />
       {ips?.name || ips?.goal ? (
         ipsIssues.length > 0 ? (
           <div style={{
@@ -444,6 +491,8 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
         <div style={{ padding: 10, color: 'var(--text-muted)', fontSize: 11.5, marginBottom: 14 }}>No IPS on file for this portfolio yet.</div>
       )}
 
+      </>
+      )}
       {/* Footer note */}
       <div style={{
         marginTop: 22,

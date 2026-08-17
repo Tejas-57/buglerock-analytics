@@ -114,6 +114,29 @@ export default function PortfolioBuilder({ selectedDate }) {
       return next;
     });
   }, []);
+  // Fetch snapshots for all funds — runs on any step, including after hard refresh.
+  // This ensures Analyse/X-Ray always have data regardless of which step the user lands on.
+  useEffect(() => {
+    if (!funds.length || !selectedDate) return;
+    const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().slice(0,10) : selectedDate;
+    if (!dateStr) return;
+    const API = process.env.REACT_APP_API_URL || '';
+    const missing = funds.filter(f => !snapshots[f.isin]);
+    if (!missing.length) return;
+    Promise.allSettled(
+      missing.map(f =>
+        fetch(`${API}/api/home/snapshot?isin=${f.isin}&date=${dateStr}`)
+          .then(r => r.ok ? r.json() : null).catch(() => null)
+      )
+    ).then(results => {
+      const map = { ...snapshots };
+      missing.forEach((f, i) => {
+        if (results[i].status === 'fulfilled' && results[i].value) map[f.isin] = results[i].value;
+      });
+      setSnapshots(map);
+    });
+  }, [funds.map(f => f.isin).join(','), selectedDate]);
+
   // Sync funds/weights to localStorage
   useEffect(() => { save('br_ptf_funds', funds); }, [funds]);
   useEffect(() => {
@@ -232,6 +255,11 @@ export default function PortfolioBuilder({ selectedDate }) {
               onEdit={() => setActiveStep(2)}
               onOptimise={() => { markDone(3); setActiveStep(4); }}
               onDataUpdate={setAnalyseData}
+              setWeights={setWeights}
+              setFunds={setFunds}
+              setSnapshots={setSnapshots}
+              selectedDate={selectedDate}
+              onBackToBuild={() => setActiveStep(2)}
             />
           )}
           {activeStep === 4 && (

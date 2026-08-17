@@ -4,11 +4,311 @@ Fund holdings endpoints — backed by Morningstar NewPortfolioApi data.
 """
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
+import logging
+import math
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
+
+@router.get("/historical-var")
+def get_historical_var(
+    isins: str = Query(...),
+    weights: str = Query(...),
+    categories: str = Query(""),
+    asset_classes: str = Query(""),
+    std_devs: str = Query(""),
+    lookback_days: int = Query(9999),
+):
+    """
+    Hybrid Historical + Parametric VaR for a portfolio.
+
+    Default lookback: full history (9999 = all available NAV data in nav_history).
+    Pass lookback_days=756 explicitly to limit to 3Y window.
+
+    Per-fund classification per horizon:
+      >= 252 days NAV  → historical for 1D/1W/1M horizons
+      >= 504 days NAV  → historical for 1Y horizon
+      < 252 days       → parametric normal distribution for all horizons
+      252-503 days     → historical for 1D/1W/1M, parametric for 1Y
+
+    Parametric std_dev proxy chain (when fund has insufficient history):
+      1. Fund own std_dev_3y from Morningstar snapshot
+      2. Category avg std_dev_3y from daily_fund_data (covers 99%+ of cases)
+      3. Asset class avg std_dev_3y (new category with no peers having 3Y data)
+      4. Hardcoded default — safety net, almost never fires
+         (Equity 18%, Debt 4%, Hybrid 10%, ETF-Equity 15%, ETF-Debt 5%,
+          International 20%, Precious Metals 22%)
+    """
+    from sqlalchemy import text
+    from models.database import engine
+    from collections import defaultdict
+
+    isin_list   = [i.strip() for i in isins.split(",") if i.strip()]
+    weight_list = [float(w.strip()) for w in weights.split(",") if w.strip()]
+    cat_list    = [c.strip() for c in categories.split(",")] if categories else [""] * len(isin_list)
+    ac_list     = [a.strip() for a in asset_classes.split(",")] if asset_classes else [""] * len(isin_list)
+    sd_list     = [float(s.strip()) if s.strip() and s.strip() not in ("-1","","-") else None
+                   for s in std_devs.split(",")] if std_devs else [None] * len(isin_list)
+
+    if len(isin_list) != len(weight_list):
+        raise HTTPException(400, "ISINs and weights must have same length")
+
+    total_w = sum(weight_list)
+    if abs(total_w - 100) > 1:
+        raise HTTPException(400, f"Weights must sum to ~100, got {total_w}")
+
+    w_frac = [w / 100.0 for w in weight_list]
+
+    AC_DEFAULTS = {
+        "equity": 18.0, "debt": 4.0, "hybrid": 10.0,
+        "etf - equity": 15.0, "etf - debt": 5.0,
+        "international": 20.0, "precious metals": 22.0,
+    }
+
+    # ── Fetch NAV history + category/AC std_dev averages ────────────────────
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT isin, date, nav FROM nav_history
+            WHERE isin = ANY(:isins) AND nav IS NOT NULL AND nav > 0
+            ORDER BY isin, date
+        """), {"isins": isin_list}).fetchall()
+
+        latest_date = conn.execute(text(
+            "SELECT MAX(data_date) FROM daily_fund_data WHERE is_benchmark = 0 OR is_benchmark IS NULL"
+        )).scalar()
+
+        cat_avgs = {r[0]: float(r[1]) for r in conn.execute(text("""
+            SELECT category, AVG(std_dev_3y) FROM daily_fund_data
+            WHERE data_date = :d AND std_dev_3y IS NOT NULL AND std_dev_3y > 0
+              AND (is_benchmark = 0 OR is_benchmark IS NULL)
+            GROUP BY category
+        """), {"d": latest_date}).fetchall() if r[0]}
+
+        ac_avgs = {r[0]: float(r[1]) for r in conn.execute(text("""
+            SELECT asset_class, AVG(std_dev_3y) FROM daily_fund_data
+            WHERE data_date = :d AND std_dev_3y IS NOT NULL AND std_dev_3y > 0
+              AND (is_benchmark = 0 OR is_benchmark IS NULL)
+            GROUP BY asset_class
+        """), {"d": latest_date}).fetchall() if r[0]}
+
+    # ── Build per-fund NAV return series ────────────────────────────────────
+    nav_series = defaultdict(list)
+    for row in rows:
+        nav_series[row[0]].append((row[1], row[2]))
+
+    fund_meta    = {}
+    fund_returns = {}  # {isin: [(date, return), ...] sorted ascending}
+    MAX_GAP = 7
+
+    for isin, series in nav_series.items():
+        series.sort(key=lambda x: x[0])
+        ret_list = []
+        gap_detected = False
+        for i in range(1, len(series)):
+            pd_, pn = series[i-1]
+            cd_, cn = series[i]
+            if (cd_ - pd_).days > MAX_GAP:
+                gap_detected = True
+                continue
+            if pn > 0:
+                ret_list.append((cd_, (cn / pn) - 1))
+        fund_meta[isin] = {
+            "total_days":   len(series),
+            "return_days":  len(ret_list),
+            "gap_detected": gap_detected,
+            "first_date":   str(series[0][0])  if series else None,
+            "last_date":    str(series[-1][0]) if series else None,
+        }
+        fund_returns[isin] = ret_list  # list of (date, ret) sorted asc
+
+    # ── Classify each fund ───────────────────────────────────────────────────
+    def get_std_proxy(idx, isin):
+        own = sd_list[idx] if idx < len(sd_list) else None
+        if own and own > 0:
+            return own, "fund_std_dev_3y"
+        cat = cat_list[idx] if idx < len(cat_list) else ""
+        if cat and cat in cat_avgs:
+            return cat_avgs[cat], "category_avg"
+        ac = ac_list[idx] if idx < len(ac_list) else ""
+        if ac and ac in ac_avgs:
+            return ac_avgs[ac], "asset_class_avg"
+        for k, v in AC_DEFAULTS.items():
+            if k in ac.lower():
+                return v, "hardcoded_default"
+        return 15.0, "hardcoded_default"
+
+    HORIZONS = [
+        {"label": "1 day",   "days": 1,   "min_returns": 252},
+        {"label": "1 week",  "days": 5,   "min_returns": 252},
+        {"label": "1 month", "days": 21,  "min_returns": 252},
+        {"label": "1 year",  "days": 252, "min_returns": 504},
+    ]
+
+    # Normal distribution critical values
+    T95, T99, ES95M, ES99M = 1.6449, 2.3263, 2.063, 2.665
+
+    # ── Compute VaR per horizon ──────────────────────────────────────────────
+    var_table   = []
+    hist_notes  = []
+    param_notes = []
+    fund_std_proxies = {}
+
+    for h in HORIZONS:
+        h_label  = h["label"]
+        h_days   = h["days"]
+        min_ret  = h["min_returns"]
+
+        # For each fund: decide historical or parametric for THIS horizon
+        hist_isins_h  = []
+        param_isins_h = []
+
+        for idx, isin in enumerate(isin_list):
+            rdays = fund_meta.get(isin, {}).get("return_days", 0)
+            gap   = fund_meta.get(isin, {}).get("gap_detected", False)
+            if rdays >= min_ret and not gap and isin in fund_returns:
+                hist_isins_h.append((idx, isin))
+            else:
+                param_isins_h.append((idx, isin))
+                if isin not in fund_std_proxies:
+                    std, src = get_std_proxy(idx, isin)
+                    fund_std_proxies[isin] = {"std": std, "source": src}
+
+        hist_w_sum = sum(weight_list[idx] for idx, _ in hist_isins_h)
+
+        # ── Historical contribution ──────────────────────────────────────────
+        hvar95_1d = hes95_1d = hvar99_1d = hes99_1d = 0.0
+        common_days_h = 0
+        date_from_h = date_to_h = None
+
+        if hist_isins_h and hist_w_sum > 0:
+            hist_w_norm = {isin: weight_list[idx] / hist_w_sum
+                           for idx, isin in hist_isins_h}
+
+            # Build overlapping h_days-period returns
+            # Use date-indexed dict for each fund, slice to lookback
+            ret_dicts = {}
+            for idx, isin in hist_isins_h:
+                ret_list = fund_returns[isin]
+                if lookback_days < 9999:
+                    ret_list = ret_list[-lookback_days:]
+                ret_dicts[isin] = {d: r for d, r in ret_list}
+
+            # Common dates across hist funds for this horizon
+            date_sets = [set(ret_dicts[isin].keys()) for _, isin in hist_isins_h]
+            common = sorted(date_sets[0].intersection(*date_sets[1:]))
+
+            if len(common) >= h_days + 1:
+                # Overlapping period returns
+                # For 1D: just use daily returns directly
+                # For 1W/1M/1Y: compute product of returns over h_days window
+                period_rets = []
+                for i in range(h_days - 1, len(common)):
+                    window = common[i - h_days + 1: i + 1]
+                    if len(window) < h_days:
+                        continue
+                    # Weighted portfolio return over this window
+                    port_ret = 0.0
+                    for _, isin in hist_isins_h:
+                        # Compound daily returns over window
+                        compound = 1.0
+                        for d in window:
+                            compound *= (1 + ret_dicts[isin].get(d, 0))
+                        port_ret += (compound - 1) * hist_w_norm[isin]
+                    period_rets.append(port_ret)
+
+                if period_rets:
+                    period_rets.sort()
+                    n = len(period_rets)
+                    tidx95 = max(int(math.floor(n * 0.05)), 1)
+                    tidx99 = max(int(math.floor(n * 0.01)), 1)
+
+                    hvar95_raw = -period_rets[tidx95 - 1] * 100
+                    hes95_raw  = -sum(period_rets[:tidx95]) / tidx95 * 100
+                    hvar99_raw = -period_rets[tidx99 - 1] * 100
+                    hes99_raw  = -sum(period_rets[:tidx99]) / tidx99 * 100
+
+                    # Scale back to 1D equivalent then re-scale (for consistency)
+                    # Actually use raw period return directly — no sqrt scaling needed
+                    # since we computed actual h_days period returns
+                    hvar95_1d = hvar95_raw
+                    hes95_1d  = hes95_raw
+                    hvar99_1d = hvar99_raw
+                    hes99_1d  = hes99_raw
+
+                    # Scale by hist weight fraction
+                    scale_h = hist_w_sum / 100.0
+                    hvar95_1d *= scale_h
+                    hes95_1d  *= scale_h
+                    hvar99_1d *= scale_h
+                    hes99_1d  *= scale_h
+
+                    common_days_h = n
+                    date_from_h = str(common[0])
+                    date_to_h   = str(common[-1])
+
+        # ── Parametric contribution ──────────────────────────────────────────
+        pvar95 = pes95 = pvar99 = pes99 = 0.0
+        for idx, isin in param_isins_h:
+            pw = w_frac[idx]
+            if isin not in fund_std_proxies:
+                std, src = get_std_proxy(idx, isin)
+                fund_std_proxies[isin] = {"std": std, "source": src}
+            std_ann = fund_std_proxies[isin]["std"]
+            # Scale annualised std to h_days period
+            std_period = std_ann * math.sqrt(h_days / 252.0)
+            pvar95 += pw * T95  * std_period
+            pes95  += pw * ES95M * std_period
+            pvar99 += pw * T99  * std_period
+            pes99  += pw * ES99M * std_period
+
+        var_table.append({
+            "horizon":     h_label,
+            "days":        h_days,
+            "var_95":      round(hvar95_1d + pvar95, 4),
+            "es_95":       round(hes95_1d  + pes95,  4),
+            "var_99":      round(hvar99_1d + pvar99, 4),
+            "es_99":       round(hes99_1d  + pes99,  4),
+            "hist_funds":  len(hist_isins_h),
+            "param_funds": len(param_isins_h),
+            "common_days": common_days_h,
+            "date_from":   date_from_h,
+            "date_to":     date_to_h,
+        })
+
+    # ── Build notes ──────────────────────────────────────────────────────────
+    for idx, isin in enumerate(isin_list):
+        rd  = fund_meta.get(isin, {}).get("return_days", 0)
+        gap = fund_meta.get(isin, {}).get("gap_detected", False)
+        if 252 <= rd < 504:
+            # Historical for 1D/1W/1M but parametric for 1Y — note it
+            hist_notes.append(f"{isin} ({rd} days — full history used for 1D/1W/1M; parametric for 1Y)")
+        elif rd < 252 or gap:
+            src = fund_std_proxies.get(isin, {}).get("source", "unknown")
+            std = fund_std_proxies.get(isin, {}).get("std", 0)
+            param_notes.append(f"{isin} ({rd} days NAV — parametric normal, std={std:.1f}%, source={src})")
+
+    # Build fund lists for response
+    historical_funds = [isin for isin in isin_list
+                        if fund_meta.get(isin, {}).get("return_days", 0) >= 252
+                        and not fund_meta.get(isin, {}).get("gap_detected", False)]
+    parametric_funds = [isin for isin in isin_list
+                        if fund_meta.get(isin, {}).get("return_days", 0) < 252
+                        or fund_meta.get(isin, {}).get("gap_detected", False)]
+    is_hybrid = len(parametric_funds) > 0
+
+    return {
+        "method":           "hybrid" if is_hybrid else "historical_simulation",
+        "var":              var_table,
+        "fund_meta":        {isin: fund_meta.get(isin, {}) for isin in isin_list},
+        "fund_std_proxies": fund_std_proxies,
+        "historical_funds": historical_funds,
+        "parametric_funds": parametric_funds,
+        "hist_notes":       hist_notes,
+        "param_notes":      param_notes,
+    }
 
 @router.get("/overlap")
 def get_overlap(isins: str, portfolio_date: Optional[str] = None):

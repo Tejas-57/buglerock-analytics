@@ -3,20 +3,23 @@ import { fp, f2 } from './BuildPortfolio';
 import AIDoctor from './analyseTabs/AIDoctor.jsx';
 import PortfolioXRay from './analyseTabs/PortfolioXRay.jsx';
 
+const API = process.env.REACT_APP_API_URL || '';
+
 const TABS = [
-  { id: 'doctor', label: '🩺 AI Doctor' },
-  { id: 'xray', label: '🩻 Portfolio X-Ray' },
+  { id: 'doctor',   label: 'AI Doctor',             hidden: true },
+  { id: 'xray',     label: 'Portfolio X-Ray',        sep_after: true },
   { id: 'overview', label: 'Overview' },
-  { id: 'returns', label: 'Returns & projections' },
-  { id: 'risk', label: 'Risk metrics' },
-  { id: 'exposure', label: 'Exposure' },
+  { id: 'returns',  label: 'Returns & projections' },
+  { id: 'risk',     label: 'Risk metrics',           sep_after: true },
   { id: 'correlation', label: 'Correlation' },
-  { id: 'overlap', label: 'Overlap' },
-  { id: 'rolling', label: 'Rolling returns' },
-  { id: 'stress', label: 'Stress test' },
-  { id: 'drift', label: 'Style & drift' },
-  { id: 'funds', label: 'Fund details' },
-];
+  { id: 'overlap',  label: 'Overlap' },
+  { id: 'rolling',  label: 'Rolling returns' },
+  { id: 'drift',    label: 'Style & drift',          sep_after: true },
+  { id: 'stress',   label: 'Stress test' },
+  { id: 'sensitivity', label: 'Sensitivity' },
+  { id: 'whatif',   label: 'What-If',               sep_after: true },
+  { id: 'funds',    label: 'Fund details' },
+].filter(t => !t.hidden);
 
 function blendFromSnaps(funds, weights, snapshots) {
   // Same approach as Watchlist — use snapshot data
@@ -155,8 +158,44 @@ function corrColor(v) {
 
 function fmtL(v) { return v >= 100000 ? '₹' + (v / 100000).toFixed(2) + 'L' : '₹' + (v / 1000).toFixed(1) + 'K'; }
 
-export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], ips, onEdit, onOptimise, onDataUpdate }) {
-  const [activeTab, setActiveTab] = useState('doctor');
+export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], ips, onEdit, onOptimise, onDataUpdate, setWeights, setFunds, setSnapshots, selectedDate, onBackToBuild }) {
+  const [activeTab, setActiveTab] = useState('xray');
+
+  // Sensitivity tab sliders
+  const [sensMarket, setSensMarket] = useState(0);
+  const [histVar, setHistVar] = useState(null);
+  const [histVarLoading, setHistVarLoading] = useState(false);
+
+  // Fetch histVar when sensitivity or xray tab is active
+  React.useEffect(() => {
+    if ((activeTab !== 'sensitivity' && activeTab !== 'xray') || histVar || histVarLoading || !funds.length) return;
+    const isins = funds.map(f=>f.isin).join(',');
+    const ws    = funds.map(f=>weights[f.isin]||0).join(',');
+    const cats  = funds.map(f=>snapshots[f.isin]?.category||'').join(',');
+    const acs   = funds.map(f=>snapshots[f.isin]?.asset_class||'').join(',');
+    const sds   = funds.map(f=>{ const s=snapshots[f.isin]?.risk?.std_dev_3y; const v=s&&s!=='-'?parseFloat(s):-1; return isNaN(v)?-1:v; }).join(',');
+    const url = API+'/api/holdings/historical-var'
+      +'?isins='+encodeURIComponent(isins)
+      +'&weights='+encodeURIComponent(ws)
+      +'&categories='+encodeURIComponent(cats)
+      +'&asset_classes='+encodeURIComponent(acs)
+      +'&std_devs='+encodeURIComponent(sds);
+    setHistVarLoading(true);
+    fetch(url)
+      .then(r=>r.json()).then(d=>{ setHistVar(d); setHistVarLoading(false); })
+      .catch(()=>setHistVarLoading(false));
+  }, [activeTab, funds.map(f=>f.isin).join(','), Object.keys(snapshots).length]);
+  const [sensRate, setSensRate] = useState(0);
+
+  // What-If tab state
+  const [wiFromIsin, setWiFromIsin] = useState('');
+  const [wiToIsin, setWiToIsin] = useState('');
+  const [wiShift, setWiShift] = useState(0);
+  const [wiLump, setWiLump] = useState(10000000);   // 1 crore default (or IPS amount)
+  const [wiSip, setWiSip] = useState(100000);        // 1 lakh default
+  const [wiYears, setWiYears] = useState(10);
+  const [wiInflation, setWiInflation] = useState(6);
+  const [wiTarget, setWiTarget] = useState(50000000);
 
   // ── Overlap state & helpers ─────────────────────────────────────────────
   const [overlapData, setOverlapData] = useState(null);
@@ -368,6 +407,20 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
   const sipAmt = ips?.monthlySIP ? parseFloat(ips.monthlySIP.replace(/[^0-9.]/g, '')) : 10000;
 
   function sipFV(m, r, y) { const mo = r / 100 / 12; if (mo === 0) return m * 12 * y; return m * ((Math.pow(1 + mo, 12 * y) - 1) / mo) * (1 + mo); }
+
+  // Asset class classification helpers — used in Sensitivity and What-If tabs
+  function isEquityLike(fsnap, f) {
+    const ac = (fsnap?.asset_class || f?.asset_class || '').toLowerCase();
+    return ac.includes('equity') || ac.includes('etf') || ac.includes('index') || ac.includes('international');
+  }
+  function isDebtLike(fsnap, f) {
+    const ac = (fsnap?.asset_class || f?.asset_class || '').toLowerCase();
+    return ac.includes('debt');
+  }
+  function isHybrid(fsnap, f) {
+    const ac = (fsnap?.asset_class || f?.asset_class || '').toLowerCase();
+    return ac.includes('hybrid') || ac.includes('balanced') || ac.includes('allocation') || ac.includes('conservative') || ac.includes('aggressive');
+  }
 
   const RISK_METRICS = [
     { k: 'sharpe_ratio_3y',  l: 'Sharpe (3Y)',  good: 0.6,  lb: false, fmt: v => f2(v),        sig: v => v > 0.7 ? ['Strong','pos'] : v > 0.4 ? ['Adequate','warn'] : ['Weak','neg'] },
@@ -584,8 +637,13 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       {/* Tab bar */}
       <div className="ptf-tab-bar">
-        {TABS.map(t => (
-          <button key={t.id} className={`ptf-tab ${activeTab === t.id ? 'active' : ''}`} onClick={() => setActiveTab(t.id)}>{t.label}</button>
+        {TABS.map((t, i) => (
+          <React.Fragment key={t.id}>
+            <button className={`ptf-tab ${activeTab === t.id ? 'active' : ''}`} onClick={() => setActiveTab(t.id)}>{t.label}</button>
+            {t.sep_after && i < TABS.length - 1 && (
+              <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)', margin: '6px 4px', flexShrink: 0 }} />
+            )}
+          </React.Fragment>
         ))}
         <div className="ptf-tab-actions">
           {activeTab === 'overlap' && overlapData && (
@@ -622,6 +680,8 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
             bmRets={bm?.rets}
             ips={ips}
             overlapData={overlapData}
+            histVar={histVar}
+            histVarLoading={histVarLoading}
           />
         )}
 
@@ -996,6 +1056,615 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
             {/* Risk alerts */}
           </div>
         )}
+
+        {/* ── SENSITIVITY ── */}
+        {activeTab === 'sensitivity' && (() => {
+          const BERRY='#912F63', PLUM='#3E3452', MUT='#6D5479', GR60='#A2A0A0', GR80='#374151', GR20='#E8E5EC', GR10='#F8F6FA', POS='#1A7A52', NEG='#B91C1C', WARN='#D97706', LAV='#A795AE';
+
+          if (!funds.length) {
+            return <div style={{ padding:40, textAlign:'center', color:GR60 }}><div style={{ fontSize:32, opacity:.2, marginBottom:12 }}>⚖</div><div style={{ fontFamily:'var(--font-serif)', fontSize:17, color:PLUM, marginBottom:6 }}>Add funds to the portfolio</div><div style={{ fontSize:13 }}>Sensitivity analysis needs at least one fund in the portfolio.</div></div>;
+          }
+
+          const DURATION_MAP = {
+            // Pure debt — standard categories
+            'Overnight':0.01, 'Liquid':0.16, 'Ultra Short Duration':0.44,
+            'Money Market':0.52, 'Floating Rate':2.23, 'Low Duration':0.88,
+            'Short Duration':2.4, 'Banking & PSU':2.5, 'Corporate Bond':2.7,
+            'Medium Duration':3.25, 'Credit Risk':2.02, 'Fund of Funds':3.05,
+            'Dynamic Bond':5.03, 'Medium to Long Duration':5.76,
+            'Government Bond':8.39, '10 yr Government Bond':6.88,
+            'Long Duration':10.64, 'Gilt':8,
+            // ETF debt — use avg of present where available, else by mandate
+            'ETF Government Bond':5.42, 'ETF 10 yr Government Bond':7,
+            'ETF Long Duration':4.4, 'ETF Medium to Long Duration':3.28,
+            'Index Funds - Fixed Income':1.92,
+            // Hybrid — arbitrage is near-cash, others by avg of present
+            'Arbitrage':0.42, 'Arbitrage Fund':0.42,
+            'Conservative Allocation':3.19, 'Balanced Allocation':3.36,
+            'Aggressive Allocation':2.74, 'Dynamic Asset Allocation':2.33,
+            'Multi Asset Allocation':1.96, 'Equity Savings':2.2,
+            'Retirement':5.29, 'Children':2.98,
+          };
+
+          // isEquityLike, isDebtLike, isHybrid defined at component level
+          function categoryDuration(cat){
+            if (!cat) return 3;
+            for (const k in DURATION_MAP) if (cat.toLowerCase().includes(k.toLowerCase())) return DURATION_MAP[k];
+            return 3;
+          }
+          function safeFloat(v){ if (v == null || v === '-') return null; const p = parseFloat(v); return isNaN(p) ? null : p; }
+
+          // Build category avg beta from all funds in snapshots (for fallback)
+          const catBetaMap = {};
+          const catBetaCount = {};
+          Object.values(snapshots).forEach(s => {
+            const cat = s?.category;
+            const beta = safeFloat(s?.risk?.beta_3y);
+            if (cat && beta != null && beta > 0) {
+              catBetaMap[cat] = (catBetaMap[cat] || 0) + beta;
+              catBetaCount[cat] = (catBetaCount[cat] || 0) + 1;
+            }
+          });
+          function categoryBeta(cat){
+            if (!cat || !catBetaMap[cat]) return null;
+            return catBetaMap[cat] / catBetaCount[cat];
+          }
+
+          // Accumulate equity sleeve (Equity + Hybrid) and debt sleeve (Debt + Hybrid look-through)
+          let eqW=0, eqBetaSum=0;
+          let debtW=0, debtDurSum=0, debtYtmSum=0, debtYtmW=0;
+
+          funds.forEach(f => {
+            const w = weights[f.isin] || 0;
+            if (!w) return;
+            const fsnap = snapshots[f.isin];
+            const cat   = f.category || fsnap?.category || '';
+
+            // ── Equity sleeve: Equity + ETF + International + Hybrid ─────────
+            if (isEquityLike(fsnap, f) || isHybrid(fsnap, f)) {
+              // Beta: use fund beta, fallback to category avg
+              const betaRaw = safeFloat(fsnap?.risk?.beta_3y);
+              const beta = betaRaw != null ? betaRaw : categoryBeta(cat);
+              if (beta != null) { eqW += w; eqBetaSum += beta * w; }
+            }
+
+            // ── Debt sleeve: Debt funds fully + Hybrid look-through via bond_pct ──
+            if (isDebtLike(fsnap, f)) {
+              // Full weight for pure debt funds
+              const durRaw = safeFloat(fsnap?.modified_duration);
+              const dur = durRaw != null ? durRaw : categoryDuration(cat);
+              debtW += w; debtDurSum += dur * w;
+              const ytm = safeFloat(fsnap?.ytm);
+              if (ytm != null && ytm > 0) { debtYtmSum += ytm * w; debtYtmW += w; }
+
+            } else if (isHybrid(fsnap, f)) {
+              // Look-through for hybrid funds using bond_pct
+              const bondPctRaw = safeFloat(fsnap?.bond_pct);
+              const bondPct = (bondPctRaw != null && bondPctRaw > 0) ? bondPctRaw / 100 : null;
+              if (bondPct != null) {
+                const effectiveDebtW = w * bondPct;
+                const durRaw = safeFloat(fsnap?.modified_duration);
+                const dur = durRaw != null ? durRaw : categoryDuration(cat);
+                debtW += effectiveDebtW; debtDurSum += dur * effectiveDebtW;
+                const ytm = safeFloat(fsnap?.ytm);
+                if (ytm != null && ytm > 0) { debtYtmSum += ytm * effectiveDebtW; debtYtmW += effectiveDebtW; }
+              }
+            }
+          });
+
+          const avgEqBeta   = eqW > 0 ? eqBetaSum / eqW : null;
+          const avgDuration = debtW > 0 ? debtDurSum / debtW : null;
+          // Weighted avg YTM — fallback to 7% if not available
+          const avgYtm = debtYtmW > 0 ? debtYtmSum / debtYtmW / 100 : 0.07;
+          // Convexity = Dmod² + Dmod/(1+y) — correct formula using modified duration + YTM
+          const avgConvexity = avgDuration != null ? (avgDuration * avgDuration) + (avgDuration / (1 + avgYtm)) : null;
+          const baseRet1y = B.return_1y;
+          const annualStd = B.std_dev_3y;
+          const monthlyStd = annualStd != null ? annualStd / Math.sqrt(12) : null;
+
+          let notional = 10000000, notionalIsClient = false;
+          if (ips?.amount) {
+            const parsed = parseFloat(String(ips.amount).replace(/[^0-9.]/g, ''));
+            if (parsed > 0) { notional = parsed; notionalIsClient = true; }
+          }
+          function inr(v){ if(v==null) return '—'; const s=v<0?'−':''; v=Math.abs(Math.round(v)); if(v>=10000000) return s+'₹'+(v/10000000).toFixed(2)+' Cr'; if(v>=100000) return s+'₹'+(v/100000).toFixed(2)+' L'; return s+'₹'+v.toLocaleString('en-IN'); }
+
+          // Composite risk posture
+          const betaScore = avgEqBeta != null ? Math.min(100, Math.max(0, (avgEqBeta/1.3)*60*(eqW/100) + ((100-eqW)/100)*10)) : (eqW>0?40:0);
+          const durScore = avgDuration != null ? Math.min(100, (avgDuration/8)*100) : 0;
+          const volScore = annualStd != null ? Math.min(100, (annualStd/25)*100) : 50;
+          const riskComposite = betaScore*0.45 + volScore*0.35 + Math.min(durScore, 40)*0.20;
+          const riskLabel = riskComposite>=65?'Aggressive':riskComposite>=45?'Moderately Aggressive':riskComposite>=28?'Balanced':riskComposite>=14?'Moderately Conservative':'Conservative';
+          const riskClr = riskComposite>=65?NEG:riskComposite>=45?WARN:riskComposite>=28?'#B8860B':riskComposite>=14?'#4C8C3C':POS;
+
+          // Interactive calculator live values
+          const eqContrib = avgEqBeta != null ? (eqW/100) * avgEqBeta * sensMarket : 0;
+          // Rate impact with convexity correction:
+          // ΔP/P = −Dmod × Δy + 0.5 × Convexity × Δy²
+          // where Convexity = Dmod² + Dmod/(1+y)
+          const deltaY = sensRate / 10000;  // convert bp to decimal (e.g. 100bp = 0.01)
+          const rateContrib = avgDuration != null
+            ? (debtW/100) * ((-avgDuration * deltaY) + (0.5 * avgConvexity * deltaY * deltaY)) * 100
+            : 0;
+          const totalImpact = eqContrib + rateContrib;
+          const totalValue = notional * totalImpact / 100;
+
+          // VaR/ES
+          const horizons = [{l:'1 day',days:1},{l:'1 week',days:5},{l:'1 month',days:21},{l:'1 year',days:252}];
+          // Standard normal distribution critical values
+          const Z = {95:1.6449, 99:2.3263};
+          const ES_MULT = {95:2.063, 99:2.665};
+          const dailyStd = annualStd != null ? annualStd/Math.sqrt(252) : null;
+          const varRows = dailyStd != null ? horizons.map(h => {
+            const periodStd = dailyStd*Math.sqrt(h.days);
+            return { l:h.l, periodStd, var95:Z[95]*periodStd, es95:ES_MULT[95]*periodStd, var99:Z[99]*periodStd, es99:ES_MULT[99]*periodStd };
+          }) : [];
+
+          // Diverging bar
+          function DivBar({value, maxAbs}){
+            const pct = Math.min(100, Math.abs(value)/maxAbs*50);
+            const clr = value>=0?POS:NEG;
+            return <div style={{ position:'relative', height:16, background:GR10, borderRadius:4, minWidth:120 }}>
+              <div style={{ position:'absolute', top:0, bottom:0, left:'50%', width:1, background:GR20 }}/>
+              <div style={{ position:'absolute', top:1, bottom:1, ...(value>=0?{left:'50%'}:{right:'50%'}), width:pct+'%', background:clr, borderRadius:3 }}/>
+            </div>;
+          }
+
+          // Market reference scenarios
+          const marketShocks = [-20,-10,-5,5,10,20];
+          const marketMax = avgEqBeta != null ? (Math.max(...marketShocks.map(s => Math.abs((eqW/100)*avgEqBeta*s))) || 1) : 1;
+
+          // Rate reference scenarios
+          const rateShocks = [-100,-50,50,100,200];
+          function rateImpact(bps) {
+            if (avgDuration == null) return 0;
+            const dy = bps / 10000;
+            return (debtW/100) * ((-avgDuration * dy) + (0.5 * avgConvexity * dy * dy)) * 100;
+          }
+          const rateMax = Math.max(...rateShocks.map(bps => Math.abs(rateImpact(bps))), 0.01);
+
+          // Combined scenario matrix
+          const mAxis = [-20,-10,0,10,20], rAxis = [-100,0,100];
+          function combinedImpact(m, r){
+            const e  = avgEqBeta != null ? (eqW/100)*avgEqBeta*m : 0;
+            const rr = rateImpact(r);  // r is already in bps
+            return e + rr;
+          }
+          const matrixVals = mAxis.flatMap(m => rAxis.map(r => Math.abs(combinedImpact(m, r))));
+          const matrixMax = Math.max(...matrixVals, 0.01);
+
+          // Risk contribution
+          const riskContrib = funds.map(f => {
+            const w = (weights[f.isin]||0)/100;
+            const raw = snapshots[f.isin]?.risk?.std_dev_3y;
+            const std = raw != null && raw !== '-' ? parseFloat(raw) : null;
+            if (std == null || isNaN(std) || std <= 0) return null;
+            return { f, w:weights[f.isin]||0, contrib: w*std };
+          }).filter(Boolean).sort((a,b) => b.contrib - a.contrib);
+          const totalContrib = riskContrib.reduce((s,r) => s+r.contrib, 0) || 1;
+
+          const cardHdStyle = { padding:'10px 16px', fontSize:9.5, fontWeight:700, letterSpacing:'.07em', textTransform:'uppercase', color:MUT, background:GR10, borderBottom:'1px solid '+GR20 };
+          const cardStyle = { marginBottom:16, border:'1px solid '+GR20, borderRadius:8, overflow:'hidden', background:'#fff' };
+
+          return <div>
+            <div style={{ fontFamily:'var(--font-serif)', fontSize:15, fontWeight:600, color:PLUM, marginBottom:4 }}>Sensitivity analysis</div>
+            <div style={{ fontSize:12, color:GR60, marginBottom:16 }}>How this portfolio's value would move under market, rate and allocation shifts</div>
+
+            {/* Overall posture banner */}
+            <div style={{ background:'linear-gradient(135deg,'+GR10+' 0%,#fff 100%)', border:'1px solid '+GR20, borderRadius:12, padding:'18px 22px', marginBottom:18, display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:16 }}>
+              <div>
+                <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.07em', textTransform:'uppercase', color:MUT, marginBottom:4 }}>Overall sensitivity posture</div>
+                <div style={{ fontFamily:'var(--font-serif)', fontSize:22, fontWeight:700, color:riskClr }}>{riskLabel}</div>
+                <div style={{ fontSize:11.5, color:GR60, marginTop:2 }}>Composite of equity beta, portfolio volatility and rate duration</div>
+              </div>
+              <div style={{ flex:1, minWidth:220, maxWidth:320 }}>
+                <div style={{ background:GR20, borderRadius:6, height:10, position:'relative', overflow:'hidden' }}>
+                  <div style={{ position:'absolute', top:0, bottom:0, left:0, width:riskComposite.toFixed(0)+'%', background:'linear-gradient(90deg,'+POS+','+WARN+','+NEG+')', borderRadius:6 }}/>
+                  <div style={{ position:'absolute', top:-3, left:riskComposite.toFixed(0)+'%', width:2, height:16, background:PLUM }}/>
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:GR60, marginTop:4 }}><span>Conservative</span><span>Balanced</span><span>Aggressive</span></div>
+              </div>
+            </div>
+
+            {/* Risk factor exposures */}
+            <div style={cardStyle}>
+              <div style={cardHdStyle}>Risk factor exposures</div>
+              <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                  <thead><tr>
+                    {['Factor','Exposure','Sleeve / basis','Interpretation'].map((h,i) => <th key={i} style={{ textAlign:i===1?'right':'left', padding:'7px 14px', fontSize:9, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:MUT, background:GR10, borderBottom:'1px solid '+GR20 }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {[
+                      { f:'Equity beta', v:avgEqBeta!=null?avgEqBeta.toFixed(2):'—', ex:eqW.toFixed(0)+'% (equity + hybrid)', note:avgEqBeta!=null?(avgEqBeta>=1.05?'More volatile than the broad market':(avgEqBeta<=0.9?'Less volatile than the broad market':'Roughly in line with the broad market')):'No equity beta data available' },
+                      { f:'Rate duration / convexity', v:avgDuration!=null?avgDuration.toFixed(1)+'y / '+(avgConvexity!=null?avgConvexity.toFixed(1):'—'):'—', ex:debtW.toFixed(1)+'% (debt + hybrid bond)', note:(() => {
+                        if (avgDuration==null) return 'No debt holdings';
+                        // Check if debt sleeve is dominated by short-duration/arbitrage
+                        let shortDurW = 0, totalDebtW = 0;
+                        funds.forEach(f => {
+                          const w = weights[f.isin] || 0;
+                          if (!isDebtLike(snapshots[f.isin], f) && !isHybrid(snapshots[f.isin], f)) return;
+                          totalDebtW += w;
+                          const cat = (f.category || snapshots[f.isin]?.category || '').toLowerCase();
+                          if (cat.includes('arbitrage') || cat.includes('overnight') || cat.includes('liquid') || cat.includes('money market') || cat.includes('ultra short')) shortDurW += w;
+                        });
+                        const shortDominated = totalDebtW > 0 && shortDurW / totalDebtW > 0.6;
+                        if (shortDominated) return 'Debt sleeve is dominated by short-duration/arbitrage holdings — rate sensitivity is minimal despite the duration figure';
+                        if (avgDuration >= 6) return 'Very high rate sensitivity — long-duration debt, significant impact from rate moves';
+                        if (avgDuration >= 4) return 'High rate sensitivity — medium-to-long duration debt';
+                        if (avgDuration >= 2) return 'Moderate rate sensitivity — typical for corporate bond and medium duration funds';
+                        if (avgDuration >= 0.5) return 'Low rate sensitivity — short-duration debt';
+                        return 'Minimal rate sensitivity — near-cash or arbitrage dominated';
+                      })() },
+                      { f:'Annualised volatility', v:annualStd!=null?annualStd.toFixed(1)+'%':'—', ex:'blended, 3Y', note:annualStd!=null?(annualStd>=18?'High — expect large swings in value':(annualStd<=8?'Low — relatively stable':'Moderate variability year to year')):'Insufficient data' }
+                    ].map((r,i) => <tr key={i} style={{ borderBottom:'1px solid '+GR20 }}>
+                      <td style={{ padding:'8px 14px', fontSize:12, fontWeight:600, color:GR80 }}>{r.f}</td>
+                      <td style={{ padding:'8px 14px', textAlign:'right', fontFamily:'var(--font-mono)', fontSize:13, fontWeight:700, color:PLUM }}>{r.v}</td>
+                      <td style={{ padding:'8px 14px', fontSize:11, color:GR60 }}>{r.ex}</td>
+                      <td style={{ padding:'8px 14px', fontSize:11.5, color:GR80 }}>{r.note}</td>
+                    </tr>)}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* VaR & ES — Historical Simulation */}
+            {(() => {
+              const hRows = histVar?.var || [];
+              const showHist = hRows.length > 0 && hRows.some(r => r.var_95 != null);
+              if (!showHist && !histVarLoading) return null;
+              return <div style={cardStyle}>
+                <div style={cardHdStyle}>
+                  Value-at-Risk &amp; Expected Shortfall — Historical Simulation
+                  {histVarLoading && <span style={{ fontWeight:400, color:GR60, marginLeft:8 }}>Computing…</span>}
+                </div>
+                {showHist && <div style={{ overflowX:'auto' }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                    <thead>
+                      <tr style={{ background:'#F0F9F5', borderBottom:'1px solid '+GR20 }}>
+                        <th style={{ textAlign:'left', padding:'7px 14px', fontSize:9, fontWeight:700, color:MUT }}>Horizon</th>
+                        {['95% VaR','95% ES','99% VaR','99% ES'].map((h,i) => <th key={i} style={{ textAlign:'right', padding:'7px 12px', fontSize:9, color:'#1A5C3A', fontWeight:600 }}>{h}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hRows.map((r,i) => <tr key={i} style={{ borderBottom:'1px solid '+GR20 }}>
+                        <td style={{ padding:'9px 14px', fontSize:12, fontWeight:600, color:GR80 }}>{r.horizon}</td>
+                        {[r.var_95, r.es_95, r.var_99, r.es_99].map((v,j) => <td key={j} style={{ textAlign:'right', padding:'9px 12px' }}>
+                          {v!=null ? <span style={{ fontFamily:'var(--font-mono)', fontSize:13, fontWeight:600, color:NEG }}>−{v.toFixed(1)}%</span> : <span style={{ color:GR60 }}>—</span>}
+                        </td>)}
+                      </tr>)}
+                    </tbody>
+                  </table>
+                </div>}
+                <div style={{ padding:'10px 14px', fontSize:10.5, color:GR60, borderTop:'1px solid '+GR20, lineHeight:1.7 }}>
+                  Overlapping period returns from actual NAV history ({hRows[0]?.date_from} → {hRows[0]?.date_to}). Note: 1Y VaR may appear lower than 1M because most 12-month periods historically recovered — this is correct behaviour, not a bug.
+                  {histVar?.parametric_funds?.length > 0 && <span style={{ color:WARN }}> {histVar.parametric_funds.length} fund(s) with &lt;252 days NAV used parametric normal distribution fallback.</span>}
+                  {histVar?.hist_notes?.length > 0 && <span style={{ color:GR60 }}> {histVar.hist_notes.join('; ')}.</span>}
+                </div>
+              </div>;
+            })()}
+
+            {/* Interactive calculator */}
+            <div style={cardStyle}>
+              <div style={cardHdStyle}>Sensitivity calculator — model a scenario</div>
+              <div style={{ padding:'16px 20px' }}>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:24, marginBottom:16 }}>
+                  <div>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:11.5, marginBottom:6 }}>
+                      <span style={{ fontWeight:700, color:GR80 }}>Market move</span>
+                      <span style={{ fontFamily:'var(--font-mono)', fontWeight:700, color:PLUM }}>{sensMarket>=0?'+':''}{sensMarket}%</span>
+                    </div>
+                    <input type="range" min={-30} max={30} value={sensMarket} step={1} onChange={e=>setSensMarket(parseInt(e.target.value))} style={{ width:'100%' }}/>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:GR60 }}><span>−30%</span><span>+30%</span></div>
+                  </div>
+                  <div>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:11.5, marginBottom:6 }}>
+                      <span style={{ fontWeight:700, color:GR80 }}>Interest rate move</span>
+                      <span style={{ fontFamily:'var(--font-mono)', fontWeight:700, color:PLUM }}>{sensRate>=0?'+':''}{sensRate}bp</span>
+                    </div>
+                    <input type="range" min={-200} max={200} value={sensRate} step={10} onChange={e=>setSensRate(parseInt(e.target.value))} style={{ width:'100%' }}/>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:GR60 }}><span>−200bp</span><span>+200bp</span></div>
+                  </div>
+                </div>
+                <div style={{ background:PLUM, borderRadius:12, padding:'16px 20px', display:'flex', alignItems:'center', justifyContent:'space-around', flexWrap:'wrap', gap:12 }}>
+                  <div style={{ textAlign:'center' }}><div style={{ fontFamily:'var(--font-mono)', fontSize:16, fontWeight:700, color:'#fff' }}>{eqContrib>=0?'+':''}{eqContrib.toFixed(1)}%</div><div style={{ fontSize:9, color:'rgba(255,255,255,.6)', textTransform:'uppercase', letterSpacing:'.04em' }}>From equity sleeve</div></div>
+                  <div style={{ fontSize:20, color:'rgba(255,255,255,.4)' }}>+</div>
+                  <div style={{ textAlign:'center' }}><div style={{ fontFamily:'var(--font-mono)', fontSize:16, fontWeight:700, color:'#fff' }}>{rateContrib>=0?'+':''}{rateContrib.toFixed(1)}%</div><div style={{ fontSize:9, color:'rgba(255,255,255,.6)', textTransform:'uppercase', letterSpacing:'.04em' }}>From debt sleeve</div></div>
+                  <div style={{ fontSize:20, color:'rgba(255,255,255,.4)' }}>=</div>
+                  <div style={{ textAlign:'center' }}><div style={{ fontFamily:'var(--font-serif)', fontSize:28, fontWeight:700, color:'#fff' }}>{totalImpact>=0?'+':''}{totalImpact.toFixed(1)}%</div><div style={{ fontSize:9, color:'rgba(255,255,255,.6)', textTransform:'uppercase', letterSpacing:'.04em' }}>Estimated portfolio impact</div></div>
+
+                </div>
+              </div>
+            </div>
+
+            {/* Market reference */}
+            <div style={cardStyle}>
+              <div style={cardHdStyle}>{avgEqBeta!=null ? 'Market sensitivity — reference scenarios (β='+avgEqBeta.toFixed(2)+', '+eqW.toFixed(0)+'% equity weight)' : 'Market sensitivity'}</div>
+              {avgEqBeta!=null ? <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                  <thead><tr>
+                    <th style={{ textAlign:'left', padding:'7px 14px', fontSize:9, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:MUT, background:GR10 }}>Market move</th>
+                    <th style={{ padding:'7px 14px', background:GR10 }}></th>
+                    <th style={{ textAlign:'right', padding:'7px 14px', fontSize:9, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:MUT, background:GR10 }}>Est. impact</th>
+                  </tr></thead>
+                  <tbody>
+                    {marketShocks.map(s => { const v = (eqW/100)*avgEqBeta*s; return <tr key={s} style={{ borderBottom:'1px solid '+GR20 }}>
+                      <td style={{ padding:'7px 14px', fontFamily:'var(--font-mono)', fontSize:12, fontWeight:600, color:GR80 }}>{s>=0?'+':''}{s}%</td>
+                      <td style={{ padding:'7px 14px' }}><DivBar value={v} maxAbs={marketMax}/></td>
+                      <td style={{ padding:'7px 14px', textAlign:'right', fontFamily:'var(--font-mono)', fontSize:12.5, fontWeight:700, color:v>=0?POS:NEG }}>{v>=0?'+':''}{v.toFixed(1)}%</td>
+                    </tr>; })}
+                  </tbody>
+                </table>
+              </div> : <div style={{ padding:20, textAlign:'center', color:GR60, fontSize:11.5 }}>No equity holdings with beta data — market sensitivity cannot be estimated.</div>}
+            </div>
+
+            {/* Rate reference */}
+            <div style={cardStyle}>
+              <div style={cardHdStyle}>{avgDuration!=null ? 'Interest rate sensitivity — reference scenarios (duration='+avgDuration.toFixed(1)+'y, '+debtW.toFixed(0)+'% debt weight)' : 'Interest rate sensitivity'}</div>
+              {avgDuration!=null ? <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                  <thead><tr>
+                    <th style={{ textAlign:'left', padding:'7px 14px', fontSize:9, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:MUT, background:GR10 }}>Rate move</th>
+                    <th style={{ padding:'7px 14px', background:GR10 }}></th>
+                    <th style={{ textAlign:'right', padding:'7px 14px', fontSize:9, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:MUT, background:GR10 }}>Est. impact</th>
+                  </tr></thead>
+                  <tbody>
+                    {rateShocks.map(bps => { const v = rateImpact(bps); return <tr key={bps} style={{ borderBottom:'1px solid '+GR20 }}>
+                      <td style={{ padding:'7px 14px', fontFamily:'var(--font-mono)', fontSize:12, fontWeight:600, color:GR80 }}>{bps>=0?'+':''}{bps}bp</td>
+                      <td style={{ padding:'7px 14px' }}><DivBar value={v} maxAbs={rateMax}/></td>
+                      <td style={{ padding:'7px 14px', textAlign:'right', fontFamily:'var(--font-mono)', fontSize:12.5, fontWeight:700, color:v>=0?POS:NEG }}>{v>=0?'+':''}{v.toFixed(1)}%</td>
+                    </tr>; })}
+                  </tbody>
+                </table>
+              </div> : <div style={{ padding:20, textAlign:'center', color:GR60, fontSize:11.5 }}>No debt holdings in this portfolio — rate sensitivity is not applicable.</div>}
+            </div>
+
+            {/* Combined matrix */}
+            {(avgEqBeta!=null || avgDuration!=null) && <div style={cardStyle}>
+              <div style={cardHdStyle}>Combined scenarios — market move × rate move</div>
+              <div style={{ padding:'14px 18px', overflowX:'auto' }}>
+                <table style={{ borderCollapse:'collapse', margin:'0 auto' }}>
+                  <tbody>
+                    <tr><td style={{ width:90 }}></td>{rAxis.map(r => <td key={r} style={{ textAlign:'center', padding:4, fontSize:9.5, fontWeight:700, color:MUT }}>Rates {r>=0?'+':''}{r}bp</td>)}</tr>
+                    {mAxis.map(m => <tr key={m}>
+                      <td style={{ textAlign:'right', padding:'4px 10px', fontSize:10.5, fontWeight:700, color:GR80, whiteSpace:'nowrap' }}>Market {m>=0?'+':''}{m}%</td>
+                      {rAxis.map(r => {
+                        const v = combinedImpact(m,r);
+                        const mag = Math.min(Math.abs(v)/matrixMax, 1);
+                        const bg = v>=0 ? 'rgba(26,122,82,'+(0.12+mag*0.55).toFixed(2)+')' : 'rgba(185,28,28,'+(0.12+mag*0.55).toFixed(2)+')';
+                        const txt = mag>0.55 ? '#fff' : (v>=0?POS:NEG);
+                        return <td key={r} style={{ padding:4 }}><div style={{ height:34, borderRadius:6, background:bg, display:'flex', alignItems:'center', justifyContent:'center' }}><span style={{ fontFamily:'var(--font-mono)', fontSize:11.5, fontWeight:700, color:txt }}>{v>=0?'+':''}{v.toFixed(1)}%</span></div></td>;
+                      })}
+                    </tr>)}
+                  </tbody>
+                </table>
+              </div>
+            </div>}
+
+            {/* Risk contribution */}
+            {riskContrib.length > 0 && <div style={cardStyle}>
+              <div style={cardHdStyle}>Risk contribution by holding — where today's volatility actually comes from</div>
+              <div style={{ padding:'14px 18px' }}>
+                <div style={{ fontSize:11.5, color:GR60, marginBottom:12 }}>Each holding's share of total blended volatility (weight × its own 3Y std deviation, normalised to 100%). This is diagnostic — it shows where risk is concentrated <em>today</em>, not a hypothetical change. To model a change, use the What-If tab.</div>
+                {riskContrib.slice(0,10).map(r => { const pct = r.contrib/totalContrib*100; return <div key={r.f.isin} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:7 }}>
+                  <div style={{ width:200, flexShrink:0, textAlign:'right', fontSize:11, color:GR80, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={r.f.name}>{r.f.name}</div>
+                  <div style={{ flex:1, position:'relative', height:16, background:GR10, borderRadius:4, overflow:'hidden' }}>
+                    <div style={{ height:'100%', width:pct.toFixed(1)+'%', background:BERRY, borderRadius:4 }}/>
+                  </div>
+                  <div style={{ width:96, flexShrink:0, fontFamily:'var(--font-mono)', fontSize:11, fontWeight:700, color:PLUM, whiteSpace:'nowrap' }}>{pct.toFixed(1)}% of risk</div>
+                  <div style={{ width:52, flexShrink:0, fontSize:10, color:GR60, whiteSpace:'nowrap' }}>({r.w}% wt)</div>
+                </div>; })}
+              </div>
+            </div>}
+
+            {/* Methodology */}
+            <div style={{ marginTop:8, border:'1px solid '+GR20, borderRadius:12, overflow:'hidden' }}>
+              <div style={cardHdStyle}>Methodology & limitations</div>
+              <div style={{ padding:'14px 18px', fontSize:11.5, color:GR80, lineHeight:1.85 }}>
+                <strong style={{ color:MUT }}>Beta & duration:</strong> equity beta is each fund's disclosed 3Y beta, weighted by portfolio allocation. Debt duration uses each fund's actual modified duration from the daily Morningstar data where available, falling back to a category-level proxy (e.g. Overnight ≈ 0.01yr, Corporate Bond ≈ 3.5yr, Long Duration ≈ 8yr) only when missing.
+                <br/><br/><strong style={{ color:MUT }}>VaR & Expected Shortfall:</strong> parametric estimates assuming normally-distributed returns, scaled from the portfolio's blended 3Y annualised volatility by √time. Expected Shortfall (CVaR) is the average loss conditional on breaching VaR — real return distributions typically have fatter tails than the normal assumption, so actual worst-case losses can exceed these estimates.
+                <br/><br/><strong style={{ color:MUT }}>All estimates are linear approximations</strong> for illustration and directional understanding — not a precise forecast or a substitute for a full risk model.
+              </div>
+            </div>
+          </div>;
+        })()}
+
+        {/* ── WHAT-IF ── */}
+        {activeTab === 'whatif' && (() => {
+          const BERRY='#912F63', PLUM='#3E3452', MUT='#6D5479', GR60='#A2A0A0', GR80='#374151', GR20='#E8E5EC', GR10='#F8F6FA', POS='#1A7A52', NEG='#B91C1C', WARN='#D97706', LAV='#A795AE';
+
+          if (!funds.length) {
+            return <div style={{ padding:40, textAlign:'center', color:GR60 }}><div style={{ fontSize:32, opacity:.2, marginBottom:12 }}>🔀</div><div style={{ fontFamily:'var(--font-serif)', fontSize:17, color:PLUM, marginBottom:6 }}>Add funds to the portfolio</div><div style={{ fontSize:13 }}>What-if analysis needs at least one fund in the portfolio.</div></div>;
+          }
+          function inr(v){ if(v==null) return '—'; const s=v<0?'−':''; v=Math.abs(Math.round(v)); if(v>=10000000) return s+'₹'+(v/10000000).toFixed(2)+' Cr'; if(v>=100000) return s+'₹'+(v/100000).toFixed(2)+' L'; return s+'₹'+v.toLocaleString('en-IN'); }
+
+          function fundBucket(f, fsnap){
+            if (isDebtLike(fsnap, f)) return 'debt';
+            if (isEquityLike(fsnap, f)) return 'equity';
+            if (isHybrid(fsnap, f)) return 'hybrid';
+            return 'other';
+          }
+
+          let eqW=0, debtW=0;
+          funds.forEach(f => {
+            const w = weights[f.isin] || 0;
+            const bucket = fundBucket(f, snapshots[f.isin]);
+            if (bucket==='equity') eqW += w; else if (bucket==='debt') debtW += w;
+          });
+
+          const cardHdStyle = { padding:'10px 16px', fontSize:9.5, fontWeight:700, letterSpacing:'.07em', textTransform:'uppercase', color:MUT, background:GR10, borderBottom:'1px solid '+GR20 };
+          const cardStyle = { marginBottom:18, border:'1px solid '+GR20, borderRadius:8, overflow:'hidden', background:'#fff' };
+
+          const fromFund = funds.find(f => f.isin === wiFromIsin) || funds[0];
+          const candList = [];  // placeholder — fund substitution search not yet implemented
+
+          // Base blended metrics
+          const baseR1y = B.return_1y, baseR3y = B.return_3y, baseStd = B.std_dev_3y, baseSharpe = B.sharpe_ratio_3y, baseEr = B.expense_ratio;
+
+          // ── Allocation shift ──
+          const shiftLimit = Math.min(eqW, debtW, 30);
+          function scaledBlend(shiftVal){
+            const eqScale = eqW>0 ? (eqW-shiftVal)/eqW : 1;
+            const debtScale = debtW>0 ? (debtW+shiftVal)/debtW : 1;
+            const b = { r1y:0, r3y:0, std:0, sharpe:0, er:0, sumW:0 };
+            funds.forEach(f => {
+              const w = weights[f.isin] || 0;
+              const bucket = fundBucket(f, snapshots[f.isin]);
+              const wf = bucket==='equity' ? (w*eqScale) : bucket==='debt' ? (w*debtScale) : w;
+              const s = snapshots[f.isin];
+              if (s) {
+                const safeF = v => { const p = parseFloat(v); return isNaN(p) || v==='-' ? null : p; };
+                const r1y = safeF(s.returns?.['1y']); if (r1y!=null) b.r1y += r1y * wf/100;
+                const r3y = safeF(s.returns?.['3y']); if (r3y!=null) b.r3y += r3y * wf/100;
+                const std = safeF(s.risk?.std_dev_3y); if (std!=null) b.std += std * wf/100;
+                const sh = safeF(s.risk?.sharpe_ratio_3y); if (sh!=null) b.sharpe += sh * wf/100;
+                const er = safeF(s.expense_ratio); if (er!=null) b.er += er * wf/100;
+                b.sumW += wf;
+              }
+            });
+            return b;
+          }
+          const shiftedBlend = scaledBlend(wiShift);
+          function delta(cur, base, fmt='pct'){
+            if (cur==null || base==null) return null;
+            const d = cur - base;
+            return { val:d, str: (d>=0?'+':'')+d.toFixed(2)+(fmt==='pct'?'%':'') };
+          }
+
+          function applyShift(){
+            if (!setWeights || !wiShift) return;
+            const eqScale = eqW>0 ? (eqW-wiShift)/eqW : 1;
+            const debtScale = debtW>0 ? (debtW+wiShift)/debtW : 1;
+            const nw = { ...weights };
+            funds.forEach(f => {
+              const bucket = fundBucket(f, snapshots[f.isin]);
+              if (bucket==='equity') nw[f.isin] = parseFloat(((weights[f.isin]||0)*eqScale).toFixed(2));
+              else if (bucket==='debt') nw[f.isin] = parseFloat(((weights[f.isin]||0)*debtScale).toFixed(2));
+            });
+            setWeights(nw);
+            setWiShift(0);
+            if (onBackToBuild) onBackToBuild();
+          }
+
+          // ── Growth projection ──
+          const growthRate = (baseR3y != null ? baseR3y : 12) / 100;
+          const infl = wiInflation / 100;
+          const months = wiYears * 12;
+          const monthlyRate = Math.pow(1 + growthRate, 1/12) - 1;
+          const lumpFuture = wiLump * Math.pow(1 + growthRate, wiYears);
+          const sipFuture = wiSip * (monthlyRate > 0 ? ((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate) * (1 + monthlyRate) : months);
+          const totalFuture = lumpFuture + sipFuture;
+          const totalInvested = wiLump + wiSip * months;
+          const gains = totalFuture - totalInvested;
+          const realValue = totalFuture / Math.pow(1 + infl, wiYears);
+
+          // Reverse SIP calculator
+          const targetMinusLump = wiTarget - lumpFuture;
+          const requiredSip = targetMinusLump > 0 && monthlyRate > 0
+            ? targetMinusLump / (((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate) * (1 + monthlyRate))
+            : null;
+
+          return <div>
+            <div style={{ fontFamily:'var(--font-serif)', fontSize:15, fontWeight:600, color:PLUM, marginBottom:4 }}>What-if analysis</div>
+            <div style={{ fontSize:12, color:GR60, marginBottom:16 }}>Model concrete changes to this portfolio — allocation shifts and growth paths — before committing to anything</div>
+
+            {/* Allocation shift */}
+            <div style={cardStyle}>
+              <div style={cardHdStyle}>Allocation shift — what if you moved money between equity and debt?</div>
+              {eqW>0 && debtW>0 ? <div style={{ padding:'16px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:11.5, marginBottom:6 }}>
+                  <span style={{ fontWeight:700, color:GR80 }}>Shift toward equity ←→ Shift toward debt</span>
+                  <span style={{ fontFamily:'var(--font-mono)', fontWeight:700, color:PLUM }}>{wiShift===0?'No shift':(wiShift>0?'+':'')+wiShift+'pt to debt'}</span>
+                </div>
+                <input type="range" min={-shiftLimit} max={shiftLimit} value={wiShift} step={1} onChange={e=>setWiShift(parseInt(e.target.value))} style={{ width:'100%' }}/>
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:GR60, marginBottom:14 }}>
+                  <span>+{shiftLimit}pt more equity</span><span>+{shiftLimit}pt more debt</span>
+                </div>
+
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:14 }}>
+                  {[
+                    { l:'3Y return',     base:baseR3y,   cur:shiftedBlend.r3y,  fmt:'pct' },
+                    { l:'Volatility',    base:baseStd,   cur:shiftedBlend.std,  fmt:'pct' },
+                    { l:'Sharpe (3Y)',   base:baseSharpe,cur:shiftedBlend.sharpe,fmt:'num' },
+                    { l:'Expense ratio', base:baseEr,    cur:shiftedBlend.er,   fmt:'pct' },
+                  ].map((m,i) => {
+                    const d = delta(m.cur, m.base, m.fmt);
+                    return <div key={i} style={{ background:GR10, borderRadius:8, padding:10, textAlign:'center' }}>
+                      <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:MUT, marginBottom:4 }}>{m.l}</div>
+                      <div style={{ fontFamily:'var(--font-mono)', fontSize:14, fontWeight:700, color:PLUM }}>{m.cur!=null?m.cur.toFixed(2)+(m.fmt==='pct'?'%':''):'—'}</div>
+                      {d && <div style={{ fontFamily:'var(--font-mono)', fontSize:10, fontWeight:600, color:d.val>=0?POS:NEG, marginTop:2 }}>{d.str}</div>}
+                    </div>;
+                  })}
+                </div>
+
+                <button onClick={applyShift} disabled={wiShift===0} style={{ padding:'8px 18px', borderRadius:20, background:wiShift===0?GR20:'var(--brand-primary)', color:wiShift===0?GR60:'#fff', border:'none', fontSize:11.5, fontWeight:600, cursor:wiShift===0?'not-allowed':'pointer' }}>Apply this shift to the portfolio →</button>
+              </div> : <div style={{ padding:20, textAlign:'center', color:GR60, fontSize:11.5 }}>This portfolio needs both equity and debt holdings to model an allocation shift.</div>}
+            </div>
+
+            {/* Growth projection */}
+            <div style={cardStyle}>
+              <div style={cardHdStyle}>Growth projection — what if you invested for the long term?</div>
+              <div style={{ padding:'16px 20px' }}>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:14 }}>
+                  <div>
+                    <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT }}>Lump sum (₹)</label>
+                    <input type="number" value={wiLump} onChange={e=>setWiLump(parseFloat(e.target.value)||0)} style={{ width:'100%', marginTop:4, padding:'7px 9px', border:'1px solid '+GR20, borderRadius:6, fontSize:12.5 }}/>
+                  </div>
+                  <div>
+                    <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT }}>Monthly SIP (₹)</label>
+                    <input type="number" value={wiSip} onChange={e=>setWiSip(parseFloat(e.target.value)||0)} style={{ width:'100%', marginTop:4, padding:'7px 9px', border:'1px solid '+GR20, borderRadius:6, fontSize:12.5 }}/>
+                  </div>
+                  <div>
+                    <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT }}>Horizon: {wiYears} years</label>
+                    <input type="range" min={1} max={30} value={wiYears} onChange={e=>setWiYears(parseInt(e.target.value))} style={{ width:'100%', marginTop:9 }}/>
+                  </div>
+                  <div>
+                    <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT }}>Inflation (%)</label>
+                    <input type="number" value={wiInflation} step={0.5} onChange={e=>setWiInflation(parseFloat(e.target.value)||0)} style={{ width:'100%', marginTop:4, padding:'7px 9px', border:'1px solid '+GR20, borderRadius:6, fontSize:12.5 }}/>
+                  </div>
+                </div>
+
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
+                  <div style={{ background:GR10, borderRadius:8, padding:12 }}>
+                    <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT, marginBottom:4 }}>Future value (nominal)</div>
+                    <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:PLUM }}>{inr(totalFuture)}</div>
+                  </div>
+                  <div style={{ background:GR10, borderRadius:8, padding:12 }}>
+                    <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT, marginBottom:4 }}>Real value (today's ₹)</div>
+                    <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:PLUM }}>{inr(realValue)}</div>
+                  </div>
+                  <div style={{ background:GR10, borderRadius:8, padding:12 }}>
+                    <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT, marginBottom:4 }}>Total invested</div>
+                    <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:GR80 }}>{inr(totalInvested)}</div>
+                  </div>
+                  <div style={{ background:'#F0F9F5', borderRadius:8, padding:12 }}>
+                    <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT, marginBottom:4 }}>Estimated gains</div>
+                    <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:POS }}>{inr(gains)}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize:10.5, color:GR60, marginTop:10 }}>Using portfolio's 3Y CAGR ({baseR3y!=null?baseR3y.toFixed(1):'—'}%) as the annual growth assumption. Real value discounts nominal by inflation at {wiInflation}%.</div>
+
+                {/* Reverse calculator */}
+                <div style={{ borderTop:'1px solid '+GR20, marginTop:16, paddingTop:14 }}>
+                  <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:MUT, marginBottom:8 }}>Reverse calculator — what SIP do you need to hit a target?</div>
+                  <div style={{ display:'flex', gap:14, alignItems:'flex-end', flexWrap:'wrap' }}>
+                    <div>
+                      <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT }}>Target corpus (₹)</label>
+                      <input type="number" value={wiTarget} onChange={e=>setWiTarget(parseFloat(e.target.value)||0)} style={{ width:180, marginTop:4, padding:'7px 9px', border:'1px solid '+GR20, borderRadius:6, fontSize:12.5 }}/>
+                    </div>
+                    <div style={{ flex:1, minWidth:220, background:GR10, borderRadius:8, padding:12 }}>
+                      <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT, marginBottom:4 }}>Required monthly SIP</div>
+                      <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:PLUM }}>{requiredSip!=null && requiredSip>0 ? inr(requiredSip) : (targetMinusLump <= 0 ? 'Lump sum alone suffices' : '—')}</div>
+                      <div style={{ fontSize:10, color:GR60, marginTop:2 }}>To reach {inr(wiTarget)} in {wiYears} years alongside {inr(wiLump)} lump sum</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize:10.5, color:GR60, marginTop:8, lineHeight:1.6 }}>What-if scenarios are computed live against this portfolio's current holdings and weights, but nothing changes until you click an "Apply" button. Growth projections use the portfolio's 3Y CAGR as the annual assumption and are simplified illustrations — not a guarantee of future performance.</div>
+          </div>;
+        })()}
 
         {/* ── EXPOSURE ── */}
         {activeTab === 'exposure' && (() => {

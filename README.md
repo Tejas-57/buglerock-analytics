@@ -44,8 +44,8 @@ Whenever something new is built, discovered, or decided that future sessions nee
 | Layer | Technology | Details |
 |---|---|---|
 | **Frontend** | React (Create React App) | Deployed on Vercel — BugleRock work account |
-| **Backend** | FastAPI (Python 3.11) | Deployed on Render — BugleRock work account |
-| **Database** | PostgreSQL via SQLAlchemy ORM | Render Basic-1GB plan, 5GB storage |
+| **Backend** | FastAPI (Python 3.11) | Render Standard plan — 2GB RAM, 1 CPU, always-on. `WEB_CONCURRENCY=2` (2 uvicorn workers). |
+| **Database** | PostgreSQL via SQLAlchemy ORM | Render Basic plan — 1GB RAM, 0.5 CPU, 5GB storage, always-on. |
 | **Data Source** | Morningstar daily Excel | Delivered via Gmail API, auto-parsed on arrival |
 | **Auth / Secrets** | Gmail OAuth 2.0 | Token stored in PostgreSQL `settings` table |
 
@@ -412,12 +412,20 @@ Constraint-based LP solver using HiGHS via `scipy.optimize.linprog`. R1/R2 funds
 
 ## Pending Features
 
-1. **Nifty Indices daily DB sync** — Apps Script → Sheet daily but DB not updated for 10 Nifty indices
-2. **Sensitivity tab** — Portfolio Builder Analyse (HTML ref lines 10540–10828)
-3. **What-If tab** — Portfolio Builder Analyse (HTML ref lines 10829–10965)
-4. **Cost basis (WACB) tax** — Retirement Planner proper LTCG tax calculation
-5. **Model Portfolio presets** — Pre-fill Retirement Planner Section G from real blended returns
-6. **Old Cloud project cleanup** — Shut down tejas.s@buglerock.asia project
+1. **Cost basis (WACB) tax** — Retirement Planner proper LTCG tax calculation
+2. **Model Portfolio presets** — Pre-fill Retirement Planner Section G from real blended returns
+3. **Old Cloud project cleanup** — Shut down tejas.s@buglerock.asia project
+4. **User auth** — Google OAuth login, per-user saved portfolios and watchlists
+5. **Fund substitution (What-If tab)** — swap one holding for another with live delta preview
+
+## Completed Features (Aug 2026)
+
+- **Nifty Indices daily DB sync** — 5-min poll loop reads sheet tail, upserts to benchmark_nav
+- **Sensitivity tab** — risk posture, VaR/ES (parametric + historical simulation), rate/market sensitivity, heatmap, tornado chart
+- **What-If tab** — allocation shift with live delta, growth projection, reverse SIP calculator
+- **Benchmark returns pipeline** — benchmark_returns table, computed daily from NAV using Morningstar period dates, feeds Section E of IPS
+- **Duplicate fund fix** — advisory lock in save_parsed_data prevents concurrent save duplication
+- **Historical VaR** — hybrid historical (overlapping period returns from nav_history) + parametric fallback for short-history funds
 
 ---
 

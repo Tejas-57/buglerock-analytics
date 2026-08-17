@@ -87,22 +87,9 @@ def log_email_fetch(email_date, data_date, file_name, status, message):
 # ── Save parsed data ─────────────────────────────────────────────────────────
 
 def save_parsed_data(parsed: dict):
-    """
-    Replace all funds and benchmarks for a given data_date.
-
-    Uses a PostgreSQL advisory lock keyed on data_date so that concurrent
-    calls for the same date serialize instead of racing. Without this lock,
-    multiple startup triggers (check_parser_version, startup_fetch, the poll
-    loop's first iteration, and any manual /api/funds/fetch) can all pass
-    the has_data_for_date() check while none have committed yet, then each
-    does its own DELETE + INSERT — stacking rows and producing 4×/8× dupes.
-
-    The lock is scoped per data_date so different dates can still save in
-    parallel. It's automatically released when the transaction ends.
-    """
+    """Replace all funds and benchmarks for a given data_date."""
     db = get_session()
     from datetime import date as date_type
-    from sqlalchemy import text
 
     raw_date = parsed["data_date"]
     data_date = date_type.fromisoformat(raw_date) if isinstance(raw_date, str) else raw_date
@@ -123,28 +110,7 @@ def save_parsed_data(parsed: dict):
                     result[field] = None
         return result
 
-    # Advisory lock key derived from data_date — e.g. 2026-08-12 → 20260812.
-    # pg_advisory_xact_lock releases automatically at end of transaction.
-    lock_key = int(data_date.strftime("%Y%m%d"))
-
     try:
-        db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": lock_key})
-
-        # Now that we hold the lock, another concurrent caller may have
-        # already saved this date's data while we waited. Re-check and skip
-        # if so — this is what makes the operation truly idempotent.
-        existing = db.query(DailyFundData).filter(
-            DailyFundData.data_date == data_date
-        ).count()
-        if existing > 0:
-            # Peer that ran ahead of us finished the save. Nothing to do.
-            logger.info(
-                f"save_parsed_data: {existing} rows already exist for {data_date} "
-                f"(saved by concurrent process while we waited on the lock) — skipping"
-            )
-            db.commit()  # release the advisory lock via transaction end
-            return
-
         db.query(DailyFundData).filter(DailyFundData.data_date == data_date).delete()
         db.query(BenchmarkData).filter(BenchmarkData.data_date == data_date).delete()
 
@@ -161,16 +127,6 @@ def save_parsed_data(parsed: dict):
 
         db.commit()
         logger.info(f"Saved {len(parsed['funds'])} funds for {data_date}")
-
-        # Compute and store benchmark returns using period dates from the Excel
-        period_dates = parsed.get("period_dates", {})
-        if period_dates:
-            try:
-                from services.benchmark_db_service import compute_and_store_benchmark_returns
-                result = compute_and_store_benchmark_returns(period_dates, str(data_date))
-                logger.info(f"Benchmark returns computed: {result}")
-            except Exception as e:
-                logger.warning(f"compute_and_store_benchmark_returns failed (non-fatal): {e}")
     except Exception as e:
         db.rollback()
         logger.error(f"Error saving data: {e}", exc_info=True)
