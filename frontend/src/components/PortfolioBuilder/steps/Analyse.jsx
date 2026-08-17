@@ -22,7 +22,6 @@ const TABS = [
 ].filter(t => !t.hidden);
 
 function blendFromSnaps(funds, weights, snapshots) {
-  // Same approach as Watchlist — use snapshot data
   function get(isin, getter) {
     const snap = snapshots[isin];
     if (!snap) return null;
@@ -30,14 +29,32 @@ function blendFromSnaps(funds, weights, snapshots) {
     if (v==null||v==='-'||v===''||isNaN(parseFloat(v))) return null;
     return parseFloat(v);
   }
+
+  // Build category avg for each metric from all available snapshots
+  // Used as proxy when a specific fund lacks a metric (e.g. new fund with no 3Y history)
+  function catAvg(category, getter) {
+    const vals = Object.values(snapshots)
+      .filter(s => s && s.category === category)
+      .map(s => { const v = getter(s); return v==null||v==='-'||v===''||isNaN(parseFloat(v)) ? null : parseFloat(v); })
+      .filter(v => v != null);
+    return vals.length > 0 ? vals.reduce((a,b) => a+b, 0) / vals.length : null;
+  }
+
   function wblend(getter) {
     let val=0, cov=0;
     funds.forEach(f => {
-      const v = get(f.isin, getter);
-      if (v==null||isNaN(v)) return;
-      val += v*(weights[f.isin]||0); cov += (weights[f.isin]||0);
+      const w = weights[f.isin] || 0;
+      if (!w) return;
+      let v = get(f.isin, getter);
+      // Fallback to category avg if fund metric is missing
+      if (v == null) {
+        const cat = snapshots[f.isin]?.category;
+        if (cat) v = catAvg(cat, getter);
+      }
+      if (v == null || isNaN(v)) return;
+      val += v * w; cov += w;
     });
-    return cov>0 ? val/cov : null;
+    return cov > 0 ? val / cov : null;
   }
   return {
     return_1y:       wblend(s=>s.returns?.['1y']),
@@ -132,8 +149,11 @@ function blendAssetClass(funds, weights, snapshots) {
 }
 
 
-const CY_KEYS = ['cy2021','cy2022','cy2023','cy2024','cy2025'];
-const CY_LBL  = ['2021','2022','2023','2024','2025'];
+// Dynamic calendar year keys — last 5 completed years only
+const _CUR_YEAR = new Date().getFullYear();
+const _CY_YEARS = [_CUR_YEAR-5, _CUR_YEAR-4, _CUR_YEAR-3, _CUR_YEAR-2, _CUR_YEAR-1];
+const CY_KEYS = _CY_YEARS.map(y => 'cy'+y);
+const CY_LBL  = _CY_YEARS.map(y => String(y));
 
 function pearson(a, b) {
   const pairs = a.map((v, i) => [v, b[i]]).filter(p => p[0] != null && p[1] != null);
@@ -807,31 +827,31 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
             <div className="ptf-card">
               <div className="ptf-card-hd">Calendar year performance vs {bmDisplayName}</div>
               <div style={{ padding: '14px 16px', overflowX: 'auto' }}>
-                <svg width="100%" height="110" viewBox="0 0 500 110" preserveAspectRatio="xMidYMid meet">
+                <svg width="100%" height="240" viewBox="0 0 560 240" preserveAspectRatio="xMidYMid meet">
                   {(() => {
                     const cyV = CY_KEYS.map(k => B['return_'+k]); // e.g. return_cy2021
-                    const bmV = ['cy21','cy22','cy23','cy24','cy25'].map(k => bm.rets[k]);
+                    const bmV = _CY_YEARS.map(y => bm.rets['cy'+String(y).slice(2)]);
                     const mx = Math.max(...cyV.concat(bmV).filter(v => v != null).map(Math.abs).concat([5]));
-                    const PH = 92, ZH = 18;
+                    const TOP = 30; const PH = 185; const BASE = TOP + PH;
                     return CY_KEYS.map((k, i) => {
                       const fv = cyV[i], bv = bmV[i];
-                      const x = i * 96, bw = 36, gp = 4;
+                      const x = i * 108 + 8, bw = 44, gp = 5;
                       const fh = fv != null ? Math.max(2, Math.abs(fv) / mx * PH) : 0;
                       const bh = bv != null ? Math.max(2, Math.abs(bv) / mx * PH) : 0;
                       const diff = fv != null && bv != null ? fv - bv : null;
                       return (
                         <g key={k}>
-                          {diff != null && <text x={x + bw} y={PH - Math.max(fh, bh) - 5} textAnchor="middle" fontSize="8" fontWeight="700" fill={diff >= 0 ? 'var(--pos)' : 'var(--brand-primary)'} fontFamily="sans-serif">{diff >= 0 ? '+' : ''}{diff.toFixed(1)}%</text>}
-                          {fv != null && <rect x={x} y={PH - fh} width={bw} height={fh} fill={fv >= 0 ? 'var(--brand-primary)' : '#C46985'} rx="2" />}
-                          {bv != null && <rect x={x + bw + gp} y={PH - bh} width={bw - 4} height={bh} fill="var(--lav-grey,#A795AE)" rx="2" opacity=".8" />}
-                          <text x={x + bw} y={107} textAnchor="middle" fontSize="8" fill="var(--text-muted)" fontFamily="sans-serif">{CY_LBL[i]}</text>
+                          {diff != null && <text x={x + bw} y={Math.max(14, BASE - Math.max(fh, bh) - 8)} textAnchor="middle" fontSize="12" fontWeight="700" fill={diff >= 0 ? 'var(--pos)' : 'var(--brand-primary)'} fontFamily="sans-serif">{diff >= 0 ? '+' : ''}{diff.toFixed(1)}%</text>}
+                          {fv != null && <rect x={x} y={BASE - fh} width={bw} height={fh} fill={fv >= 0 ? 'var(--brand-primary)' : '#C46985'} rx="2" />}
+                          {bv != null && <rect x={x + bw + gp} y={BASE - bh} width={bw - 4} height={bh} fill="var(--lav-grey,#A795AE)" rx="2" opacity=".8" />}
+                          <text x={x + bw} y={BASE + 18} textAnchor="middle" fontSize="13" fill="var(--text-muted)" fontFamily="sans-serif">{CY_LBL[i]}</text>
                         </g>
                       );
                     });
                   })()}
-                  <line x1="0" y1="92" x2="500" y2="92" stroke="var(--border)" strokeWidth="1" />
+                  <line x1="0" y1="215" x2="560" y2="215" stroke="var(--border)" strokeWidth="1" />
                 </svg>
-                <div style={{ display: 'flex', gap: 14, marginTop: 8, fontSize: 9, color: 'var(--text-muted)' }}>
+                <div style={{ display: 'flex', gap: 16, marginTop: 10, fontSize: 11, color: 'var(--text-muted)' }}>
                   <span><span style={{ display: 'inline-block', width: 10, height: 10, background: 'var(--brand-primary)', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }}></span>Portfolio</span>
                   <span><span style={{ display: 'inline-block', width: 10, height: 10, background: 'var(--lav-grey,#A795AE)', borderRadius: 2, marginRight: 4, verticalAlign: 'middle', opacity: .8 }}></span>{bmDisplayName}</span>
                   <span style={{ fontStyle: 'italic' }}>Δ above bars = outperformance</span>
