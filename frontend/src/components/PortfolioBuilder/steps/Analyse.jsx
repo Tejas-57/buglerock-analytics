@@ -1359,9 +1359,8 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                   </table>
                 </div>}
                 <div style={{ padding:'10px 14px', fontSize:10.5, color:GR60, borderTop:'1px solid '+GR20, lineHeight:1.7 }}>
-                  Overlapping period returns from actual NAV history ({hRows[0]?.date_from} → {hRows[0]?.date_to}). Note: 1Y VaR may appear lower than 1M because most 12-month periods historically recovered — this is correct behaviour, not a bug.
-                  {histVar?.parametric_funds?.length > 0 && <span style={{ color:WARN }}> {histVar.parametric_funds.length} fund(s) with &lt;252 days NAV used parametric normal distribution fallback.</span>}
-                  {histVar?.hist_notes?.length > 0 && <span style={{ color:GR60 }}> {histVar.hist_notes.join('; ')}.</span>}
+                  Historical simulation — overlapping period returns from actual NAV history.
+                  {histVar?.parametric_funds?.length > 0 && <span style={{ color:WARN }}> {histVar.parametric_funds.length} fund(s) with insufficient NAV history used parametric fallback.</span>}
                 </div>
               </div>;
             })()}
