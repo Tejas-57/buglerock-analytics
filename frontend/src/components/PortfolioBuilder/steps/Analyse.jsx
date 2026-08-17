@@ -278,6 +278,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
   const [stressData, setStressData] = useState(null);
   const [stressLoading, setStressLoading] = useState(false);
   const [stressError, setStressError] = useState(null);
+  const [bmStress, setBmStress] = useState(null);
 
   useEffect(() => {
     if (activeTab !== 'stress' || funds.length === 0) return;
@@ -289,12 +290,21 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
       .then(r => r.json())
       .then(d => { setStressData(d); setStressLoading(false); })
       .catch(e => { setStressError('Failed to load stress test data.'); setStressLoading(false); });
+
+    // Fetch blended benchmark stress returns if benchmarks set
+    if (benchmarks && benchmarks.length > 0) {
+      const bmNames = benchmarks.map(b => b.name || b.display_name).join(',');
+      const bmWts   = benchmarks.map(b => b.weight || 0).join(',');
+      fetch(`${API}/api/benchmarks/stress-returns?index_names=${encodeURIComponent(bmNames)}&weights=${encodeURIComponent(bmWts)}`)
+        .then(r => r.json()).then(d => setBmStress(d)).catch(() => setBmStress(null));
+    } else { setBmStress(null); }
   }, [activeTab, funds.map(f => f.isin).join(','), JSON.stringify(weights)]);
 
   // ── Rolling returns state & fetch (daily-NAV based) ─────────────────────
   const [rollingData, setRollingData] = useState(null);
   const [rollingLoading, setRollingLoading] = useState(false);
   const [rollingError, setRollingError] = useState(null);
+  const [bmRolling, setBmRolling] = useState(null);
 
   useEffect(() => {
     if (activeTab !== 'rolling' || funds.length === 0) return;
@@ -306,6 +316,18 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
       .then(r => { if (!r.ok) throw new Error('Failed to compute rolling metrics'); return r.json(); })
       .then(d => { setRollingData(d.funds || {}); setRollingLoading(false); })
       .catch(e => { setRollingError(e.message); setRollingLoading(false); });
+
+    // Fetch benchmark rolling metrics if benchmarks are set
+    if (benchmarks && benchmarks.length > 0) {
+      const bmNames = benchmarks.map(b => b.name || b.display_name).join(',');
+      const bmWts   = benchmarks.map(b => b.weight || 0).join(',');
+      fetch(`${API}/api/benchmarks/rolling-metrics?index_names=${encodeURIComponent(bmNames)}&weights=${encodeURIComponent(bmWts)}`)
+        .then(r => r.json())
+        .then(d => setBmRolling(d))
+        .catch(() => setBmRolling(null));
+    } else {
+      setBmRolling(null);
+    }
   }, [activeTab, funds.map(f => f.isin).join(',')]);
 
   // Compute blended benchmark from benchmarks array (manual weights)
@@ -363,7 +385,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
   const isMultiBm = benchmarks.length > 1;
   const bmDisplayName = isMultiBm
-    ? 'Blended BM'
+    ? 'Blended Benchmark'
     : (benchmarks[0]?.display_name || 'Benchmark');
   const bmComposition = isMultiBm
     ? benchmarks.map(b => `${b.display_name} ${b.weight}%`).join(' + ')
@@ -2030,7 +2052,9 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
         const { scenarios } = stressData || {};
         if (!scenarios || scenarios.length === 0) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No scenario data available.</div>;
-        const withData = scenarios.filter(s => s.has_data && s.portfolio_return != null);
+        const HIDDEN_SCENARIOS = ['gfc', 'euro'];
+        const scenarios_filtered = scenarios.filter(s => !HIDDEN_SCENARIOS.includes(s.id));
+        const withData = scenarios_filtered.filter(s => s.has_data && s.portfolio_return != null);
         const worstReturn = withData.length > 0 ? Math.min(...withData.map(s => s.portfolio_return)) : 0;
 
         const retColor = v => v == null ? 'var(--text-muted)' : v >= 0 ? 'var(--pos)' : 'var(--neg)';
@@ -2052,7 +2076,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
             <div className="ptf-card" style={{ marginBottom: 14 }}>
               <div className="ptf-card-hd">Portfolio drawdown by scenario — actual NAV returns</div>
               <div style={{ padding: 14 }}>
-                {scenarios.map(sc => {
+                {scenarios_filtered.map(sc => {
                   const v = sc.portfolio_return;
                   const pct = worstReturn < 0 && v != null ? Math.abs(v / worstReturn * 100) : 0;
                   return (
@@ -2085,7 +2109,9 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                       <th style={{ padding: '8px 14px', textAlign: 'center', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>Period</th>
                       <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>Portfolio</th>
                       <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>Nifty 500</th>
-                      <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>Cushion vs Index</th>
+                      {bmStress && !bmStress.error && <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#1A5C3A', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>Blended BM</th>}
+                      <th style={{ padding: '8px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>Cushion vs {bmStress && !bmStress.error ? 'Blended BM' : 'Nifty 500'}</th>
+                      <th style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', borderLeft: '2px solid var(--border)' }}></th>
                       {funds.map(f => (
                         <th key={f.isin} style={{ padding: '8px 14px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {f.name?.split(' ').slice(0, 3).join(' ')}
@@ -2095,15 +2121,20 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                     </tr>
                   </thead>
                   <tbody>
-                    {scenarios.map((sc, i) => (
+                    {scenarios_filtered.map((sc, i) => (
                       <tr key={sc.id} style={{ borderBottom: '1px solid var(--bg-secondary)', background: i % 2 === 0 ? 'var(--bg-secondary)' : '#fff' }}>
                         <td style={{ padding: '10px 14px', fontWeight: 500, color: 'var(--text-primary)' }}>{sc.name}</td>
                         <td style={{ padding: '10px 14px', textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{sc.label}</td>
                         <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: retColor(sc.portfolio_return) }}>{fmt2(sc.portfolio_return)}</td>
                         <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, color: retColor(sc.nifty500_return) }}>{fmt2(sc.nifty500_return)}</td>
-                        <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: sc.cushion == null ? 'var(--text-muted)' : sc.cushion >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
-                          {sc.cushion == null ? '—' : (sc.cushion >= 0 ? '+' : '') + sc.cushion.toFixed(1) + '%'}
+                        {bmStress && !bmStress.error && (() => {
+                          const bmRet = bmStress.returns?.[sc.id];
+                          return <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, color: retColor(bmRet) }}>{fmt2(bmRet)}</td>;
+                        })()}
+                        <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: (() => { const ref = bmStress && !bmStress.error ? bmStress.returns?.[sc.id] : sc.nifty500_return; const cushion = sc.portfolio_return != null && ref != null ? sc.portfolio_return - ref : null; return cushion == null ? 'var(--text-muted)' : cushion >= 0 ? 'var(--pos)' : 'var(--neg)'; })() }}>
+                          {(() => { const ref = bmStress && !bmStress.error ? bmStress.returns?.[sc.id] : sc.nifty500_return; const cushion = sc.portfolio_return != null && ref != null ? sc.portfolio_return - ref : null; return cushion == null ? '—' : (cushion >= 0 ? '+' : '') + cushion.toFixed(1) + '%'; })()}
                         </td>
+                        <td style={{ padding: '10px 14px', borderLeft: '2px solid var(--border)' }} />
                         {funds.map(f => (
                           <td key={f.isin} style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, color: retColor(sc.fund_returns?.[f.isin]) }}>
                             {fmt2(sc.fund_returns?.[f.isin])}
@@ -2116,6 +2147,8 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
               </div>
               <div style={{ padding: '8px 14px', fontSize: 10, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
                 Returns calculated from actual NAV history. "—" means the fund was not active or NAV data is unavailable for that period.
+                {benchmarks && benchmarks.length > 0 && !bmStress && <span style={{ color: '#B46B10', marginLeft: 8 }}>⏳ Loading benchmark column…</span>}
+                {bmStress?.error && <span style={{ color: 'var(--neg)', marginLeft: 8 }}>Benchmark stress unavailable ({bmStress.error})</span>}
               </div>
             </div>
           </div>
@@ -2195,11 +2228,11 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
         return (
           <div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 14, marginBottom: 14 }}>
-              {/* Style box */}
-              <div className="ptf-card">
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
+              {/* Style box — centred */}
+              <div className="ptf-card" style={{ minWidth: 280, maxWidth: 360 }}>
                 <div className="ptf-card-hd">Morningstar style box</div>
-                <div style={{ padding: 14 }}>
+                <div style={{ padding: 14, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                   <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} style={{ display: 'block' }}>
                     {ROW_LBLS.map((l, i) => (
                       <text key={l} x={38} y={45 + i * CELL + CELL / 2 + 4} textAnchor="end" fontSize={10} fill="#A2A0A0" fontFamily="var(--font-body)">{l}</text>
@@ -2222,26 +2255,11 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                     })}
                   </svg>
                   {domStyle && (
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.6, textAlign: 'center' }}>
                       Dominant style: <strong style={{ color: 'var(--brand-primary)' }}>{domStyle}</strong> ({domPct.toFixed(0)}% of portfolio)
                     </div>
                   )}
                   {!domStyle && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>No equity style data available for these funds.</div>}
-                </div>
-              </div>
-
-              {/* Cap-tier drift */}
-              <div className="ptf-card">
-                <div className="ptf-card-hd">Cap-tier drift vs neutral (60 / 25 / 15)</div>
-                <div style={{ padding: 14 }}>
-                  <DriftBar label="Large cap" current={blendedLc} neutral={60} drift={lcDrift} />
-                  <DriftBar label="Mid cap"   current={blendedMc} neutral={25} drift={mcDrift} />
-                  <DriftBar label="Small cap" current={blendedSc} neutral={15} drift={scDrift} />
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
-                    {(Math.abs(lcDrift) > 10 || Math.abs(mcDrift) > 10 || Math.abs(scDrift) > 10)
-                      ? <span style={{ color: '#B46B10' }}>⚠ Meaningful cap-tier drift — portfolio has deviated significantly from the 60/25/15 neutral mix.</span>
-                      : <span style={{ color: 'var(--pos)' }}>✓ Cap-tier allocation is broadly balanced vs the 60/25/15 neutral mix.</span>}
-                  </div>
                 </div>
               </div>
             </div>
@@ -2393,9 +2411,42 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                         </td>
                         <td style={{ padding: '8px 12px' }} />
                       </tr>
+                      {bmRolling && !bmRolling.error && (
+                        <tr style={{ borderTop: '1px solid var(--border)', background: '#1E2A3A' }}>
+                          <td style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, color: '#fff', textAlign: 'left' }}>
+                            {bmDisplayName}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'rgba(255,255,255,.5)' }}>BM</td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#fff' }}>
+                            {bmRolling.rolling_3m_avg_1y != null ? (bmRolling.rolling_3m_avg_1y >= 0 ? '+' : '') + bmRolling.rolling_3m_avg_1y.toFixed(1) + '%' : '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#fff' }}>
+                            {bmRolling.rolling_1y_avg_3y != null ? (bmRolling.rolling_1y_avg_3y >= 0 ? '+' : '') + bmRolling.rolling_1y_avg_3y.toFixed(1) + '%' : '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#fff' }}>
+                            {bmRolling.rolling_3y_cagr_avg_5y != null ? (bmRolling.rolling_3y_cagr_avg_5y >= 0 ? '+' : '') + bmRolling.rolling_3y_cagr_avg_5y.toFixed(1) + '%' : '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px' }} />
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
+                {bmRolling && !bmRolling.error && (
+                  <div style={{ padding: '8px 14px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>
+                    Benchmark: {bmRolling.benchmark_label} · Same lookback windows as fund rolling returns (3M avg 1Y, 1Y avg 3Y, 3Y CAGR avg 5Y) · {bmRolling.common_days} common trading days available
+                  </div>
+                )}
+                {benchmarks && benchmarks.length > 0 && !bmRolling && (
+                  <div style={{ padding: '8px 14px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
+                    Computing benchmark rolling returns…
+                  </div>
+                )}
+                {(!benchmarks || benchmarks.length === 0) && (
+                  <div style={{ padding: '8px 14px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>
+                    No benchmark set — configure in Client &amp; IPS → Section E to compare against benchmark rolling returns.
+                  </div>
+                )}
               </div>
             </div>
           );

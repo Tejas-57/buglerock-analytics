@@ -683,7 +683,7 @@ STRESS_SCENARIOS = [
 def get_stress_test(isins: str, weights: str):
     """
     For each historical stress scenario, compute actual portfolio return using
-    weighted NAV history from the DB, and Nifty 500 return via yfinance.
+    weighted NAV history from the DB, and Nifty 500 return from benchmark_nav table.
 
     isins:   comma-separated ISINs
     weights: comma-separated weights (same order, summing to 100)
@@ -696,50 +696,86 @@ def get_stress_test(isins: str, weights: str):
     if len(isin_list) != len(weight_list):
         raise HTTPException(400, "ISINs and weights must have same length")
 
-    # Fetch Nifty 500 data for all scenario date ranges in one call
+    # Fetch Nifty 500 returns from benchmark_nav (same source as blended benchmark)
+    # Using benchmark_nav ensures consistency — both Nifty 500 and blended BM
+    # come from the same data source and the same date conventions.
     nifty500_returns = {}
-    NIFTY500_TICKERS = ["^CRSLDX", "^CNX500", "NIFTY500.NS", "CNX500.NS"]
     try:
-        import yfinance as yf
-        nifty_df = None
-        for ticker in NIFTY500_TICKERS:
-            logger.info(f"Trying Nifty 500 ticker: {ticker}")
-            try:
-                df = yf.download(ticker, start="2007-01-01", end=date.today().isoformat(), progress=False, auto_adjust=True)
-                if not df.empty:
-                    logger.info(f"Nifty 500 ticker {ticker} returned {len(df)} rows")
-                    nifty_df = df
-                    break
-                else:
-                    logger.warning(f"Ticker {ticker} returned empty dataframe")
-            except Exception as te:
-                logger.warning(f"Ticker {ticker} failed: {te}")
-        if nifty_df is not None and not nifty_df.empty:
-            # Flatten multi-level columns if present
-            if hasattr(nifty_df.columns, 'levels'):
-                nifty_df.columns = nifty_df.columns.get_level_values(0)
-            nifty_close = nifty_df["Close"]
-            for sc in STRESS_SCENARIOS:
-                start = date.fromisoformat(sc["start"])
-                end   = date.fromisoformat(sc["end"])
-                mask = (nifty_close.index.date >= start - timedelta(days=10)) & \
-                       (nifty_close.index.date <= end + timedelta(days=10))
-                window = nifty_close[mask]
-                if len(window) >= 2:
-                    start_val = window.iloc[0]
-                    end_val   = window.iloc[-1]
-                    nifty500_returns[sc["id"]] = round((float(end_val) / float(start_val) - 1) * 100, 2)
-                else:
-                    nifty500_returns[sc["id"]] = None
-        else:
-            logger.warning("All Nifty 500 tickers failed or returned empty data")
-            nifty500_returns = {sc["id"]: None for sc in STRESS_SCENARIOS}
+        from sqlalchemy import text
+        from models.database import engine
+        # Compute full date range needed
+        sc_starts = [date.fromisoformat(sc["start"]) for sc in STRESS_SCENARIOS]
+        sc_ends   = [date.fromisoformat(sc["end"])   for sc in STRESS_SCENARIOS]
+        with engine.connect() as conn:
+            # ONE query for all scenario dates
+            rows = conn.execute(text("""
+                SELECT nav_date, value FROM benchmark_nav
+                WHERE index_name = 'Nifty 500'
+                  AND nav_date >= CAST(:s AS date) - INTERVAL '10 days'
+                  AND nav_date <= CAST(:e AS date) + INTERVAL '10 days'
+                ORDER BY nav_date ASC
+            """), {"s": min(sc_starts).isoformat(), "e": max(sc_ends).isoformat()}).fetchall()
+        nifty_nav = {r[0]: float(r[1]) for r in rows}
+        def nearest_nifty(target, prefer_after=True):
+            candidates = [(d, v) for d, v in nifty_nav.items() if abs((d - target).days) <= 10]
+            if not candidates: return None
+            if prefer_after:
+                after = [(d, v) for d, v in candidates if d >= target]
+                return min(after, key=lambda x: x[0])[1] if after else min(candidates, key=lambda x: abs((x[0]-target).days))[1]
+            else:
+                before = [(d, v) for d, v in candidates if d <= target]
+                return max(before, key=lambda x: x[0])[1] if before else min(candidates, key=lambda x: abs((x[0]-target).days))[1]
+        for sc in STRESS_SCENARIOS:
+            sv = nearest_nifty(date.fromisoformat(sc["start"]), prefer_after=True)
+            ev = nearest_nifty(date.fromisoformat(sc["end"]),   prefer_after=False)
+            nifty500_returns[sc["id"]] = round((ev/sv - 1)*100, 2) if sv and ev and sv > 0 else None
+        logger.info(f"Nifty 500 stress returns from benchmark_nav: {nifty500_returns}")
     except Exception as e:
-        logger.warning(f"Nifty 500 fetch failed (non-fatal): {e}")
+        logger.warning(f"Nifty 500 benchmark_nav fetch failed: {e}")
         nifty500_returns = {sc["id"]: None for sc in STRESS_SCENARIOS}
+
+    # Compute date range needed across ALL scenarios
+    all_starts = [date.fromisoformat(sc["start"]) - timedelta(days=10) for sc in STRESS_SCENARIOS]
+    all_ends   = [date.fromisoformat(sc["end"])   + timedelta(days=10) for sc in STRESS_SCENARIOS]
+    global_start = min(all_starts)
+    global_end   = max(all_ends)
 
     db = SessionLocal()
     try:
+        # ONE bulk query for all funds across the full date range
+        all_rows = (
+            db.query(NavHistory.isin, NavHistory.date, NavHistory.nav)
+            .filter(
+                NavHistory.isin.in_(isin_list),
+                NavHistory.date >= global_start,
+                NavHistory.date <= global_end,
+                NavHistory.nav != None,
+            )
+            .order_by(NavHistory.isin, NavHistory.date)
+            .all()
+        )
+
+        # Build in-memory lookup: {isin: [(date, nav), ...]} sorted by date
+        from collections import defaultdict
+        nav_lookup = defaultdict(list)
+        for row in all_rows:
+            nav_lookup[row.isin].append((row.date, row.nav))
+
+        def nearest_nav(isin, target_date, direction='nearest'):
+            """Find NAV nearest to target_date within ±10 days."""
+            rows = nav_lookup.get(isin, [])
+            if not rows: return None
+            candidates = [(d, n) for d, n in rows if abs((d - target_date).days) <= 10]
+            if not candidates: return None
+            if direction == 'start':
+                # Prefer dates >= target (first available on or after)
+                after = [(d, n) for d, n in candidates if d >= target_date]
+                return min(after, key=lambda x: x[0]) if after else min(candidates, key=lambda x: abs((x[0] - target_date).days))
+            else:
+                # Prefer dates <= target (last available on or before)
+                before = [(d, n) for d, n in candidates if d <= target_date]
+                return max(before, key=lambda x: x[0]) if before else min(candidates, key=lambda x: abs((x[0] - target_date).days))
+
         results = []
         for sc in STRESS_SCENARIOS:
             start = date.fromisoformat(sc["start"])
@@ -749,27 +785,11 @@ def get_stress_test(isins: str, weights: str):
             has_data = False
 
             for isin in isin_list:
-                nav_rows = (
-                    db.query(NavHistory)
-                    .filter(
-                        NavHistory.isin == isin,
-                        NavHistory.date >= start - timedelta(days=10),
-                        NavHistory.date <= end + timedelta(days=10),
-                        NavHistory.nav != None,
-                    )
-                    .order_by(NavHistory.date)
-                    .all()
-                )
+                sv = nearest_nav(isin, start, 'start')
+                ev = nearest_nav(isin, end,   'end')
 
-                if not nav_rows:
-                    fund_returns[isin] = None
-                    continue
-
-                start_row = min(nav_rows, key=lambda r: abs((r.date - start).days))
-                end_row   = min(nav_rows, key=lambda r: abs((r.date - end).days))
-
-                if start_row.nav and end_row.nav and start_row.date != end_row.date:
-                    ret = (end_row.nav / start_row.nav - 1) * 100
+                if sv and ev and sv[1] and ev[1] and sv[0] != ev[0]:
+                    ret = (ev[1] / sv[1] - 1) * 100
                     fund_returns[isin] = round(ret, 2)
                     has_data = True
                 else:
@@ -778,11 +798,11 @@ def get_stress_test(isins: str, weights: str):
             portfolio_return = None
             if has_data:
                 weighted_sum = 0
-                weight_used = 0
+                weight_used  = 0
                 for isin, wt in zip(isin_list, weight_list):
                     if fund_returns.get(isin) is not None:
                         weighted_sum += fund_returns[isin] * wt
-                        weight_used += wt
+                        weight_used  += wt
                 if weight_used > 0:
                     portfolio_return = round(weighted_sum / weight_used, 2)
 
