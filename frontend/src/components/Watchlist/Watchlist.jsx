@@ -117,7 +117,7 @@ function FundCard({ fund, data, onRemove, onSelect, selected, onToggleSelect, da
       <div onClick={() => onSelect(fund)} style={{ paddingLeft: 24, paddingRight: 20, marginBottom: 8 }}>
         <div style={{ fontFamily: 'var(--font-serif)', fontSize: 14, fontWeight: 600, color: 'var(--brand-dark)', lineHeight: 1.3, marginBottom: 5 }}>{fund.name}</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          {fund.category && <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 20, background: 'rgba(145,47,99,0.08)', color: 'var(--brand-primary)', fontWeight: 500 }}>{fund.category.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}</span>}
+          {(f?.category || fund.category) && <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 20, background: 'rgba(145,47,99,0.08)', color: 'var(--brand-primary)', fontWeight: 500 }}>{(f?.category || fund.category).replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}</span>}
           {f?.morningstar_rating && f.morningstar_rating !== '-' && <span style={{ fontSize: 11, color: '#B46B10', letterSpacing: -1 }}>{stars(f.morningstar_rating)}</span>}
 
         </div>

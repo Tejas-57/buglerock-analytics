@@ -13,7 +13,6 @@ const TABS = [
   { id: 'risk',     label: 'Risk metrics',           sep_after: true },
   { id: 'correlation', label: 'Correlation' },
   { id: 'overlap',  label: 'Overlap' },
-  { id: 'rolling',  label: 'Rolling returns' },
   { id: 'drift',    label: 'Style & drift',          sep_after: true },
   { id: 'stress',   label: 'Stress test' },
   { id: 'sensitivity', label: 'Sensitivity' },
@@ -395,7 +394,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
   const [bmRolling, setBmRolling] = useState(null);
 
   useEffect(() => {
-    if (activeTab !== 'rolling' || funds.length === 0) return;
+    if (activeTab !== 'returns' || funds.length === 0) return;
     const API = process.env.REACT_APP_API_URL || '';
     const isins = funds.map(f => f.isin).join(',');
     setRollingLoading(true);
@@ -517,6 +516,8 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
   const sipAmt = ips?.monthlySIP ? parseFloat(ips.monthlySIP.replace(/[^0-9.]/g, '')) : 10000;
 
   function sipFV(m, r, y) { const mo = r / 100 / 12; if (mo === 0) return m * 12 * y; return m * ((Math.pow(1 + mo, 12 * y) - 1) / mo) * (1 + mo); }
+
+  const MUT_C='#6D5479',GR60_C='#A2A0A0',GR80_C='#374151',GR20_C='#E8E5EC',GR10_C='#F8F6FA',POS_C='#1A7A52',NEG_C='#B91C1C',WARN_C='#D97706',LAV_C='#A795AE',PLUM_C='#3E3452',BERRY_C='#912F63';
 
   // Asset class classification helpers — used in Sensitivity and What-If tabs
   function isEquityLike(fsnap, f) {
@@ -743,6 +744,16 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
     w.document.close();
   }
 
+  // inr formatter and growth projection calcs — component level for use in Returns tab
+  function inr(v){ if(v==null) return '—'; const s=v<0?'−':''; v=Math.abs(Math.round(v)); if(v>=10000000) return s+'₹'+(v/10000000).toFixed(2)+' Cr'; if(v>=100000) return s+'₹'+(v/100000).toFixed(2)+' L'; return s+'₹'+v.toLocaleString('en-IN'); }
+  const _gR3y=B.return_3y, _gRate=(_gR3y!=null?_gR3y:12)/100, _gMoRate=Math.pow(1+_gRate,1/12)-1, _gMonths=wiYears*12, _gInfl=wiInflation/100;
+  const lumpFuture=wiLump*Math.pow(1+_gRate,wiYears);
+  const sipFuture=wiSip*(_gMoRate>0?((Math.pow(1+_gMoRate,_gMonths)-1)/_gMoRate)*(1+_gMoRate):_gMonths);
+  const totalFuture=lumpFuture+sipFuture, totalInvested=wiLump+wiSip*_gMonths, gains=totalFuture-totalInvested;
+  const realValue=totalFuture/Math.pow(1+_gInfl,wiYears);
+  const targetMinusLump=wiTarget-lumpFuture;
+  const requiredSip=targetMinusLump>0&&_gMoRate>0?targetMinusLump/(((Math.pow(1+_gMoRate,_gMonths)-1)/_gMoRate)*(1+_gMoRate)):null;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       {/* Tab bar */}
@@ -951,68 +962,6 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
               ))}
             </div>
 
-            {/* Projection cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
-              <div className="ptf-card">
-                <div className="ptf-card-hd">Lump sum projection — {fmtL(investAmt)}</div>
-                <div style={{ padding: '10px 14px', overflowX: 'auto' }}>
-                  <table className="ptf-analytics-tbl">
-                    <thead><tr><th style={{ textAlign: 'left' }}>Horizon</th><th>Portfolio</th><th>{bmDisplayName}</th><th>Gain</th></tr></thead>
-                    <tbody>
-                      {[3, 5, 10].map(y => {
-                        const ptfR = y === 3 ? (B.return_3y || 0) : (B.return_5y || B.return_3y || 0);
-                        const bmR  = y === 3 ? bm.rets.r3y : (bm.rets.r5y || bm.rets.r3y);
-                        const ptfV = investAmt * Math.pow(1 + ptfR / 100, y);
-                        const bmV  = bmR != null ? investAmt * Math.pow(1 + bmR / 100, y) : null;
-                        return (
-                          <tr key={y}>
-                            <td>{y} yrs <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>@ {ptfR.toFixed(1)}%</span></td>
-                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--brand-primary)' }}>{fmtL(ptfV)}</td>
-                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{bmV != null ? fmtL(bmV) : '—'}</td>
-                            <td style={{ fontFamily: 'var(--font-mono)', color: bmV != null ? (ptfV >= bmV ? 'var(--pos)' : 'var(--brand-primary)') : 'var(--text-muted)' }}>
-                              {bmV != null ? (ptfV >= bmV ? '+' : '-') + fmtL(Math.abs(ptfV - bmV)) : '—'}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div className="ptf-card">
-                <div className="ptf-card-hd">SIP projection — ₹{sipAmt.toLocaleString('en-IN')}/month</div>
-                <div style={{ padding: '10px 14px', overflowX: 'auto' }}>
-                  <table className="ptf-analytics-tbl">
-                    <thead><tr><th style={{ textAlign: 'left' }}>Horizon</th><th>Invested</th><th>Portfolio</th><th>vs BM</th></tr></thead>
-                    <tbody>
-                      {[5, 10].map(y => {
-                        const ptfR = B.return_5y || B.return_3y || 0;
-                        const bmR  = bm.rets.r5y || bm.rets.r3y;
-                        const ptfV = sipFV(sipAmt, ptfR, y);
-                        const bmV  = bmR != null ? sipFV(sipAmt, bmR, y) : null;
-                        const invested = sipAmt * 12 * y;
-                        return (
-                          <tr key={y}>
-                            <td>{y} yrs <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>@ {ptfR.toFixed(1)}%</span></td>
-                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{fmtL(invested)}</td>
-                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--brand-primary)' }}>{fmtL(ptfV)}</td>
-                            <td style={{ fontFamily: 'var(--font-mono)', color: bmV != null ? (ptfV >= bmV ? 'var(--pos)' : 'var(--brand-primary)') : 'var(--text-muted)' }}>
-                              {bmV != null ? (ptfV >= bmV ? '+' : '') + (((ptfV - bmV) / bmV) * 100).toFixed(1) + '%' : '—'}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
-                    Based on blended 5Y CAGR ({(B.return_5y || B.return_3y || 0).toFixed(2)}% p.a.) vs {bmDisplayName} ({(bm.rets.r5y || bm.rets.r3y || 0).toFixed(2)}% p.a.). Lump sum uses 3Y CAGR for 3yr horizon, 5Y CAGR for 5yr and 10yr. Illustrative only — not a guarantee of future returns.
-                    {bmComposition && <><br/><strong>Benchmark:</strong> {bmComposition}</>}
-                    {bmMissingNotes.length > 0 && <><br/><span style={{ color: 'var(--warn, #D97706)' }}>~ Partial data — {bmMissingNotes.join('; ')}</span></>}
-                  </div>
-                </div>
-              </div>
-            </div>
-
             {/* Per-fund return table */}
             <div className="ptf-card">
               <div className="ptf-card-hd">Return contribution per fund</div>
@@ -1084,6 +1033,270 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                 </div>
               </div>
             </div>
+            {/* Projection cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+              <div className="ptf-card">
+                <div className="ptf-card-hd">Lump sum projection — {fmtL(investAmt)}</div>
+                <div style={{ padding: '10px 14px', overflowX: 'auto' }}>
+                  <table className="ptf-analytics-tbl">
+                    <thead><tr><th style={{ textAlign: 'left' }}>Horizon</th><th>Portfolio</th><th>{bmDisplayName}</th><th>Gain</th></tr></thead>
+                    <tbody>
+                      {[3, 5, 10].map(y => {
+                        const ptfR = y === 3 ? (B.return_3y || 0) : (B.return_5y || B.return_3y || 0);
+                        const bmR  = y === 3 ? bm.rets.r3y : (bm.rets.r5y || bm.rets.r3y);
+                        const ptfV = investAmt * Math.pow(1 + ptfR / 100, y);
+                        const bmV  = bmR != null ? investAmt * Math.pow(1 + bmR / 100, y) : null;
+                        return (
+                          <tr key={y}>
+                            <td>{y} yrs <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>@ {ptfR.toFixed(1)}%</span></td>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--brand-primary)' }}>{fmtL(ptfV)}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{bmV != null ? fmtL(bmV) : '—'}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)', color: bmV != null ? (ptfV >= bmV ? 'var(--pos)' : 'var(--brand-primary)') : 'var(--text-muted)' }}>
+                              {bmV != null ? (ptfV >= bmV ? '+' : '-') + fmtL(Math.abs(ptfV - bmV)) : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="ptf-card">
+                <div className="ptf-card-hd">SIP projection — ₹{sipAmt.toLocaleString('en-IN')}/month</div>
+                <div style={{ padding: '10px 14px', overflowX: 'auto' }}>
+                  <table className="ptf-analytics-tbl">
+                    <thead><tr><th style={{ textAlign: 'left' }}>Horizon</th><th>Invested</th><th>Portfolio</th><th>vs BM</th></tr></thead>
+                    <tbody>
+                      {[5, 10].map(y => {
+                        const ptfR = B.return_5y || B.return_3y || 0;
+                        const bmR  = bm.rets.r5y || bm.rets.r3y;
+                        const ptfV = sipFV(sipAmt, ptfR, y);
+                        const bmV  = bmR != null ? sipFV(sipAmt, bmR, y) : null;
+                        const invested = sipAmt * 12 * y;
+                        return (
+                          <tr key={y}>
+                            <td>{y} yrs <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>@ {ptfR.toFixed(1)}%</span></td>
+                            <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{fmtL(invested)}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--brand-primary)' }}>{fmtL(ptfV)}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)', color: bmV != null ? (ptfV >= bmV ? 'var(--pos)' : 'var(--brand-primary)') : 'var(--text-muted)' }}>
+                              {bmV != null ? (ptfV >= bmV ? '+' : '') + (((ptfV - bmV) / bmV) * 100).toFixed(1) + '%' : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+                    Based on blended 5Y CAGR ({(B.return_5y || B.return_3y || 0).toFixed(2)}% p.a.) vs {bmDisplayName} ({(bm.rets.r5y || bm.rets.r3y || 0).toFixed(2)}% p.a.). Lump sum uses 3Y CAGR for 3yr horizon, 5Y CAGR for 5yr and 10yr. Illustrative only — not a guarantee of future returns.
+                    {bmComposition && <><br/><strong>Benchmark:</strong> {bmComposition}</>}
+                    {bmMissingNotes.length > 0 && <><br/><span style={{ color: 'var(--warn, #D97706)' }}>~ Partial data — {bmMissingNotes.join('; ')}</span></>}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+
+            {/* Growth projection */}
+            <div style={{ marginBottom:18, border:'1px solid '+GR20_C, borderRadius:8, overflow:'hidden', background:'#fff' }}>
+              <div style={{ padding:'10px 16px', fontSize:9.5, fontWeight:700, letterSpacing:'.07em', textTransform:'uppercase', color:BERRY_C, background:GR10_C, borderBottom:'1px solid '+GR20_C }}>Growth projection — what if you invested for the long term?</div>
+              <div style={{ padding:'16px 20px' }}>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:14 }}>
+                  <div>
+                    <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT_C }}>Lump sum (₹)</label>
+                    <input type="number" value={wiLump} onChange={e=>setWiLump(parseFloat(e.target.value)||0)} style={{ width:'100%', marginTop:4, padding:'7px 9px', border:'1px solid '+GR20_C, borderRadius:6, fontSize:12.5 }}/>
+                  </div>
+                  <div>
+                    <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT_C }}>Monthly SIP (₹)</label>
+                    <input type="number" value={wiSip} onChange={e=>setWiSip(parseFloat(e.target.value)||0)} style={{ width:'100%', marginTop:4, padding:'7px 9px', border:'1px solid '+GR20_C, borderRadius:6, fontSize:12.5 }}/>
+                  </div>
+                  <div>
+                    <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT_C }}>Horizon: {wiYears} years</label>
+                    <input type="range" min={1} max={30} value={wiYears} onChange={e=>setWiYears(parseInt(e.target.value))} style={{ width:'100%', marginTop:9 }}/>
+                  </div>
+                  <div>
+                    <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT_C }}>Inflation (%)</label>
+                    <input type="number" value={wiInflation} step={0.5} onChange={e=>setWiInflation(parseFloat(e.target.value)||0)} style={{ width:'100%', marginTop:4, padding:'7px 9px', border:'1px solid '+GR20_C, borderRadius:6, fontSize:12.5 }}/>
+                  </div>
+                </div>
+
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
+                  <div style={{ background:GR10_C, borderRadius:8, padding:12 }}>
+                    <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT_C, marginBottom:4 }}>Future value (nominal)</div>
+                    <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:PLUM_C }}>{inr(totalFuture)}</div>
+                  </div>
+                  <div style={{ background:GR10_C, borderRadius:8, padding:12 }}>
+                    <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT_C, marginBottom:4 }}>Real value (today's ₹)</div>
+                    <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:PLUM_C }}>{inr(realValue)}</div>
+                  </div>
+                  <div style={{ background:GR10_C, borderRadius:8, padding:12 }}>
+                    <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT_C, marginBottom:4 }}>Total invested</div>
+                    <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:GR80_C }}>{inr(totalInvested)}</div>
+                  </div>
+                  <div style={{ background:'#F0F9F5', borderRadius:8, padding:12 }}>
+                    <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT_C, marginBottom:4 }}>Estimated gains</div>
+                    <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:POS_C }}>{inr(gains)}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize:10.5, color:GR60_C, marginTop:10 }}>Using portfolio's 3Y CAGR ({_gR3y!=null?_gR3y.toFixed(1):'—'}%) as the annual growth assumption. Real value discounts nominal by inflation at {wiInflation}%.</div>
+
+                {/* Reverse calculator */}
+                <div style={{ borderTop:'1px solid '+GR20_C, marginTop:16, paddingTop:14 }}>
+                  <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:MUT_C, marginBottom:8 }}>Reverse calculator — what SIP do you need to hit a target?</div>
+                  <div style={{ display:'flex', gap:14, alignItems:'flex-end', flexWrap:'wrap' }}>
+                    <div>
+                      <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT_C }}>Target corpus (₹)</label>
+                      <input type="number" value={wiTarget} onChange={e=>setWiTarget(parseFloat(e.target.value)||0)} style={{ width:180, marginTop:4, padding:'7px 9px', border:'1px solid '+GR20_C, borderRadius:6, fontSize:12.5 }}/>
+                    </div>
+                    <div style={{ flex:1, minWidth:220, background:GR10_C, borderRadius:8, padding:12 }}>
+                      <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT_C, marginBottom:4 }}>Required monthly SIP</div>
+                      <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:PLUM_C }}>{requiredSip!=null && requiredSip>0 ? inr(requiredSip) : (targetMinusLump <= 0 ? 'Lump sum alone suffices' : '—')}</div>
+                      <div style={{ fontSize:10, color:GR60_C, marginTop:2 }}>To reach {inr(wiTarget)} in {wiYears} years alongside {inr(wiLump)} lump sum</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+
+
+            {/* Rolling returns — moved from Rolling tab */}
+      {(() => {
+          if (funds.length === 0) {
+            return <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Add funds to the portfolio to see rolling returns.</div>;
+          }
+          if (rollingLoading) {
+            return <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Computing rolling returns from daily NAV history...</div>;
+          }
+          if (rollingError) {
+            return <div style={{ padding: 32, textAlign: 'center', color: 'var(--neg)', fontSize: 13 }}>{rollingError}</div>;
+          }
+          if (!rollingData) return null;
+
+          const rows = funds.map(f => {
+            const d = rollingData[f.isin] || {};
+            return {
+              f,
+              w: weights[f.isin] || 0,
+              r3m: d.rolling_3m_avg_1y != null ? d.rolling_3m_avg_1y : null,
+              r3mN: d.rolling_3m_window_count || 0,
+              r1y: d.rolling_1y_avg_3y != null ? d.rolling_1y_avg_3y : null,
+              r1yN: d.rolling_1y_window_count || 0,
+              r3y: d.rolling_3y_cagr_avg_5y != null ? d.rolling_3y_cagr_avg_5y : null,
+              r3yN: d.rolling_3y_window_count || 0,
+              years: d.years_available || 0,
+            };
+          });
+
+          function weightedAvg(getter) {
+            let wSum = 0, wTotal = 0;
+            rows.forEach(row => {
+              const v = getter(row);
+              if (v == null) return;
+              wSum += v * row.w; wTotal += row.w;
+            });
+            return wTotal > 0 ? wSum / wTotal : null;
+          }
+          const port3m = weightedAvg(r => r.r3m);
+          const port1y = weightedAvg(r => r.r1y);
+          const port3y = weightedAvg(r => r.r3y);
+
+          const colorFor = (v) => v == null ? 'var(--text-muted)' : v >= 12 ? 'var(--pos)' : v >= 6 ? '#D97706' : 'var(--neg)';
+          const colorFor3m = (v) => v == null ? 'var(--text-muted)' : v >= 4 ? 'var(--pos)' : v >= 0 ? '#D97706' : 'var(--neg)';
+
+          return (
+            <div>
+              <div style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                Computed from each fund's daily NAV history. <strong>3M rolling return</strong> is the average of all overlapping 3-month (63 trading-day) return windows over the trailing 1 year. <strong>1Y rolling return</strong> is the average of all overlapping 1-year (252 trading-day) return windows over the trailing 3 years. <strong>3Y rolling CAGR</strong> is the average of all overlapping 3-year CAGR windows over the trailing 5 years. Funds with less history than required show "—".
+              </div>
+              <div className="ptf-card">
+                <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Rolling return consistency by fund</div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>Fund</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>Weight</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>3M Rolling Return — Avg (1Y)</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>1Y Rolling Return — Avg (3Y)</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>3Y Rolling CAGR — Avg (5Y)</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>NAV History</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, fi) => (
+                        <tr key={row.f.isin} style={{ background: fi % 2 === 0 ? 'var(--bg-secondary)' : '#fff' }}>
+                          <td style={{ padding: '8px 12px', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', textAlign: 'left' }}>
+                            <span style={{ display: 'inline-block', width: 3, height: 20, background: row.f.color, borderRadius: 2, marginRight: 8, verticalAlign: 'middle' }} />
+                            {row.f.name}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{f2(row.w)}%</td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: colorFor3m(row.r3m) }}>
+                            {row.r3m != null ? (row.r3m >= 0 ? '+' : '') + row.r3m.toFixed(1) + '%' : '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: colorFor(row.r1y) }}>
+                            {row.r1y != null ? (row.r1y >= 0 ? '+' : '') + row.r1y.toFixed(1) + '%' : '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: colorFor(row.r3y) }}>
+                            {row.r3y != null ? (row.r3y >= 0 ? '+' : '') + row.r3y.toFixed(1) + '%' : '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{row.years ? `${row.years}Y` : '—'}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ borderTop: '2px solid var(--border)', background: 'rgba(145,47,99,.06)' }}>
+                        <td style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)', textAlign: 'left' }}>Blended portfolio</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{f2(rows.reduce((s, r) => s + r.w, 0))}%</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)' }}>
+                          {port3m != null ? (port3m >= 0 ? '+' : '') + port3m.toFixed(1) + '%' : '—'}
+                        </td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)' }}>
+                          {port1y != null ? (port1y >= 0 ? '+' : '') + port1y.toFixed(1) + '%' : '—'}
+                        </td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)' }}>
+                          {port3y != null ? (port3y >= 0 ? '+' : '') + port3y.toFixed(1) + '%' : '—'}
+                        </td>
+                        <td style={{ padding: '8px 12px' }} />
+                      </tr>
+                      {bmRolling && !bmRolling.error && (
+                        <tr style={{ borderTop: '1px solid var(--border)', background: '#1E2A3A' }}>
+                          <td style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, color: '#fff', textAlign: 'left' }}>
+                            {bmDisplayName}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'rgba(255,255,255,.5)' }}>BM</td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#fff' }}>
+                            {bmRolling.rolling_3m_avg_1y != null ? (bmRolling.rolling_3m_avg_1y >= 0 ? '+' : '') + bmRolling.rolling_3m_avg_1y.toFixed(1) + '%' : '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#fff' }}>
+                            {bmRolling.rolling_1y_avg_3y != null ? (bmRolling.rolling_1y_avg_3y >= 0 ? '+' : '') + bmRolling.rolling_1y_avg_3y.toFixed(1) + '%' : '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#fff' }}>
+                            {bmRolling.rolling_3y_cagr_avg_5y != null ? (bmRolling.rolling_3y_cagr_avg_5y >= 0 ? '+' : '') + bmRolling.rolling_3y_cagr_avg_5y.toFixed(1) + '%' : '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px' }} />
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {bmRolling && !bmRolling.error && (
+                  <div style={{ padding: '8px 14px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>
+                    Benchmark: {bmRolling.benchmark_label} · Same lookback windows as fund rolling returns (3M avg 1Y, 1Y avg 3Y, 3Y CAGR avg 5Y) · {bmRolling.common_days} common trading days available
+                  </div>
+                )}
+                {benchmarks && benchmarks.length > 0 && !bmRolling && (
+                  <div style={{ padding: '8px 14px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
+                    Computing benchmark rolling returns…
+                  </div>
+                )}
+                {(!benchmarks || benchmarks.length === 0) && (
+                  <div style={{ padding: '8px 14px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>
+                    No benchmark set — configure in Client &amp; IPS → Section E to compare against benchmark rolling returns.
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
           </div>
         )}
 
@@ -1278,6 +1491,8 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
             if (parsed > 0) { notional = parsed; notionalIsClient = true; }
           }
           function inr(v){ if(v==null) return '—'; const s=v<0?'−':''; v=Math.abs(Math.round(v)); if(v>=10000000) return s+'₹'+(v/10000000).toFixed(2)+' Cr'; if(v>=100000) return s+'₹'+(v/100000).toFixed(2)+' L'; return s+'₹'+v.toLocaleString('en-IN'); }
+
+
 
           // Composite risk posture
           const betaScore = avgEqBeta != null ? Math.min(100, Math.max(0, (avgEqBeta/1.3)*60*(eqW/100) + ((100-eqW)/100)*10)) : (eqW>0?40:0);
@@ -2056,66 +2271,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
               </div> : <div style={{ padding:20, textAlign:'center', color:GR60, fontSize:11.5 }}>This portfolio needs both equity and debt exposure to model an allocation shift.</div>}
             </div>
 
-            {/* Growth projection */}
-            <div style={cardStyle}>
-              <div style={cardHdStyle}>Growth projection — what if you invested for the long term?</div>
-              <div style={{ padding:'16px 20px' }}>
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:14 }}>
-                  <div>
-                    <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT }}>Lump sum (₹)</label>
-                    <input type="number" value={wiLump} onChange={e=>setWiLump(parseFloat(e.target.value)||0)} style={{ width:'100%', marginTop:4, padding:'7px 9px', border:'1px solid '+GR20, borderRadius:6, fontSize:12.5 }}/>
-                  </div>
-                  <div>
-                    <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT }}>Monthly SIP (₹)</label>
-                    <input type="number" value={wiSip} onChange={e=>setWiSip(parseFloat(e.target.value)||0)} style={{ width:'100%', marginTop:4, padding:'7px 9px', border:'1px solid '+GR20, borderRadius:6, fontSize:12.5 }}/>
-                  </div>
-                  <div>
-                    <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT }}>Horizon: {wiYears} years</label>
-                    <input type="range" min={1} max={30} value={wiYears} onChange={e=>setWiYears(parseInt(e.target.value))} style={{ width:'100%', marginTop:9 }}/>
-                  </div>
-                  <div>
-                    <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT }}>Inflation (%)</label>
-                    <input type="number" value={wiInflation} step={0.5} onChange={e=>setWiInflation(parseFloat(e.target.value)||0)} style={{ width:'100%', marginTop:4, padding:'7px 9px', border:'1px solid '+GR20, borderRadius:6, fontSize:12.5 }}/>
-                  </div>
-                </div>
-
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
-                  <div style={{ background:GR10, borderRadius:8, padding:12 }}>
-                    <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT, marginBottom:4 }}>Future value (nominal)</div>
-                    <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:PLUM }}>{inr(totalFuture)}</div>
-                  </div>
-                  <div style={{ background:GR10, borderRadius:8, padding:12 }}>
-                    <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT, marginBottom:4 }}>Real value (today's ₹)</div>
-                    <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:PLUM }}>{inr(realValue)}</div>
-                  </div>
-                  <div style={{ background:GR10, borderRadius:8, padding:12 }}>
-                    <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT, marginBottom:4 }}>Total invested</div>
-                    <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:GR80 }}>{inr(totalInvested)}</div>
-                  </div>
-                  <div style={{ background:'#F0F9F5', borderRadius:8, padding:12 }}>
-                    <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT, marginBottom:4 }}>Estimated gains</div>
-                    <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:POS }}>{inr(gains)}</div>
-                  </div>
-                </div>
-                <div style={{ fontSize:10.5, color:GR60, marginTop:10 }}>Using portfolio's 3Y CAGR ({baseR3y!=null?baseR3y.toFixed(1):'—'}%) as the annual growth assumption. Real value discounts nominal by inflation at {wiInflation}%.</div>
-
-                {/* Reverse calculator */}
-                <div style={{ borderTop:'1px solid '+GR20, marginTop:16, paddingTop:14 }}>
-                  <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:MUT, marginBottom:8 }}>Reverse calculator — what SIP do you need to hit a target?</div>
-                  <div style={{ display:'flex', gap:14, alignItems:'flex-end', flexWrap:'wrap' }}>
-                    <div>
-                      <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT }}>Target corpus (₹)</label>
-                      <input type="number" value={wiTarget} onChange={e=>setWiTarget(parseFloat(e.target.value)||0)} style={{ width:180, marginTop:4, padding:'7px 9px', border:'1px solid '+GR20, borderRadius:6, fontSize:12.5 }}/>
-                    </div>
-                    <div style={{ flex:1, minWidth:220, background:GR10, borderRadius:8, padding:12 }}>
-                      <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:MUT, marginBottom:4 }}>Required monthly SIP</div>
-                      <div style={{ fontFamily:'var(--font-mono)', fontSize:15, fontWeight:700, color:PLUM }}>{requiredSip!=null && requiredSip>0 ? inr(requiredSip) : (targetMinusLump <= 0 ? 'Lump sum alone suffices' : '—')}</div>
-                      <div style={{ fontSize:10, color:GR60, marginTop:2 }}>To reach {inr(wiTarget)} in {wiYears} years alongside {inr(wiLump)} lump sum</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            {/* Growth projection → moved to Returns tab */}
 
             <div style={{ fontSize:10.5, color:GR60, marginTop:8, lineHeight:1.6 }}>What-if scenarios are computed live against this portfolio's current holdings and weights, but nothing changes until you click an "Apply" button. Growth projections use the portfolio's 3Y CAGR as the annual assumption and are simplified illustrations — not a guarantee of future performance.</div>
           </div>;
@@ -2748,142 +2904,6 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
         );
       })()}
 
-      {activeTab === 'rolling' && (() => {
-          if (funds.length === 0) {
-            return <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Add funds to the portfolio to see rolling returns.</div>;
-          }
-          if (rollingLoading) {
-            return <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Computing rolling returns from daily NAV history...</div>;
-          }
-          if (rollingError) {
-            return <div style={{ padding: 32, textAlign: 'center', color: 'var(--neg)', fontSize: 13 }}>{rollingError}</div>;
-          }
-          if (!rollingData) return null;
-
-          const rows = funds.map(f => {
-            const d = rollingData[f.isin] || {};
-            return {
-              f,
-              w: weights[f.isin] || 0,
-              r3m: d.rolling_3m_avg_1y != null ? d.rolling_3m_avg_1y : null,
-              r3mN: d.rolling_3m_window_count || 0,
-              r1y: d.rolling_1y_avg_3y != null ? d.rolling_1y_avg_3y : null,
-              r1yN: d.rolling_1y_window_count || 0,
-              r3y: d.rolling_3y_cagr_avg_5y != null ? d.rolling_3y_cagr_avg_5y : null,
-              r3yN: d.rolling_3y_window_count || 0,
-              years: d.years_available || 0,
-            };
-          });
-
-          function weightedAvg(getter) {
-            let wSum = 0, wTotal = 0;
-            rows.forEach(row => {
-              const v = getter(row);
-              if (v == null) return;
-              wSum += v * row.w; wTotal += row.w;
-            });
-            return wTotal > 0 ? wSum / wTotal : null;
-          }
-          const port3m = weightedAvg(r => r.r3m);
-          const port1y = weightedAvg(r => r.r1y);
-          const port3y = weightedAvg(r => r.r3y);
-
-          const colorFor = (v) => v == null ? 'var(--text-muted)' : v >= 12 ? 'var(--pos)' : v >= 6 ? '#D97706' : 'var(--neg)';
-          const colorFor3m = (v) => v == null ? 'var(--text-muted)' : v >= 4 ? 'var(--pos)' : v >= 0 ? '#D97706' : 'var(--neg)';
-
-          return (
-            <div>
-              <div style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-muted)' }}>
-                Computed from each fund's daily NAV history. <strong>3M rolling return</strong> is the average of all overlapping 3-month (63 trading-day) return windows over the trailing 1 year. <strong>1Y rolling return</strong> is the average of all overlapping 1-year (252 trading-day) return windows over the trailing 3 years. <strong>3Y rolling CAGR</strong> is the average of all overlapping 3-year CAGR windows over the trailing 5 years. Funds with less history than required show "—".
-              </div>
-              <div className="ptf-card">
-                <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Rolling return consistency by fund</div>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-                    <thead>
-                      <tr>
-                        <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>Fund</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>Weight</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>3M Rolling Return — Avg (1Y)</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>1Y Rolling Return — Avg (3Y)</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>3Y Rolling CAGR — Avg (5Y)</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>NAV History</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((row, fi) => (
-                        <tr key={row.f.isin} style={{ background: fi % 2 === 0 ? 'var(--bg-secondary)' : '#fff' }}>
-                          <td style={{ padding: '8px 12px', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', textAlign: 'left' }}>
-                            <span style={{ display: 'inline-block', width: 3, height: 20, background: row.f.color, borderRadius: 2, marginRight: 8, verticalAlign: 'middle' }} />
-                            {row.f.name}
-                          </td>
-                          <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{f2(row.w)}%</td>
-                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: colorFor3m(row.r3m) }}>
-                            {row.r3m != null ? (row.r3m >= 0 ? '+' : '') + row.r3m.toFixed(1) + '%' : '—'}
-                          </td>
-                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: colorFor(row.r1y) }}>
-                            {row.r1y != null ? (row.r1y >= 0 ? '+' : '') + row.r1y.toFixed(1) + '%' : '—'}
-                          </td>
-                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: colorFor(row.r3y) }}>
-                            {row.r3y != null ? (row.r3y >= 0 ? '+' : '') + row.r3y.toFixed(1) + '%' : '—'}
-                          </td>
-                          <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{row.years ? `${row.years}Y` : '—'}</td>
-                        </tr>
-                      ))}
-                      <tr style={{ borderTop: '2px solid var(--border)', background: 'rgba(145,47,99,.06)' }}>
-                        <td style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)', textAlign: 'left' }}>Blended portfolio</td>
-                        <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>{f2(rows.reduce((s, r) => s + r.w, 0))}%</td>
-                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)' }}>
-                          {port3m != null ? (port3m >= 0 ? '+' : '') + port3m.toFixed(1) + '%' : '—'}
-                        </td>
-                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)' }}>
-                          {port1y != null ? (port1y >= 0 ? '+' : '') + port1y.toFixed(1) + '%' : '—'}
-                        </td>
-                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--brand-dark)' }}>
-                          {port3y != null ? (port3y >= 0 ? '+' : '') + port3y.toFixed(1) + '%' : '—'}
-                        </td>
-                        <td style={{ padding: '8px 12px' }} />
-                      </tr>
-                      {bmRolling && !bmRolling.error && (
-                        <tr style={{ borderTop: '1px solid var(--border)', background: '#1E2A3A' }}>
-                          <td style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, color: '#fff', textAlign: 'left' }}>
-                            {bmDisplayName}
-                          </td>
-                          <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, color: 'rgba(255,255,255,.5)' }}>BM</td>
-                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#fff' }}>
-                            {bmRolling.rolling_3m_avg_1y != null ? (bmRolling.rolling_3m_avg_1y >= 0 ? '+' : '') + bmRolling.rolling_3m_avg_1y.toFixed(1) + '%' : '—'}
-                          </td>
-                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#fff' }}>
-                            {bmRolling.rolling_1y_avg_3y != null ? (bmRolling.rolling_1y_avg_3y >= 0 ? '+' : '') + bmRolling.rolling_1y_avg_3y.toFixed(1) + '%' : '—'}
-                          </td>
-                          <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#fff' }}>
-                            {bmRolling.rolling_3y_cagr_avg_5y != null ? (bmRolling.rolling_3y_cagr_avg_5y >= 0 ? '+' : '') + bmRolling.rolling_3y_cagr_avg_5y.toFixed(1) + '%' : '—'}
-                          </td>
-                          <td style={{ padding: '8px 12px' }} />
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-                {bmRolling && !bmRolling.error && (
-                  <div style={{ padding: '8px 14px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>
-                    Benchmark: {bmRolling.benchmark_label} · Same lookback windows as fund rolling returns (3M avg 1Y, 1Y avg 3Y, 3Y CAGR avg 5Y) · {bmRolling.common_days} common trading days available
-                  </div>
-                )}
-                {benchmarks && benchmarks.length > 0 && !bmRolling && (
-                  <div style={{ padding: '8px 14px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
-                    Computing benchmark rolling returns…
-                  </div>
-                )}
-                {(!benchmarks || benchmarks.length === 0) && (
-                  <div style={{ padding: '8px 14px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>
-                    No benchmark set — configure in Client &amp; IPS → Section E to compare against benchmark rolling returns.
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })()}
 
         {activeTab === 'funds' && (
           <div>
