@@ -1205,9 +1205,6 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
           return (
             <div>
-              <div style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-muted)' }}>
-                Computed from each fund's daily NAV history. <strong>3M rolling return</strong> is the average of all overlapping 3-month (63 trading-day) return windows over the trailing 1 year. <strong>1Y rolling return</strong> is the average of all overlapping 1-year (252 trading-day) return windows over the trailing 3 years. <strong>3Y rolling CAGR</strong> is the average of all overlapping 3-year CAGR windows over the trailing 5 years. Funds with less history than required show "—".
-              </div>
               <div className="ptf-card">
                 <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Rolling return consistency by fund</div>
                 <div style={{ overflowX: 'auto' }}>
@@ -1292,6 +1289,9 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                     No benchmark set — configure in Client &amp; IPS → Section E to compare against benchmark rolling returns.
                   </div>
                 )}
+              </div>
+              <div style={{ marginTop: 10, padding: '10px 14px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                Computed from each fund's daily NAV history. <strong>3M rolling return</strong> is the average of all overlapping 3-month (63 trading-day) return windows over the trailing 1 year. <strong>1Y rolling return</strong> is the average of all overlapping 1-year (252 trading-day) return windows over the trailing 3 years. <strong>3Y rolling CAGR</strong> is the average of all overlapping 3-year CAGR windows over the trailing 5 years. Funds with less history than required show "—".
               </div>
             </div>
           );
