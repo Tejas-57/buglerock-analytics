@@ -675,7 +675,11 @@ def search_funds_global(query: str, data_date: date, limit: int = 50) -> list:
             DailyFundData.isin != None,
             DailyFundData.name != None,
             and_(*word_filters)
-        ).order_by(func.lower(DailyFundData.name)).limit(limit).all()
+        ).order_by(
+            # Sort by ranking first (R1/R2 before R3/R4/R5), then alphabetically
+            DailyFundData.ranking.nulls_last(),
+            func.lower(DailyFundData.name)
+        ).limit(limit).all()
 
         return [{
             "isin": f.isin,

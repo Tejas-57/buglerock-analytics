@@ -205,12 +205,80 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
       .then(r=>r.json()).then(d=>{ setHistVar(d); setHistVarLoading(false); })
       .catch(()=>setHistVarLoading(false));
   }, [activeTab, funds.map(f=>f.isin).join(','), Object.keys(snapshots).length]);
+
+
   const [sensRate, setSensRate] = useState(0);
 
   // What-If tab state
   const [wiFromIsin, setWiFromIsin] = useState('');
-  const [wiToIsin, setWiToIsin] = useState('');
-  const [wiShift, setWiShift] = useState(0);
+  const [wiSwaps, setWiSwaps] = useState(() => {
+    try {
+      const saved = localStorage.getItem('buglerock_wi_swaps');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [{ from: '', to: '' }];
+  });
+  // Persist wiSwaps to localStorage whenever it changes
+  React.useEffect(() => {
+    try { localStorage.setItem('buglerock_wi_swaps', JSON.stringify(wiSwaps)); } catch {}
+  }, [JSON.stringify(wiSwaps)]);
+  const [wiSwapSnaps, setWiSwapSnaps] = useState({});  // snapshots for candidate funds fetched on-demand
+  const [wiCandidates, setWiCandidates] = useState([]);
+  const [wiSearchQ, setWiSearchQ] = useState('');
+  const [wiSearchResults, setWiSearchResults] = useState([]);
+  const [wiSearching, setWiSearching] = useState(false);
+  const [wiSwapQ, setWiSwapQ] = useState(['', '', '']);        // search query per swap slot
+  const [wiSwapRes, setWiSwapRes] = useState([[], [], []]);    // search results per swap slot
+  const [wiSwapLoading, setWiSwapLoading] = useState([false, false, false]);
+
+  // Fetch snapshot on-demand for any 'to' fund selected in swap rows
+  useEffect(() => {
+    const toIsins = wiSwaps.map(s => s.to).filter(Boolean);
+    const missing = toIsins.filter(isin => !wiSwapSnaps[isin] && !snapshots[isin]);
+    if (missing.length === 0) return;
+    const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().slice(0,10) : selectedDate;
+    if (!dateStr) return;
+    Promise.allSettled(
+      missing.map(isin =>
+        fetch(`${API}/api/home/snapshot?isin=${isin}&date=${dateStr}`)
+          .then(r => r.ok ? r.json() : null).catch(() => null)
+      )
+    ).then(results => {
+      const newSnaps = { ...wiSwapSnaps };
+      missing.forEach((isin, i) => {
+        if (results[i].status === 'fulfilled' && results[i].value) newSnaps[isin] = results[i].value;
+      });
+      setWiSwapSnaps(newSnaps);
+    });
+  }, [wiSwaps.map(s => s.to).join(','), selectedDate]);
+
+  // Fetch R1/R2 candidates for whichever fund was last selected in swaps
+  useEffect(() => {
+    const lastFrom = [...wiSwaps].reverse().find(s => s.from)?.from;
+    if (!lastFrom) { setWiCandidates([]); return; }
+    const fromFund = funds.find(f => f.isin === lastFrom);
+    const fromCategory = fromFund?.category || snapshots[lastFrom]?.category || '';
+    if (!fromCategory) return;
+    fetch(`${API}/api/funds/peers?category=${encodeURIComponent(fromCategory)}&rankings=R1,R2&exclude=${lastFrom}`)
+      .then(r => r.json())
+      .then(d => setWiCandidates(d.funds || []))
+      .catch(() => setWiCandidates([]));
+  }, [wiSwaps.map(s => s.from).join(','), funds.map(f=>f.isin).join(',')]);
+  const [wiShift, setWiShift] = useState(() => {
+    try { const s = localStorage.getItem('buglerock_wi_shift'); return s ? parseFloat(s) : 0; } catch { return 0; }
+  });
+  React.useEffect(() => {
+    try { localStorage.setItem('buglerock_wi_shift', String(wiShift)); } catch {}
+  }, [wiShift]);
+  const [prevWeights, setPrevWeights] = useState(() => {
+    try { const s = localStorage.getItem('buglerock_prev_weights'); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
+  React.useEffect(() => {
+    try {
+      if (prevWeights) localStorage.setItem('buglerock_prev_weights', JSON.stringify(prevWeights));
+      else localStorage.removeItem('buglerock_prev_weights');
+    } catch {}
+  }, [JSON.stringify(prevWeights)]);
   const [wiLump, setWiLump] = useState(10000000);   // 1 crore default (or IPS amount)
   const [wiSip, setWiSip] = useState(100000);        // 1 lakh default
   const [wiYears, setWiYears] = useState(10);
@@ -1218,6 +1286,13 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
           const riskComposite = betaScore*0.45 + volScore*0.35 + Math.min(durScore, 40)*0.20;
           const riskLabel = riskComposite>=65?'Aggressive':riskComposite>=45?'Moderately Aggressive':riskComposite>=28?'Balanced':riskComposite>=14?'Moderately Conservative':'Conservative';
           const riskClr = riskComposite>=65?NEG:riskComposite>=45?WARN:riskComposite>=28?'#B8860B':riskComposite>=14?'#4C8C3C':POS;
+          // Remap composite score to visual bar position so label zones align with bar zones
+          // Conservative=0-20%, ModCons=20-40%, Balanced=40-60%, ModAgg=60-80%, Aggressive=80-100%
+          const riskBarPct = riskComposite<14 ? (riskComposite/14)*20 :
+                             riskComposite<28 ? 20 + ((riskComposite-14)/14)*20 :
+                             riskComposite<45 ? 40 + ((riskComposite-28)/17)*20 :
+                             riskComposite<65 ? 60 + ((riskComposite-45)/20)*20 :
+                                               80 + ((riskComposite-65)/35)*20;
 
           // Interactive calculator live values
           const eqContrib = avgEqBeta != null ? (eqW/100) * avgEqBeta * sensMarket : 0;
@@ -1301,8 +1376,8 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
               </div>
               <div style={{ flex:1, minWidth:220, maxWidth:320 }}>
                 <div style={{ background:GR20, borderRadius:6, height:10, position:'relative', overflow:'hidden' }}>
-                  <div style={{ position:'absolute', top:0, bottom:0, left:0, width:riskComposite.toFixed(0)+'%', background:'linear-gradient(90deg,'+POS+','+WARN+','+NEG+')', borderRadius:6 }}/>
-                  <div style={{ position:'absolute', top:-3, left:riskComposite.toFixed(0)+'%', width:2, height:16, background:PLUM }}/>
+                  <div style={{ position:'absolute', top:0, bottom:0, left:0, width:riskBarPct.toFixed(0)+'%', background:'linear-gradient(90deg,'+POS+','+WARN+','+NEG+')', borderRadius:6 }}/>
+
                 </div>
                 <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:GR60, marginTop:4 }}><span>Conservative</span><span>Balanced</span><span>Aggressive</span></div>
               </div>
@@ -1536,35 +1611,191 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
           const cardHdStyle = { padding:'10px 16px', fontSize:9.5, fontWeight:700, letterSpacing:'.07em', textTransform:'uppercase', color:MUT, background:GR10, borderBottom:'1px solid '+GR20 };
           const cardStyle = { marginBottom:18, border:'1px solid '+GR20, borderRadius:8, overflow:'hidden', background:'#fff' };
 
-          const fromFund = funds.find(f => f.isin === wiFromIsin) || funds[0];
-          const candList = [];  // placeholder — fund substitution search not yet implemented
+          // Fund substitution — multi-swap (up to 3)
+          const safeSnap = (s, path) => {
+            if (!s) return null;
+            const v = path.split('.').reduce((o, k) => o?.[k], s);
+            if (v == null || v === '-') return null;
+            const p = parseFloat(v);
+            return isNaN(p) ? null : p;
+          };
+          const getSnap = isin => wiSwapSnaps[isin] || snapshots[isin];  // combine both sources
+
+
+
+          function updateSwap(idx, field, value) {
+            setWiSwaps(prev => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s));
+          }
+          function addSwapRow() {
+            setWiSwaps(prev => prev.length < 3 ? [...prev, { from: '', to: '' }] : prev);
+          }
+          function removeSwapRow(idx) {
+            setWiSwaps(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
+          }
+          function handleSwapSearch(idx, q) {
+            // Update query immediately so input feels responsive
+            setWiSwapQ(prev => { const a=[...prev]; a[idx]=q; return a; });
+            if (q.length < 2) {
+              setWiSwapRes(prev => { const a=[...prev]; a[idx]=[]; return a; });
+              setWiSwapLoading(prev => { const a=[...prev]; a[idx]=false; return a; });
+              return;
+            }
+            setWiSwapLoading(prev => { const a=[...prev]; a[idx]=true; return a; });
+            fetch(`${API}/api/funds/search?q=${encodeURIComponent(q)}&limit=20`)
+              .then(r => r.json())
+              .then(d => {
+                // Sort by relevance: exact name match first, then starts-with, then contains
+                const qL = q.toLowerCase();
+                const sorted = (d.funds || []).slice().sort((a, b) => {
+                  const aL = (a.name||'').toLowerCase();
+                  const bL = (b.name||'').toLowerCase();
+                  const aStart = aL.startsWith(qL) ? 0 : aL.includes(qL) ? 1 : 2;
+                  const bStart = bL.startsWith(qL) ? 0 : bL.includes(qL) ? 1 : 2;
+                  return aStart - bStart;
+                });
+                setWiSwapRes(prev => { const a=[...prev]; a[idx]=sorted; return a; });
+                setWiSwapLoading(prev => { const a=[...prev]; a[idx]=false; return a; });
+              })
+              .catch(() => setWiSwapLoading(prev => { const a=[...prev]; a[idx]=false; return a; }));
+          }
+          function selectSwapTo(idx, isin) {
+            updateSwap(idx, 'to', isin);
+            setWiSwapQ(prev => { const a=[...prev]; a[idx]=''; return a; });
+            setWiSwapRes(prev => { const a=[...prev]; a[idx]=[]; return a; });
+            // Eagerly fetch snapshot if not already available
+            if (!wiSwapSnaps[isin] && !snapshots[isin]) {
+              const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().slice(0,10) : selectedDate;
+              if (dateStr) {
+                fetch(`${API}/api/home/snapshot?isin=${isin}&date=${dateStr}`)
+                  .then(r => r.ok ? r.json() : null)
+                  .then(data => { if (data) setWiSwapSnaps(prev => ({ ...prev, [isin]: data })); })
+                  .catch(() => {});
+              }
+            }
+          }
+
+          // Compute combined delta across ALL swaps
+          function combinedSwapDelta(getter) {
+            let delta = 0;
+            let hasAny = false;
+            for (const s of wiSwaps) {
+              if (!s.from || !s.to) continue;
+              const w = (weights[s.from] || 0) / 100;
+              const fromVal = getter(getSnap(s.from));
+              const toVal = getter(getSnap(s.to));
+              if (fromVal == null || toVal == null) continue;
+              delta += (toVal - fromVal) * w;
+              hasAny = true;
+            }
+            return hasAny ? delta : null;
+          }
+          const dR6m  = combinedSwapDelta(s => safeSnap(s, 'returns.6m'));
+          const dR1y  = combinedSwapDelta(s => safeSnap(s, 'returns.1y'));
+          const dR3y  = combinedSwapDelta(s => safeSnap(s, 'returns.3y'));
+          const dStd  = combinedSwapDelta(s => safeSnap(s, 'risk.std_dev_3y'));
+          const dSh   = combinedSwapDelta(s => safeSnap(s, 'risk.sharpe_ratio_3y'));
+          const dTr   = combinedSwapDelta(s => safeSnap(s, 'risk.treynor_ratio_3y'));
+          const dUpC  = combinedSwapDelta(s => safeSnap(s, 'risk.up_capture_3y'));
+          const dDnC  = combinedSwapDelta(s => safeSnap(s, 'risk.down_capture_3y'));
+
+          const validSwaps = wiSwaps.filter(s => s.from && s.to && s.from !== s.to);
+          const canApply = validSwaps.length > 0;
+
+          function applyAllSwaps() {
+            if (!canApply) return;
+            let newFunds = [...funds];
+            let newWeights = { ...weights };
+            for (const s of validSwaps) {
+              // Build toData from any available source — snapshot is most reliable
+              const snap = getSnap(s.to);
+              const toData = snap
+                ? { isin: s.to, name: snap.name || s.to, category: snap.category || '' }
+                : wiCandidates.find(f => f.isin === s.to)
+                || (wiSwapRes || []).flat().find(f => f.isin === s.to)
+                || { isin: s.to, name: s.to, category: '' };  // fallback — always apply, never skip
+              newFunds = newFunds.map(f => f.isin === s.from
+                ? { ...f, isin: s.to, name: toData.name, category: toData.category }
+                : f);
+              newWeights[s.to] = newWeights[s.from] || 0;
+              delete newWeights[s.from];
+            }
+            setFunds(newFunds);
+            setWeights(newWeights);
+            setWiSwaps([{ from: '', to: '' }]);
+            try { localStorage.removeItem('buglerock_wi_swaps'); } catch {}
+            setWiSwapQ(['', '', '']);
+            setWiSwapRes([[], [], []]);
+            if (onBackToBuild) onBackToBuild();
+          }
 
           // Base blended metrics
-          const baseR1y = B.return_1y, baseR3y = B.return_3y, baseStd = B.std_dev_3y, baseSharpe = B.sharpe_ratio_3y, baseEr = B.expense_ratio;
+          // ── Allocation shift (Option D) ──
+          // Only pure equity/debt funds are scaled. Hybrids/gold/international unchanged.
+          // This keeps the shift transparent and auditable.
+          const safeF2 = (s, v) => { const p = parseFloat(v); return isNaN(p) || v==='-' ? null : p; };
+          function fundShiftBucket(f, s) {
+            const eqPct  = safeF2(s, s?.equity_pct);
+            const bndPct = safeF2(s, s?.bond_pct);
+            if (eqPct != null && bndPct != null) {
+              if (eqPct >= 80) return 'equity';
+              if (bndPct >= 80) return 'debt';
+              return 'hybrid';
+            }
+            if (isEquityLike(s, f)) return 'equity';
+            if (isDebtLike(s, f)) return 'debt';
+            return 'hybrid';
+          }
+          let pureEqW = 0, pureDebtW = 0;
+          funds.forEach(f => {
+            const w = weights[f.isin] || 0;
+            const bucket = fundShiftBucket(f, snapshots[f.isin]);
+            if (bucket === 'equity') pureEqW   += w;
+            if (bucket === 'debt')   pureDebtW += w;
+          });
+          // Full effective sleeve totals for display (includes hybrids via look-through)
+          let eqEff = 0, debtEff = 0;
+          funds.forEach(f => {
+            const w = weights[f.isin] || 0;
+            const s = snapshots[f.isin];
+            const ep = safeF2(s, s?.equity_pct) ?? (isEquityLike(s,f) ? 100 : 0);
+            const bp = safeF2(s, s?.bond_pct)   ?? (isDebtLike(s,f)   ? 100 : 0);
+            eqEff   += w * ep / 100;
+            debtEff += w * bp / 100;
+          });
+          const shiftLimit = Math.min(pureEqW, pureDebtW, 30);
 
-          // ── Allocation shift ──
-          const shiftLimit = Math.min(eqW, debtW, 30);
           function scaledBlend(shiftVal){
-            const eqScale = eqW>0 ? (eqW-shiftVal)/eqW : 1;
-            const debtScale = debtW>0 ? (debtW+shiftVal)/debtW : 1;
-            const b = { r1y:0, r3y:0, std:0, sharpe:0, er:0, sumW:0 };
+            const eqScale   = pureEqW   > 0 ? (pureEqW   - shiftVal) / pureEqW   : 1;
+            const debtScale = pureDebtW > 0 ? (pureDebtW + shiftVal) / pureDebtW : 1;
+            const b = { r1y:0, r3y:0, std:0, sharpe:0, treynor:0, er:0, sumW:0 };
             funds.forEach(f => {
               const w = weights[f.isin] || 0;
-              const bucket = fundBucket(f, snapshots[f.isin]);
-              const wf = bucket==='equity' ? (w*eqScale) : bucket==='debt' ? (w*debtScale) : w;
               const s = snapshots[f.isin];
+              const safeF = v => { const p = parseFloat(v); return isNaN(p) || v==='-' ? null : p; };
+              const bucket = fundShiftBucket(f, s);
+              const wf = bucket === 'equity' ? w * eqScale
+                       : bucket === 'debt'   ? w * debtScale
+                       : w;  // hybrids/gold/other unchanged
               if (s) {
-                const safeF = v => { const p = parseFloat(v); return isNaN(p) || v==='-' ? null : p; };
-                const r1y = safeF(s.returns?.['1y']); if (r1y!=null) b.r1y += r1y * wf/100;
-                const r3y = safeF(s.returns?.['3y']); if (r3y!=null) b.r3y += r3y * wf/100;
-                const std = safeF(s.risk?.std_dev_3y); if (std!=null) b.std += std * wf/100;
-                const sh = safeF(s.risk?.sharpe_ratio_3y); if (sh!=null) b.sharpe += sh * wf/100;
-                const er = safeF(s.expense_ratio); if (er!=null) b.er += er * wf/100;
+                const r1y = safeF(s.returns?.['1y']); if (r1y!=null) { b.r1y += r1y * wf/100; }
+                const r3y = safeF(s.returns?.['3y']); if (r3y!=null) { b.r3y += r3y * wf/100; }
+                const std = safeF(s.risk?.std_dev_3y); if (std!=null) { b.std += std * wf/100; }
+                const sh  = safeF(s.risk?.sharpe_ratio_3y); if (sh!=null) { b.sharpe += sh * wf/100; }
+                const tr  = safeF(s.risk?.treynor_ratio_3y); if (tr!=null) { b.treynor += tr * wf/100; }
+                const er  = safeF(s.expense_ratio); if (er!=null) { b.er += er * wf/100; }
                 b.sumW += wf;
               }
             });
             return b;
           }
+          // Use scaledBlend(0) as base so delta is exactly zero at no shift
+          const _base = scaledBlend(0);
+          const baseR1y = _base.r1y || B.return_1y;
+          const baseR3y = _base.r3y || B.return_3y;
+          const baseStd = _base.std || B.std_dev_3y;
+          const baseSharpe = _base.sharpe || B.sharpe_ratio_3y;
+          const baseTreynor = _base.treynor || B.treynor_ratio_3y;
+          const baseEr = _base.er || B.expense_ratio;
           const shiftedBlend = scaledBlend(wiShift);
           function delta(cur, base, fmt='pct'){
             if (cur==null || base==null) return null;
@@ -1574,16 +1805,33 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
           function applyShift(){
             if (!setWeights || !wiShift) return;
-            const eqScale = eqW>0 ? (eqW-wiShift)/eqW : 1;
-            const debtScale = debtW>0 ? (debtW+wiShift)/debtW : 1;
+            setPrevWeights({ ...weights });  // snapshot current weights for revert
+            try { localStorage.setItem('buglerock_prev_weights', JSON.stringify(weights)); } catch {}
+            // Option D: only scale pure equity and pure debt funds, hybrids unchanged
+            const eqScale   = pureEqW   > 0 ? (pureEqW   - wiShift) / pureEqW   : 1;
+            const debtScale = pureDebtW > 0 ? (pureDebtW + wiShift) / pureDebtW : 1;
             const nw = { ...weights };
             funds.forEach(f => {
-              const bucket = fundBucket(f, snapshots[f.isin]);
-              if (bucket==='equity') nw[f.isin] = parseFloat(((weights[f.isin]||0)*eqScale).toFixed(2));
-              else if (bucket==='debt') nw[f.isin] = parseFloat(((weights[f.isin]||0)*debtScale).toFixed(2));
+              const w = weights[f.isin] || 0;
+              const bucket = fundShiftBucket(f, snapshots[f.isin]);
+              if (bucket === 'equity') nw[f.isin] = parseFloat((w * eqScale).toFixed(2));
+              else if (bucket === 'debt') nw[f.isin] = parseFloat((w * debtScale).toFixed(2));
+              // hybrids and others: unchanged
             });
+            // Normalise to exactly 100
+            const total = Object.values(nw).reduce((s, v) => s + v, 0);
+            if (total > 0) Object.keys(nw).forEach(k => nw[k] = parseFloat((nw[k] / total * 100).toFixed(2)));
             setWeights(nw);
-            setWiShift(0);
+            // Do NOT reset wiShift — keep slider position so user can see what was applied
+            if (onBackToBuild) onBackToBuild();
+          }
+
+          function revertShift() {
+            if (!prevWeights) return;
+            setWeights(prevWeights);
+            setPrevWeights(null);
+            setWiShift(0);  // reset slider only on revert
+            try { localStorage.removeItem('buglerock_prev_weights'); localStorage.removeItem('buglerock_wi_shift'); } catch {}
             if (onBackToBuild) onBackToBuild();
           }
 
@@ -1609,17 +1857,134 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
             <div style={{ fontFamily:'var(--font-serif)', fontSize:15, fontWeight:600, color:PLUM, marginBottom:4 }}>What-if analysis</div>
             <div style={{ fontSize:12, color:GR60, marginBottom:16 }}>Model concrete changes to this portfolio — allocation shifts and growth paths — before committing to anything</div>
 
+            {/* Fund substitution — multi-swap up to 3 */}
+            <div style={cardStyle}>
+              <div style={cardHdStyle}>Fund substitution — what if you swapped a holding?</div>
+              <div style={{ padding:'16px 20px' }}>
+                {wiSwaps.map((swap, idx) => {
+                  const swapFromFund = funds.find(f => f.isin === swap.from);
+                  const swapCat = swapFromFund?.category || snapshots[swap.from]?.category || '';
+                  const swapCandidates = swap.from ? wiCandidates.filter(f => f.isin !== swap.from) : [];
+                  const swapSearchQ = wiSwapQ[idx] || '';
+                  const swapSearchRes = wiSwapRes[idx] || [];
+                  const swapSearching = wiSwapLoading[idx] || false;
+                  const swapDdOpen = swapSearchQ.length >= 2 && swapSearchRes.length > 0;
+
+                  return <div key={idx} style={{ marginBottom:18, paddingBottom:18, borderBottom: idx < wiSwaps.length-1 ? '1px dashed '+GR20 : 'none' }}>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr auto', gap:14, alignItems:'start' }}>
+
+                      {/* LEFT: Replace this holding */}
+                      <div>
+                        <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT, display:'block', marginBottom:4 }}>Replace holding {wiSwaps.length > 1 ? '#'+(idx+1) : ''}</label>
+                        <select value={swap.from} onChange={e => { updateSwap(idx, 'from', e.target.value); updateSwap(idx, 'to', ''); }}
+                          style={{ width:'100%', padding:'7px 9px', border:'1px solid '+GR20, borderRadius:6, fontSize:12.5, background:'#fff' }}>
+                          <option value=''>— pick fund to replace —</option>
+                          {[...funds].sort((a,b) => (weights[b.isin]||0)-(weights[a.isin]||0))
+                            .filter(f => !wiSwaps.some((s, si) => si !== idx && s.from === f.isin))
+                            .map(f => <option key={f.isin} value={f.isin}>{f.name} ({weights[f.isin]||0}%)</option>)}
+                        </select>
+                      </div>
+
+                      {/* RIGHT: With this fund — R1/R2 dropdown + search */}
+                      <div>
+                        <label style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', color:MUT, display:'block', marginBottom:4 }}>With this fund</label>
+                        {/* R1/R2 dropdown — includes search-selected fund as option so it shows correctly */}
+                        {(() => {
+                          const searchSelected = swap.to && !swapCandidates.find(f => f.isin === swap.to)
+                            ? (getSnap(swap.to) || swapSearchRes.find(f => f.isin === swap.to))
+                            : null;
+                          return <select value={swap.to} onChange={e => updateSwap(idx, 'to', e.target.value)} disabled={!swap.from}
+                            style={{ width:'100%', padding:'7px 9px', border:'1px solid '+GR20, borderRadius:6, fontSize:12.5, background: swap.from ? '#fff' : GR10, marginBottom:6 }}>
+                            <option value=''>— R1/R2 in same category —</option>
+                            {swapCandidates.map(f => <option key={f.isin} value={f.isin}>{f.name} ({f.ranking})</option>)}
+                            {searchSelected && <option key={swap.to} value={swap.to}>
+                              {searchSelected.name || swap.to}
+                            </option>}
+                          </select>;
+                        })()}
+                        {/* Per-swap search box — exactly like BuildPortfolio */}
+                        {swap.from && <div style={{ position:'relative' }}>
+                          <span style={{ position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', color:GR60, fontSize:12, pointerEvents:'none' }}>⊕</span>
+                          <input
+                            type='search'
+                            value={swapSearchQ}
+                            onChange={e => handleSwapSearch(idx, e.target.value)}
+                            placeholder='Search any fund by name…'
+                            style={{ width:'100%', padding:'7px 10px 7px 28px', border:'1.5px solid '+GR20, borderRadius:6, fontSize:12, boxSizing:'border-box' }}
+                          />
+                          {swapSearching && <span style={{ position:'absolute', right:10, top:9, fontSize:10, color:GR60 }}>Searching…</span>}
+                          {swapDdOpen && <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, right:0, background:'#fff', border:'1px solid '+GR20, borderRadius:8, boxShadow:'0 4px 16px rgba(62,52,82,.12)', maxHeight:200, overflowY:'auto', zIndex:50 }}>
+                            {swapSearchRes.slice(0,5).map(f => <div key={f.isin}
+                              onClick={() => selectSwapTo(idx, f.isin)}
+                              style={{ padding:'8px 12px', cursor:'pointer', borderBottom:'1px solid '+GR20, fontSize:12 }}
+                              onMouseEnter={e=>e.currentTarget.style.background=GR10}
+                              onMouseLeave={e=>e.currentTarget.style.background='#fff'}>
+                              <div style={{ fontWeight:500, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', marginBottom:2 }}>{f.name}</div>
+                              <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                                <span style={{ fontSize:9, background:GR10, padding:'1px 6px', borderRadius:10, color:GR80 }}>{f.category}</span>
+                                {f.ranking && <span style={{ fontSize:9, fontWeight:700, color: ['R1','R2'].includes(f.ranking)?POS:NEG }}>{f.ranking}</span>}
+                                {f.return_1y!=null && <span style={{ fontSize:9, color:f.return_1y>=0?POS:NEG, fontWeight:600 }}>{f.return_1y>=0?'+':''}{f.return_1y?.toFixed(1)}%</span>}
+                              </div>
+                            </div>)}
+                            {swapSearchRes.length > 5 && <div style={{ padding:'6px 12px', fontSize:10, color:GR60, textAlign:'center' }}>Scroll for {swapSearchRes.length-5} more results</div>}
+                          </div>}
+                        </div>}
+                      </div>
+
+                      {/* +/- buttons */}
+                      <div style={{ display:'flex', gap:6, paddingTop:24 }}>
+                        {wiSwaps.length > 1 && <button onClick={() => removeSwapRow(idx)}
+                          style={{ width:28, height:28, borderRadius:'50%', background:'#fff', border:'1px solid '+GR20, color:NEG, fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', lineHeight:1 }}>−</button>}
+                        {idx === wiSwaps.length-1 && wiSwaps.length < 3 && <button onClick={addSwapRow}
+                          style={{ width:28, height:28, borderRadius:'50%', background:BERRY, border:'none', color:'#fff', fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', lineHeight:1 }}>+</button>}
+                      </div>
+                    </div>
+                  </div>;
+                })}
+
+                {/* Combined delta */}
+                {canApply && <div style={{ background:GR10, borderRadius:8, padding:'14px 18px', marginBottom:14 }}>
+                  <div style={{ fontSize:9.5, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:MUT, marginBottom:10 }}>
+                    Portfolio impact after {validSwaps.length} swap{validSwaps.length > 1 ? 's' : ''}
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(8,1fr)', gap:10 }}>
+                    {[
+                      { l:'6M Return',      v:dR6m,  unit:'%' },
+                      { l:'1Y Return',      v:dR1y,  unit:'%' },
+                      { l:'3Y CAGR',        v:dR3y,  unit:'%' },
+                      { l:'Volatility (3Y)',v:dStd,  unit:'%' },
+                      { l:'Sharpe (3Y)',    v:dSh,   unit:''  },
+                      { l:'Treynor (3Y)',   v:dTr,   unit:''  },
+                      { l:'Up Capture (3Y)',v:dUpC,  unit:'%' },
+                      { l:'Dn Capture (3Y)',v:dDnC,  unit:'%' },
+                    ].map(({l,v,unit}) => <div key={l} style={{ textAlign:'center' }}>
+                      <div style={{ fontSize:10, color:GR60, marginBottom:3 }}>{l}</div>
+                      <div style={{ fontFamily:'var(--font-mono)', fontSize:14, fontWeight:700, color: v==null?GR60:v>=0?POS:NEG }}>
+                        {v==null ? '—' : (v>=0?'+':'')+v.toFixed(2)+unit}
+                      </div>
+                    </div>)}
+                  </div>
+                  {validSwaps.some(s => !getSnap(s.to)) && <div style={{ fontSize:10.5, color:WARN, marginTop:10, textAlign:'center' }}>⏳ Loading candidate fund data…</div>}
+                </div>}
+
+                <button onClick={applyAllSwaps} disabled={!canApply}
+                  style={{ padding:'8px 18px', background:canApply?BERRY:'#ccc', color:'#fff', border:'none', borderRadius:6, fontSize:11.5, cursor:canApply?'pointer':'default', fontWeight:600 }}>
+                  Apply {validSwaps.length > 1 ? validSwaps.length + ' swaps' : 'this swap'} to the portfolio →
+                </button>
+              </div>
+            </div>
+
             {/* Allocation shift */}
             <div style={cardStyle}>
               <div style={cardHdStyle}>Allocation shift — what if you moved money between equity and debt?</div>
-              {eqW>0 && debtW>0 ? <div style={{ padding:'16px 20px' }}>
+              {eqEff>0 && debtEff>0 ? <div style={{ padding:'16px 20px' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', fontSize:11.5, marginBottom:6 }}>
                   <span style={{ fontWeight:700, color:GR80 }}>Shift toward equity ←→ Shift toward debt</span>
-                  <span style={{ fontFamily:'var(--font-mono)', fontWeight:700, color:PLUM }}>{wiShift===0?'No shift':(wiShift>0?'+':'')+wiShift+'pt to debt'}</span>
+                  <span style={{ fontFamily:'var(--font-mono)', fontWeight:700, color:PLUM }}>{wiShift===0?'No shift':'+'+Math.abs(Math.round(wiShift))+'% to '+(wiShift>0?'debt':'equity')}</span>
                 </div>
                 <input type="range" min={-shiftLimit} max={shiftLimit} value={wiShift} step={1} onChange={e=>setWiShift(parseInt(e.target.value))} style={{ width:'100%' }}/>
                 <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:GR60, marginBottom:14 }}>
-                  <span>+{shiftLimit}pt more equity</span><span>+{shiftLimit}pt more debt</span>
+                  <span>+{Math.round(shiftLimit)}% more equity</span><span>+{Math.round(shiftLimit)}% more debt</span>
                 </div>
 
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:14 }}>
@@ -1627,7 +1992,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                     { l:'3Y return',     base:baseR3y,   cur:shiftedBlend.r3y,  fmt:'pct' },
                     { l:'Volatility',    base:baseStd,   cur:shiftedBlend.std,  fmt:'pct' },
                     { l:'Sharpe (3Y)',   base:baseSharpe,cur:shiftedBlend.sharpe,fmt:'num' },
-                    { l:'Expense ratio', base:baseEr,    cur:shiftedBlend.er,   fmt:'pct' },
+                    { l:'Treynor (3Y)',  base:baseTreynor,cur:shiftedBlend.treynor,fmt:'num' },
                   ].map((m,i) => {
                     const d = delta(m.cur, m.base, m.fmt);
                     return <div key={i} style={{ background:GR10, borderRadius:8, padding:10, textAlign:'center' }}>
@@ -1638,8 +2003,57 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                   })}
                 </div>
 
-                <button onClick={applyShift} disabled={wiShift===0} style={{ padding:'8px 18px', borderRadius:20, background:wiShift===0?GR20:'var(--brand-primary)', color:wiShift===0?GR60:'#fff', border:'none', fontSize:11.5, fontWeight:600, cursor:wiShift===0?'not-allowed':'pointer' }}>Apply this shift to the portfolio →</button>
-              </div> : <div style={{ padding:20, textAlign:'center', color:GR60, fontSize:11.5 }}>This portfolio needs both equity and debt holdings to model an allocation shift.</div>}
+                {/* Trade-off curve — risk vs return across full shift range */}
+                {baseStd != null && (() => {
+                  const W=540, H=210, PL=44, PB=24, PT=12, PR=12;
+                  const scanPts = [];
+                  for (let sv=-shiftLimit; sv<=shiftLimit; sv+=Math.max(1,Math.round(shiftLimit/12))) {
+                    scanPts.push({ shift:Math.round(sv), b:scaledBlend(sv) });
+                  }
+                  const xs = scanPts.map(p=>p.b.std||0), ys = scanPts.map(p=>p.b.r3y||0);
+                  const xPad=(Math.max(...xs)-Math.min(...xs)||1)*0.15, yPad=(Math.max(...ys)-Math.min(...ys)||1)*0.2;
+                  const xMin=Math.min(...xs)-xPad, xMax=Math.max(...xs)+xPad;
+                  const yMin=Math.min(...ys)-yPad, yMax=Math.max(...ys)+yPad;
+                  const sx = v => PL+((v-xMin)/(xMax-xMin||1))*(W-PL-PR);
+                  const sy = v => H-PB-((v-yMin)/(yMax-yMin||1))*(H-PB-PT);
+                  const pathD = scanPts.map((p,i) => (i===0?'M':'L')+sx(p.b.std||0).toFixed(1)+','+sy(p.b.r3y||0).toFixed(1)).join(' ');
+                  const cur = scaledBlend(wiShift);
+                  return <div style={{ marginTop:14 }}>
+                    <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:MUT, marginBottom:6 }}>Full trade-off — risk vs. return across the entire shift range</div>
+                    <svg viewBox={'0 0 '+W+' '+H} style={{ width:'100%', maxWidth:640, height:240, display:'block', margin:'0 auto' }}>
+                      <path d={pathD} fill="none" stroke={LAV} strokeWidth="2"/>
+                      <circle cx={sx(cur.std||0).toFixed(1)} cy={sy(cur.r3y||0).toFixed(1)} r="6" fill={BERRY} stroke="#fff" strokeWidth="1.5"/>
+                      {/* Shift labels above the line — absolute values only */}
+                      {scanPts.filter((_,i)=>i%4===0).map((p,i) => <text key={i} x={sx(p.b.std||0)} y={sy(p.b.r3y||0)-8} fontSize="8" fill={p.shift<0?POS:p.shift>0?NEG:'#222'} fontWeight="600" textAnchor="middle">{Math.abs(Math.round(p.shift))}%</text>)}
+                      {/* Directional labels parallel to line, below it */}
+                      {(() => {
+                        const p0 = scanPts[0], pN = scanPts[scanPts.length-1];
+                        const x0=sx(p0.b.std||0), y0=sy(p0.b.r3y||0);
+                        const x1=sx(pN.b.std||0), y1=sy(pN.b.r3y||0);
+                        const angle = Math.atan2(y1-y0, x1-x0) * 180 / Math.PI;
+                        const textAngle = angle > 90 || angle < -90 ? angle + 180 : angle;
+                        const midX=(x0+x1)/2, midY=(y0+y1)/2;
+                        // Equity label near start of line (bottom-left)
+                        const eqX=(x0+midX*0.4)/1.4, eqY=(y0+midY*0.4)/1.4+14;
+                        // Debt label near end of line (top-right)
+                        const dtX=(x1+midX*0.4)/1.4, dtY=(y1+midY*0.4)/1.4+14;
+                        return <>
+                          <text x={eqX} y={eqY} fontSize="8.5" fill={POS} fontWeight="700" textAnchor="middle" transform={`rotate(${textAngle},${eqX},${eqY})`}>more equity →</text>
+                          <text x={dtX} y={dtY} fontSize="8.5" fill={NEG} fontWeight="700" textAnchor="middle" transform={`rotate(${textAngle},${dtX},${dtY})`}>← more debt</text>
+                        </>;
+                      })()}
+                      <text x={W/2} y={H-4} fontSize="8.5" fill={MUT} textAnchor="middle" fontWeight="700">Risk →</text>
+                      <text x={8} y={H/2} fontSize="8.5" fill={MUT} textAnchor="middle" fontWeight="700" transform={`rotate(-90,8,${H/2})`}>Return →</text>
+                    </svg>
+                    <div style={{ fontSize:9.5, color:GR60, textAlign:'center', marginTop:2 }}>Marker moves live as you drag the slider above</div>
+                  </div>;
+                })()}
+
+                <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+                  <button onClick={applyShift} disabled={wiShift===0} style={{ padding:'8px 18px', borderRadius:20, background:wiShift===0?GR20:'var(--brand-primary)', color:wiShift===0?GR60:'#fff', border:'none', fontSize:11.5, fontWeight:600, cursor:wiShift===0?'not-allowed':'pointer' }}>Apply this shift to the portfolio →</button>
+                  <button onClick={revertShift} disabled={!prevWeights} style={{ padding:'8px 16px', borderRadius:20, background:'#fff', color:prevWeights?NEG:GR60, border:'1px solid '+(prevWeights?NEG:GR20), fontSize:11.5, fontWeight:600, cursor:prevWeights?'pointer':'not-allowed', opacity:prevWeights?1:0.5 }}>↩ Revert last shift</button>
+                </div>
+              </div> : <div style={{ padding:20, textAlign:'center', color:GR60, fontSize:11.5 }}>This portfolio needs both equity and debt exposure to model an allocation shift.</div>}
             </div>
 
             {/* Growth projection */}
