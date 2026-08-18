@@ -98,7 +98,7 @@ const RANK_COLORS = {
   R4:{ bg:'rgba(239,68,68,0.08)',  color:'#EF4444', border:'rgba(239,68,68,0.2)' },
   R5:{ bg:'rgba(239,68,68,0.08)',  color:'#EF4444', border:'rgba(239,68,68,0.2)' },
 };
-const PIP_COLORS = { R1:'#059669', R2:'#10B981', R3:'#6D5479', R4:'#F59E0B', R5:'#EF4444', default:'#A795AE' };
+const PIP_COLORS = { R1:'#059669', R2:'#059669', R3:'#2D1F2B', R4:'#EF4444', R5:'#EF4444', default:'#A795AE' };
 
 function getRankOrder(r) { return !r || r==='-' || r==='0' ? 99 : (RANK_ORDER[r] || 98); }
 function cleanLabel(cat) { return cat.replace(/^(India Fund |India OE |India ETF |Cat: |Cat:)/,''); }
@@ -308,7 +308,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   }, [allFunds, showWhitelisted, searchQuery, sortBy, sortKey]);
 
   const handleFundClick = (fund) => {
-    setSelectedFund({ isin:fund.isin, name:fund.name, ranking:fund.ranking, amfi_code:fund.amfi_code, category:normCat(selectedCat), assetClass:subtypeItem?.asset_classes[0] });
+    setSelectedFund({ isin:fund.isin, name:fund.name, ranking:fund.ranking, amfi_code:fund.amfi_code, category: fund.category || normCat(selectedCat), assetClass:subtypeItem?.asset_classes[0] });
     navigate('/home');
   };
 
