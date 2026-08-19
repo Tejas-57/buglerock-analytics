@@ -484,7 +484,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', marginBottom: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <button onClick={() => navigate('/fund-explorer')} style={{ padding: '4px 10px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>← Back</button>
+              <button onClick={() => navigate(-1)} style={{ padding: '4px 10px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>← Back</button>
               {f && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{f.category}</span>}
             </div>
             <div style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, color: 'var(--brand-dark)', letterSpacing: '-.02em', lineHeight: 1.15, marginBottom: 6 }}>
@@ -665,7 +665,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
                 </thead>
                 <tbody>
                   {riskRows.length === 0 ? (
-                    <tr><td colSpan={4} style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)' }}>Risk data not available for this date</td></tr>
+                    <tr><td colSpan={4} style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>No {period.toUpperCase()} risk data available for this fund — select a shorter period above</td></tr>
                   ) : riskRows.map(row => (
                     <tr key={row.l} style={{ borderBottom: '1px solid var(--bg-secondary)' }}>
                       <td style={{ padding: '9px 12px', color: 'var(--text-muted)' }}>{row.l}</td>
