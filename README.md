@@ -231,8 +231,8 @@ curl https://buglerock-analytics-ew17.onrender.com/api/benchmarks/load-status
 curl "https://buglerock-analytics-ew17.onrender.com/api/benchmarks/nav-history?index=Nifty%2050&from_date=2024-01-01"
 ```
 
-### ⚠️ Pending: Nifty Indices daily DB sync
-Apps Script writes to the sheet daily but the DB is NOT updated daily for the 10 Nifty index columns. Need a daily cron that reads last N rows from "Nifty Indices" sheet tab and upserts to DB.
+### ✅ Nifty Indices daily DB sync (live)
+Apps Script writes to the "Nifty Indices" sheet tab daily via Yahoo Finance. The 5-minute Gmail poll loop calls `sync_nifty_indices_from_sheet()` inside `fetch_all_benchmarks()` every poll cycle, reading the last 20 rows and upserting to `benchmark_nav`. Verified live Aug 2026 — all 12 indices current.
 
 ---
 
@@ -433,7 +433,6 @@ Full Holdings V2 used when available (up to 99,999 holdings). Falls back to Top 
 4. **Model Portfolio presets** — Pre-fill Retirement Planner from real blended returns
 5. **Old Cloud project cleanup** — Shut down tejas.s@buglerock.asia project
 6. **CY 2026 column** — add to calendar year chart when year completes (do not add before year-end)
-7. **Nifty Indices daily DB sync** — cron to read sheet tail and upsert to benchmark_nav
 
 ---
 
@@ -466,4 +465,3 @@ Full Holdings V2 used when available (up to 99,999 holdings). Falls back to Top 
 ---
 
 - PPT export is built but hidden (`display:none`) — to be enabled when ready
-- `backend/utils/trading_calendar.py` is deprecated and safe to delete
