@@ -55,6 +55,23 @@ function blendFromSnaps(funds, weights, snapshots) {
     });
     return cov > 0 ? val / cov : null;
   }
+
+  function wblendEquity(getter) {
+    let val=0, cov=0;
+    funds.forEach(f => {
+      if (isPreciousMetalsFund(f.isin, snapshots)) return; // exclude — capture ratio meaningless vs equity BM
+      const w = weights[f.isin] || 0;
+      if (!w) return;
+      let v = get(f.isin, getter);
+      if (v == null) {
+        const cat = snapshots[f.isin]?.category;
+        if (cat) v = catAvg(cat, getter);
+      }
+      if (v == null || isNaN(v)) return;
+      val += v * w; cov += w;
+    });
+    return cov > 0 ? val / cov : null;
+  }
   return {
     return_1y:       wblend(s=>s.returns?.['1y']),
     return_3y:       wblend(s=>s.returns?.['3y']),
@@ -72,8 +89,8 @@ function blendFromSnaps(funds, weights, snapshots) {
     sortino_ratio_3y:wblend(s=>s.risk?.sortino_ratio_3y),
     alpha_3y:        wblend(s=>s.risk?.alpha_3y),
     beta_3y:         wblend(s=>s.risk?.beta_3y),
-    down_capture_3y: wblend(s=>s.risk?.down_capture_3y),
-    up_capture_3y:   wblend(s=>s.risk?.up_capture_3y),
+    down_capture_3y: wblendEquity(s=>s.risk?.down_capture_3y),
+    up_capture_3y:   wblendEquity(s=>s.risk?.up_capture_3y),
     std_dev_3y:      wblend(s=>s.risk?.std_dev_3y),
     expense_ratio:   wblend(s=>s.expense_ratio),
     large_cap:       wblend(s=>s.large_cap),
@@ -90,6 +107,17 @@ function blendFromSnaps(funds, weights, snapshots) {
   };
 }
 function blend(funds, weights, keys) { return {}; } // legacy stub
+
+// Up/dn capture is only meaningful vs equity benchmark — exclude precious metals & commodity funds.
+// Module-level so it's accessible in both blendFromSnaps and the Analyse component render.
+function isPreciousMetalsFund(isin, snapshots) {
+  const snap = snapshots[isin];
+  const ac  = (snap?.asset_class || '').toLowerCase();
+  const cat = (snap?.category    || '').toLowerCase();
+  return ac.includes('precious') || ac.includes('gold') || ac.includes('silver') ||
+         ac.includes('commodity') || cat.includes('gold') || cat.includes('silver') ||
+         cat.includes('precious metal') || cat.includes('sector - precious');
+}
 
 /**
  * blendAssetClass — computes asset class exposure by fund asset_class field.
@@ -1378,6 +1406,11 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                         </div></td>
                         <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, textAlign: 'center' }}>{weights[f.isin] || 0}%</td>
                         {RISK_METRICS.map(m => {
+                          // Up/dn capture is meaningless for precious metals funds — always show —
+                          const isCaptureMetric = m.k === 'up_capture_3y' || m.k === 'down_capture_3y';
+                          if (isCaptureMetric && isPreciousMetalsFund(f.isin, snapshots)) {
+                            return <td key={m.k} style={{ color: 'var(--text-muted)', textAlign: 'right' }}>—</td>;
+                          }
                           const riskMap = {
                             sharpe_ratio_3y:  fsnap?.risk?.sharpe_ratio_3y,
                             sortino_ratio_3y: fsnap?.risk?.sortino_ratio_3y,
