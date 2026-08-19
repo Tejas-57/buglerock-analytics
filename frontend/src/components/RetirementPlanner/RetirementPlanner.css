@@ -195,7 +195,7 @@
 }
 
 /* Goals / lumps rows */
-.rt-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.rt-rows { display: flex; flex-direction: column; gap: 10px; }
 .rt-row {
   display: flex;
   gap: 8px;

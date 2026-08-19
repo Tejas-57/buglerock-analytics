@@ -57,7 +57,8 @@ export function rtSimulate(IN, NSIM) {
 
   const paths = [], depletions = [];
   for (let s = 0; s < NSIM; s++) {
-    let c = IN.corpus0;
+    // If retiring today (yearsToRet=0), EPF+NPS lump is already available at t=0
+    let c = IN.corpus0 + (yearsToRet === 0 ? (epfAtRet + npsLump - (IN.oneTime || 0)) : 0);
     const path = [c];
     let depAge = null;
     let sip = (IN.sipM * 12) / 100000;

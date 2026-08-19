@@ -174,7 +174,7 @@ export function rtBuildFullSections(R) {
     return (sign || '') + str;
   };
 
-  let cfRows = '', sipA2 = IN.sipM * 12 / 100000;
+  let cfRows = '', sipA2 = IN.sipM * 12 / 100000, p10Depleted = false;
   for (let y = 1; y <= R.years; y++) {
     const ca = IN.age + y, isRet2 = ca > IN.retAge;
     const sipIn = (ca <= IN.sipTill && ca <= IN.retAge) ? sipA2 : 0;
@@ -201,7 +201,7 @@ export function rtBuildFullSections(R) {
       + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${WARN}">${gi2 || oneT2 ? fmtCF(gi2 + oneT2, '−') : '—'}</td>`
       + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${NEG}">${wd2 ? fmtCF(wd2, '−') : '—'}</td>`
       + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;font-weight:${isRet1 ? '700' : '400'};color:${BERRY}">${fmtCF(R.P50[y])}</td>`
-      + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${NEG}">${fmtCF(R.P10[y])}</td>`
+      + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${NEG}">${(() => { if (p10Depleted) return '—'; if (R.P10[y] <= 0) { p10Depleted = true; return '—'; } return fmtCF(R.P10[y]); })()}</td>`
       + `</tr>`;
   }
 

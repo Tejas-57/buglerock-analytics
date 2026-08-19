@@ -71,12 +71,13 @@ export default function RetirementPlanner() {
     preMu: num('preret') / 100, preSig: num('prevol') / 100,
     postMu: num('postret') / 100, postSig: num('postvol') / 100,
     infl: num('inflation') / 100,
-    goals: goals.slice(), lumps: lumps.slice(),
+    goals: goals.map(g => ({ ...g, age: parseFloat(g.age) || 0, amt: parseFloat(g.amt) || 0 })),
+    lumps: lumps.map(l => ({ ...l, age: parseFloat(l.age) || 0, amt: parseFloat(l.amt) || 0 })),
   });
 
   const run = () => {
     const IN = collectInputs();
-    if (IN.retAge <= IN.age) { alert('Retirement age must be greater than current age.'); return; }
+    if (IN.retAge < IN.age) { alert('Retirement age must be greater than or equal to current age.'); return; }
     if (IN.lifeExp <= IN.retAge) { alert('Plan-till age must be greater than retirement age.'); return; }
     setRunning(true);
     setTimeout(() => {
@@ -124,21 +125,39 @@ export default function RetirementPlanner() {
   );
 }
 
-// ══════════════ Input Form ══════════════
-function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running }) {
-  const Field = ({ k, label, type = 'number', ...rest }) => (
+// ══════════════ Field component — must be outside InputForm to keep stable identity ══════════════
+function Field({ k, label, type = 'number', f, set, ...rest }) {
+  const isNum = type === 'number';
+  return (
     <div className="rt-f">
       <label>{label}</label>
-      <input type={type} value={f[k]} onChange={set(k)} {...rest} />
+      <input
+        type="text"
+        inputMode={isNum ? 'decimal' : 'text'}
+        value={f[k] ?? ''}
+        onChange={set(k)}
+        {...rest}
+      />
     </div>
   );
+}
+
+// ══════════════ Input Form ══════════════
+function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running }) {
 
   return (
     <>
       <div className="rt-chips">
         {CHIPS.map(([code, label], i) => (
           <React.Fragment key={code}>
-            <div className={`rt-chip ${i === 0 ? 'on' : ''}`}><span>{code}</span> {label}</div>
+            <div
+              className={`rt-chip ${i === 0 ? 'on' : ''}`}
+              style={{ cursor: 'pointer' }}
+              onClick={() => {
+                const el = document.getElementById(`rt-section-${code}`);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+            ><span>{code}</span> {label}</div>
             {i < CHIPS.length - 1 && <div className="rt-chip-sep">›</div>}
           </React.Fragment>
         ))}
@@ -151,10 +170,10 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
             <label>Client name</label>
             <input type="text" value={f.name} onChange={set('name')} placeholder="e.g. Priya Sharma" />
           </div>
-          <Field k="age" label="Current age" min="18" max="70" />
-          <Field k="retage" label="Retirement age" min="40" max="75" />
-          <Field k="lifeexp" label="Plan till age" min="70" max="105" />
-          <Field k="spouse" label="Spouse age (opt.)" placeholder="—" min="18" max="80" />
+          <Field f={f} set={set} k="age" label="Current age" min="18" max="70" />
+          <Field f={f} set={set} k="retage" label="Retirement age" min="40" max="75" />
+          <Field f={f} set={set} k="lifeexp" label="Plan till age" min="70" max="105" />
+          <Field f={f} set={set} k="spouse" label="Spouse age (opt.)" placeholder="—" min="18" max="80" />
           <div className="rt-f">
             <label>Prepared by</label>
             <input type="text" value={f.rm} onChange={set('rm')} />
@@ -165,10 +184,10 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
       {/* B — Corpus & SIP */}
       <Section code="B" title="Investment corpus & SIP" sub="Existing savings and ongoing contributions">
         <div className="rt-grid rt-grid-4">
-          <Field k="corpus" label="Current corpus (₹ L)" min="0" />
-          <Field k="sip" label="Monthly SIP (₹)" min="0" step="5000" />
-          <Field k="stepup" label="Annual SIP step-up (%)" min="0" max="25" />
-          <Field k="sipuntil" label="SIP continue until age" min="30" max="75" />
+          <Field f={f} set={set} k="corpus" label="Current corpus (₹ L)" min="0" />
+          <Field f={f} set={set} k="sip" label="Monthly SIP (₹)" min="0" step="5000" />
+          <Field f={f} set={set} k="stepup" label="Annual SIP step-up (%)" min="0" max="25" />
+          <Field f={f} set={set} k="sipuntil" label="SIP continue until age" min="30" max="75" />
         </div>
       </Section>
 
@@ -178,18 +197,18 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
           <div>
             <div className="rt-subgroup-label">EPF / PPF</div>
             <div className="rt-grid rt-grid-3">
-              <Field k="epf" label="Current corpus (₹ L)" min="0" />
-              <Field k="epfm" label="Monthly contribution (₹)" min="0" step="1000" />
-              <Field k="epfr" label="Expected return (%)" min="5" max="10" step="0.1" />
+              <Field f={f} set={set} k="epf" label="Current corpus (₹ L)" min="0" />
+              <Field f={f} set={set} k="epfm" label="Monthly contribution (₹)" min="0" step="1000" />
+              <Field f={f} set={set} k="epfr" label="Expected return (%)" min="5" max="10" step="0.1" />
             </div>
           </div>
           <div>
             <div className="rt-subgroup-label">NPS</div>
             <div className="rt-grid rt-grid-4">
-              <Field k="nps" label="Current corpus (₹ L)" min="0" />
-              <Field k="npsm" label="Monthly contribution (₹)" min="0" step="1000" />
-              <Field k="npsr" label="Expected return (%)" min="6" max="14" step="0.5" />
-              <Field k="annrate" label="Annuity rate (%)" min="4" max="8" step="0.5" />
+              <Field f={f} set={set} k="nps" label="Current corpus (₹ L)" min="0" />
+              <Field f={f} set={set} k="npsm" label="Monthly contribution (₹)" min="0" step="1000" />
+              <Field f={f} set={set} k="npsr" label="Expected return (%)" min="6" max="14" step="0.5" />
+              <Field f={f} set={set} k="annrate" label="Annuity rate (%)" min="4" max="8" step="0.5" />
             </div>
           </div>
         </div>
@@ -209,11 +228,9 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
       {/* F — Income */}
       <Section code="F" title="Retirement income need" sub="Post-retirement expenses, income offsets and tax">
         <div className="rt-grid rt-grid-4">
-          <Field k="expenses" label="Current monthly expenses (₹)" min="0" step="5000" />
-          <Field k="replace" label="Replacement ratio (%)" min="30" max="120" step="5" />
-          <Field k="health" label="Healthcare today (₹/mo)" min="0" step="1000" />
-          <Field k="healthinfl" label="Healthcare inflation (%)" min="4" max="15" step="0.5" />
-          <Field k="otherinc" label="Pension / rental (₹/mo)" min="0" step="2500" />
+          <Field f={f} set={set} k="expenses" label="Current monthly expenses (₹)" min="0" step="5000" />
+          <Field f={f} set={set} k="replace" label="Replacement ratio (%)" min="30" max="120" step="5" />
+          <Field f={f} set={set} k="otherinc" label="Pension / rental (₹/mo)" min="0" step="2500" />
           <div className="rt-f">
             <label>Other income indexed?</label>
             <select value={f.otherindexed} onChange={set('otherindexed')}>
@@ -221,8 +238,8 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
               <option value="0">No — fixed</option>
             </select>
           </div>
-          <Field k="onetime" label="One-time expense at retirement (₹ L)" min="0" />
-          <Field k="tax" label="Tax on withdrawals (%)" min="0" max="30" step="1" />
+          <Field f={f} set={set} k="onetime" label="One-time expense at retirement (₹ L)" min="0" />
+          <Field f={f} set={set} k="tax" label="Tax on withdrawals (%)" min="0" max="30" step="1" />
         </div>
       </Section>
 
@@ -232,21 +249,21 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
           <div>
             <div className="rt-subgroup-label">Pre-retirement (accumulation)</div>
             <div className="rt-grid rt-grid-2">
-              <Field k="preret" label="Expected return (%)" min="4" max="20" step="0.5" />
-              <Field k="prevol" label="Volatility / std dev (%)" min="2" max="30" />
+              <Field f={f} set={set} k="preret" label="Expected return (%)" min="4" max="20" step="0.5" />
+              <Field f={f} set={set} k="prevol" label="Volatility / std dev (%)" min="2" max="30" />
             </div>
           </div>
           <div>
             <div className="rt-subgroup-label">Post-retirement (drawdown)</div>
             <div className="rt-grid rt-grid-2">
-              <Field k="postret" label="Expected return (%)" min="3" max="15" step="0.5" />
-              <Field k="postvol" label="Volatility / std dev (%)" min="1" max="20" />
+              <Field f={f} set={set} k="postret" label="Expected return (%)" min="3" max="15" step="0.5" />
+              <Field f={f} set={set} k="postvol" label="Volatility / std dev (%)" min="1" max="20" />
             </div>
           </div>
           <div>
             <div className="rt-subgroup-label">Macro & simulation</div>
             <div className="rt-grid rt-grid-2">
-              <Field k="inflation" label="General inflation (%)" min="2" max="12" step="0.5" />
+              <Field f={f} set={set} k="inflation" label="General inflation (%)" min="2" max="12" step="0.5" />
               <div className="rt-f">
                 <label>No. of simulations</label>
                 <select value={f.sims} onChange={set('sims')}>
@@ -272,7 +289,7 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
 
 function Section({ code, title, sub, children }) {
   return (
-    <div className="rt-card">
+    <div id={`rt-section-${code}`} className="rt-card">
       <div className="rt-card-hd">
         <div className="rt-card-badge">{code}</div>
         <div>
@@ -298,17 +315,17 @@ function RowEditor({ rows, setRows, kind, placeholder, defAge, defAmt = 0, empty
         <div className="rt-rows">
           {rows.map((r, i) => (
             <div className="rt-row" key={i}>
-              <div className="rt-f" style={{ flex: 1.8 }}>
+              <div className="rt-f" style={{ flex: 3, minWidth: 0 }}>
                 <label>{kind}</label>
                 <input type="text" value={r.name} placeholder={placeholder} onChange={(e) => update(i, 'name', e.target.value)} />
               </div>
               <div className="rt-f" style={{ width: 68 }}>
                 <label>Age</label>
-                <input type="number" value={r.age} min="25" max="95" onChange={(e) => update(i, 'age', parseInt(e.target.value, 10) || defAge)} />
+                <input type="text" inputMode="numeric" value={r.age} min="25" max="95" onChange={(e) => update(i, 'age', e.target.value)} onBlur={(e) => { if (!e.target.value) update(i, 'age', defAge); }} />
               </div>
               <div className="rt-f" style={{ width: 72 }}>
                 <label>₹ L</label>
-                <input type="number" value={r.amt} min="0" onChange={(e) => update(i, 'amt', parseFloat(e.target.value) || 0)} />
+                <input type="text" inputMode="decimal" value={r.amt} min="0" onChange={(e) => update(i, 'amt', e.target.value)} onBlur={(e) => { if (!e.target.value) update(i, 'amt', 0); }} />
               </div>
               <button className="rt-row-rm" onClick={() => remove(i)} title="Remove">✕</button>
             </div>

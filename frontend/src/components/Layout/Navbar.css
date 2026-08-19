@@ -65,10 +65,32 @@
 .nav-list {
   list-style: none;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 4px 10px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(145, 47, 99, 0.2) transparent;
+}
+
+.nav-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.nav-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.nav-list::-webkit-scrollbar-thumb {
+  background: rgba(145, 47, 99, 0.2);
+  border-radius: 4px;
+}
+
+.nav-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(145, 47, 99, 0.4);
 }
 
 .nav-item {
