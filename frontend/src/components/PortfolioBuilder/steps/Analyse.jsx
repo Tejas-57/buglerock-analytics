@@ -384,9 +384,12 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
     const API = process.env.REACT_APP_API_URL || '';
     const isins = funds.map(f => f.isin).join(',');
     const wts = funds.map(f => (weights[f.isin] || 0)).join(',');
-    const portfolioKey = isins + '|' + wts;
+    const bmKey = benchmarks && benchmarks.length > 0
+      ? benchmarks.map(b => `${b.name || b.display_name}:${b.weight || 0}`).join(',')
+      : '';
+    const portfolioKey = isins + '|' + wts + '|' + bmKey;
 
-    // Skip refetch if portfolio hasn't changed since last fetch
+    // Skip refetch if portfolio + benchmark haven't changed since last fetch
     if (stressPortfolioKey.current === portfolioKey && stressData) return;
 
     stressPortfolioKey.current = portfolioKey;
@@ -403,7 +406,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
       fetch(`${API}/api/benchmarks/stress-returns?index_names=${encodeURIComponent(bmNames)}&weights=${encodeURIComponent(bmWts)}`)
         .then(r => r.json()).then(d => setBmStress(d)).catch(() => setBmStress(null));
     } else { setBmStress(null); }
-  }, [activeTab, funds.map(f => f.isin).join(','), JSON.stringify(weights)]);
+  }, [activeTab, funds.map(f => f.isin).join(','), JSON.stringify(weights), JSON.stringify(benchmarks)]);
 
   // ── Rolling returns state & fetch (daily-NAV based) ─────────────────────
   const [rollingData, setRollingData] = useState(null);
