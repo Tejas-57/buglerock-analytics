@@ -474,8 +474,11 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
       </div>
 
       {Math.abs(totalWeight-100)>0.05&&funds.length>0 && (
-        <div style={{ padding:'8px 20px', background:totalWeight>100?'rgba(145,47,99,.06)':'var(--bg-secondary)', borderTop:'1px solid var(--border)', fontSize:11, color:totalWeight>100?'var(--brand-primary)':'var(--text-muted)', flexShrink:0 }}>
-          {totalWeight>100?`⚠ Total weight ${totalWeight}% — reduce by ${totalWeight-100}%`:`ℹ Total weight ${totalWeight}% — add ${100-totalWeight}% more to analyse`}
+        <div style={{ padding:'10px 20px', background:totalWeight>100?'#FFF1F4':'var(--bg-secondary)', borderTop:'1px solid '+(totalWeight>100?'#F9A8BC':'var(--border)'), fontSize:11.5, color:totalWeight>100?'#B91C1C':'var(--text-muted)', flexShrink:0, display:'flex', alignItems:'center', gap:8, fontWeight: totalWeight>100?600:400 }}>
+          {totalWeight>100
+            ? <>⚠️ <span>Weights sum to <strong>{totalWeight}%</strong> — exceeds 100% by <strong>{(totalWeight-100).toFixed(2)}%</strong>. Weights must sum to exactly 100% to run analysis.</span></>
+            : <>ℹ️ <span>Weights sum to <strong>{totalWeight}%</strong> — add <strong>{(100-totalWeight).toFixed(2)}%</strong> more to reach 100%</span></>
+          }
         </div>
       )}
     </div>

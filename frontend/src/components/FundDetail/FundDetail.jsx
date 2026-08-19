@@ -387,7 +387,7 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
   const f = data;
   const r = f?.returns || {};
   const risk = f?.risk || {};
-  const rk  = (base) => { const v = risk[`${base}_${period}`]; return v != null && v !== '-' ? v : risk[`${base}_3y`] ?? null; };
+  const rk  = (base) => { const v = risk[`${base}_${period}`]; return v != null && v !== '-' ? v : null; };
   const rk1 = (base) => risk[`${base}_1y`] ?? null;
   const bmName = benchmark?.name || null;
   const bmR = benchmark?.returns || {};
@@ -408,7 +408,9 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
   const bmRisk = benchmark?.risk || {};
   // Helper — true only if value is a real number (not null, not '-', not 0 for capture ratios)
   const hasVal = (v) => v != null && v !== '-' && !isNaN(parseFloat(v));
-  const hasEquityRisk = hasVal(rk('up_capture')) || hasVal(rk('alpha')) || hasVal(rk('beta'));
+  const hasEquityRisk = ['1y','3y','5y'].some(p =>
+    ['up_capture','alpha','beta'].some(base => { const v = risk[`${base}_${p}`]; return v != null && v !== '-'; })
+  );
   const hasCYData = ['cy2021','cy2022','cy2023','cy2024','cy2025'].some(k => hasVal(f?.returns?.[k]));
   const bmRk = (base) => { const v = bmRisk[`${base}_${period}`]; return v != null && v !== '-' ? v : null; };
 
