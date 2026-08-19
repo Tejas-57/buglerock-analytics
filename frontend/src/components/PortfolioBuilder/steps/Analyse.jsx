@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { fp, f2 } from './BuildPortfolio';
 import AIDoctor from './analyseTabs/AIDoctor.jsx';
 import PortfolioXRay from './analyseTabs/PortfolioXRay.jsx';
@@ -356,9 +356,18 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
     finally { setOverlapLoading(false); }
   }
 
+  const overlapPortfolioKey = useRef(null);
+
   useEffect(() => {
-    if ((activeTab === 'overlap' || activeTab === 'doctor' || activeTab === 'xray') && equityFundsForOverlap.length >= 2) fetchOverlap();
-    else if (activeTab === 'overlap' && equityFundsForOverlap.length < 2) { setOverlapData(null); setOverlapError(null); }
+    const isins = equityFundsForOverlap.map(f => f.isin).join(',');
+    if ((activeTab === 'overlap' || activeTab === 'doctor' || activeTab === 'xray') && equityFundsForOverlap.length >= 2) {
+      // Skip refetch if same portfolio already has data
+      if (overlapPortfolioKey.current === isins && overlapData) return;
+      overlapPortfolioKey.current = isins;
+      fetchOverlap();
+    } else if (activeTab === 'overlap' && equityFundsForOverlap.length < 2) {
+      setOverlapData(null); setOverlapError(null);
+    }
   }, [activeTab, funds.map(f => f.isin).join(',')]);
 
   // ── Stress test state ────────────────────────────────────────────────────
@@ -367,12 +376,21 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
   const [stressError, setStressError] = useState(null);
   const [bmStress, setBmStress] = useState(null);
 
+  // Track what portfolio the stress data was last computed for
+  const stressPortfolioKey = useRef(null);
+
   useEffect(() => {
-    if (activeTab !== 'stress' || funds.length === 0) return;
-    setStressLoading(true); setStressError(null); setStressData(null);
+    if ((activeTab !== 'stress' && activeTab !== 'xray') || funds.length === 0) return;
     const API = process.env.REACT_APP_API_URL || '';
     const isins = funds.map(f => f.isin).join(',');
     const wts = funds.map(f => (weights[f.isin] || 0)).join(',');
+    const portfolioKey = isins + '|' + wts;
+
+    // Skip refetch if portfolio hasn't changed since last fetch
+    if (stressPortfolioKey.current === portfolioKey && stressData) return;
+
+    stressPortfolioKey.current = portfolioKey;
+    setStressLoading(true); setStressError(null); setStressData(null);
     fetch(`${API}/api/nav/stress-test?isins=${isins}&weights=${wts}`)
       .then(r => r.json())
       .then(d => { setStressData(d); setStressLoading(false); })
@@ -393,10 +411,20 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
   const [rollingError, setRollingError] = useState(null);
   const [bmRolling, setBmRolling] = useState(null);
 
+  const rollingPortfolioKey = useRef(null);
+
   useEffect(() => {
     if (activeTab !== 'returns' || funds.length === 0) return;
     const API = process.env.REACT_APP_API_URL || '';
     const isins = funds.map(f => f.isin).join(',');
+
+    const wts = funds.map(f => (weights[f.isin] || 0)).join(',');
+    const portfolioKey = isins + '|' + wts;
+
+    // Skip refetch if portfolio composition and weights unchanged
+    if (rollingPortfolioKey.current === portfolioKey && rollingData) return;
+    rollingPortfolioKey.current = portfolioKey;
+
     setRollingLoading(true);
     setRollingError(null);
     fetch(`${API}/api/nav/rolling-metrics?isins=${isins}`)
@@ -415,9 +443,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
     } else {
       setBmRolling(null);
     }
-  }, [activeTab, funds.map(f => f.isin).join(',')]);
-
-  // Compute blended benchmark from benchmarks array (manual weights)
+  }, [activeTab, funds.map(f => f.isin).join(','), JSON.stringify(weights)]);
   const totalBmW = benchmarks.reduce((s, b) => s + (b.weight || 0), 0) || 1;
   // Returns { value, partial, missing[] } for a given getter across all benchmarks
   function blendBmMeta(getter) {
@@ -554,10 +580,17 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
     if (onDataUpdate) onDataUpdate({ stressData, overlapData, corrData });
   }, [stressData, overlapData, corrData]);
 
+  const corrPortfolioKey = useRef(null);
+
   React.useEffect(() => {
     if (activeTab !== 'correlation' || funds.length < 2) return;
     const API = process.env.REACT_APP_API_URL || '';
     const isins = funds.map(f => f.isin).join(',');
+
+    // Skip refetch if same portfolio already has data
+    if (corrPortfolioKey.current === isins && corrData) return;
+    corrPortfolioKey.current = isins;
+
     setCorrLoading(true);
     fetch(`${API}/api/nav/correlation?isins=${isins}`)
       .then(r => r.json())
@@ -803,6 +836,8 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
             overlapData={overlapData}
             histVar={histVar}
             histVarLoading={histVarLoading}
+            stressData={stressData}
+            bmStress={bmStress}
           />
         )}
 

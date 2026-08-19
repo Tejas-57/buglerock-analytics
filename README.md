@@ -245,55 +245,48 @@ buglerock-analytics/
 │       └── components/
 │           ├── FundExplorer/          # Fund browsing, filtering, search
 │           ├── FundDetail/            # Individual fund deep dive
+│           ├── PeerComparison/        # CompareFunds.jsx — up to 4 funds
 │           ├── StockExposure/         # Stock Exposure Finder tab
 │           ├── RetirementPlanner/     # Retirement Planner tab (Monte Carlo)
 │           │   ├── RetirementPlanner.jsx
 │           │   ├── rtEngine.js        # Monte Carlo engine
 │           │   ├── rtReport.js        # 8-section report builder
 │           │   └── RetirementPlanner.css
+│           ├── Simulator/             # SIP Simulator (under CALCULATE nav section)
 │           ├── ModelPortfolios/       # BugleRock multi-asset model portfolios
+│           ├── Watchlist/             # Fund watchlist with card/table/compare views
 │           └── PortfolioBuilder/      # 6-step portfolio workflow
 │               ├── PortfolioBuilder.jsx
 │               └── steps/
 │                   ├── ClientIPS.jsx
 │                   ├── FundSearch.jsx
 │                   ├── BuildPortfolio.jsx
-│                   ├── Analyse.jsx            # Step 4: analytics suite
-│                   ├── analyseTabs/           # New modular analyse tabs
-│                   │   ├── AIDoctor.jsx       # Rules-based portfolio diagnostic
+│                   ├── Analyse.jsx            # Analytics suite
+│                   ├── analyseTabs/
 │                   │   └── PortfolioXRay.jsx  # Comprehensive tear sheet
 │                   ├── Optimise.jsx
 │                   ├── Compare.jsx
 │                   └── PDFProposal.jsx
 │
 └── backend/
-    ├── main.py                        # FastAPI app, startup, Gmail poll loop
-    ├── generate_gmail_token.py        # Run once to generate gmail_token.json
+    ├── main.py
     ├── routers/
-    │   ├── funds.py                   # /api/funds
-    │   ├── home.py                    # /api/home
-    │   ├── nav.py                     # /api/nav
-    │   ├── holdings.py                # /api/holdings (overlap, stock-exposure, portfolio-lookthrough)
-    │   ├── performance.py             # /api/performance
-    │   ├── peer.py                    # /api/peer
-    │   ├── benchmarks.py             # /api/benchmarks (fund benchmarks + NAV time series)
-    │   ├── models.py                  # /api/models (model portfolios LP solver)
-    │   ├── optimise.py                # /api/optimise
-    │   ├── gmail.py                   # /api/gmail (store-token, reparse)
-    │   └── proposal.py                # /api/proposal
-    ├── services/
-    │   ├── parser.py                  # Excel → PostgreSQL parser
-    │   ├── gmail_watcher.py           # Gmail OAuth + MF email fetch logic
-    │   ├── benchmark_watcher.py       # Gmail poller for NSE + CRISIL benchmark emails
-    │   ├── benchmark_sheet_service.py # Google Sheets read/write via service account
-    │   ├── benchmark_parser.py        # Parses NSE ZIP + CRISIL Excel attachments
-    │   ├── benchmark_db_service.py    # benchmark_nav table CRUD
-    │   ├── db_service.py              # DB query functions
-    │   ├── morningstar_service.py     # Morningstar API (holdings, AMC names)
-    │   ├── nav_fetcher.py             # NAV history (Morningstar primary, mfapi fallback)
-    │   └── optimiser.py              # Monte Carlo optimiser
-    └── models/
-        └── database.py               # SQLAlchemy models
+    │   ├── funds.py
+    │   ├── home.py
+    │   ├── nav.py
+    │   ├── holdings.py
+    │   ├── benchmarks.py
+    │   ├── models.py
+    │   ├── optimise.py
+    │   ├── gmail.py
+    │   └── proposal.py
+    └── services/
+        ├── parser.py
+        ├── db_service.py
+        ├── morningstar_service.py
+        ├── nav_fetcher.py
+        ├── benchmark_db_service.py
+        └── optimiser.py
 ```
 
 ---
@@ -301,19 +294,13 @@ buglerock-analytics/
 ## Database Models
 
 ### `DailyFundData`
-One row per fund per data date. Includes: ISIN, name, category, asset_class, NAV, returns, risk metrics, cap allocation, expense ratio, AUM, rating, `branding_name` (AMC short name from Morningstar).
-
-### `BenchmarkData`
-Benchmark performance by date from Morningstar Excel.
+One row per fund per data date. Includes: ISIN, name, category, asset_class, NAV, returns, risk metrics, cap allocation, expense ratio, AUM, rating, `branding_name`.
 
 ### `benchmark_nav`
-Daily NAV time series for CRISIL/NSE indices. 47K+ rows. Queried for benchmark charts and rolling returns.
-
-### `EmailFetchLog`
-Tracks which MF emails have been processed.
+Daily NAV time series for CRISIL/NSE indices. 47K+ rows.
 
 ### `FundHolding` (Render only)
-Individual stock-level holdings per fund from Morningstar `NewPortfolioApi`.
+Individual stock-level holdings per fund from Morningstar `NewPortfolioApi`. Uses Full Holdings V2 (up to 99,999 holdings per fund) with fallback to Top 25.
 
 ### `FundPortfolioStats` (Render only)
 Fund-level portfolio stats — asset allocation, market cap breakdown, sector weights, PE/PB.
@@ -322,38 +309,79 @@ Fund-level portfolio stats — asset allocation, market cap breakdown, sector we
 
 ## Key Features
 
+### Navbar Structure
+- **DISCOVER** — Fund Explorer, Watchlist, Stock Exposure
+- **ANALYSE** — Fund Detail, Compare Funds, Peer Group Analytics
+- **BUILD** — Portfolio Builder, Model Portfolios, Retirement Planner
+- **CALCULATE** — SIP Simulator, Rolling Analytics
+- Sidebar scrollable when items overflow (small/zoomed screens)
+
 ### Fund Explorer
-2,000+ mutual funds. Filter by asset class, category. Sort by return. Search by name/AMC/ISIN. Whitelisted (R1/R2) filter.
+- Category shown on watchlist card uses fund's own `category` field, NOT the sidebar filter category
+- Back button on Fund Detail uses `navigate(-1)` — returns to wherever user came from
 
-### Stock Exposure Finder
-Search any stock → see all funds holding it with weights, AUM exposure, AMC breakdown. Uses real Morningstar holdings data. ISIN-first deduplication handles name variants.
+### Watchlist
+- Category displayed from live snapshot (`f?.category`) with localStorage fallback
+- Add-to-watchlist saves fund's own category, not selected sidebar filter
 
-### Retirement Planner
-Monte Carlo retirement planning tool.
-- **Engine:** Box-Muller normal distribution, 5,000 simulations main, 1,000/scenario for sensitivity
-- **Inputs:** 7 sections (personal, corpus/SIP, EPF/NPS, inflows, goals, income, assumptions)
-- **Outputs:** Success rate, verdict, 8-section inline report + printable PDF
-- **Persistence:** localStorage — survives hard refresh, only resets on Reset button
-- **Feasibility threshold:** 1.25× median corpus vs inflated goal
-- **Pending:** Cost basis (WACB) tax calculation, Model Portfolio presets for Section G
+### Compare Funds (`/PeerComparison/CompareFunds.jsx`)
+- 5 sub-tabs: Returns, Risk metrics, Composition, Sectoral exposure, Fund info, Overlap
+- **Sectoral exposure** — fetches `stats.sector_breakdown` from `/api/holdings/{isin}` for each fund
+- **Overlap tab** — Export Overlap Report PDF button (same format as Portfolio Builder)
+- PDF uses `shortFundName()` for display names
 
 ### Portfolio Builder — Analyse Tab
-Tab order: AI Doctor → Portfolio X-Ray → Overview → Returns → Risk → Exposure → Correlation → Overlap → Rolling → Stress → Style & Drift → Fund Details
+Tab groups: `Portfolio X-Ray | Overview · Returns & projections · Risk metrics | Correlation · Overlap · Style & drift | Stress test · Sensitivity · What-If | Fund details`
 
-**AI Doctor** — Rules-based diagnostic. 10 checks. 0–100 health score. Symptom cards with prescriptions. Confirmed strengths. Uses real Morningstar overlap data.
+**Returns & projections tab** includes (in order):
+1. Return pills
+2. Return contribution per fund table
+3. Lump sum projection
+4. SIP projection
+5. Growth projection
+6. Rolling returns consistency table
 
-**Portfolio X-Ray** — Comprehensive tear sheet. 7 sections. Real sector look-through and top 10 companies via `/api/holdings/portfolio-lookthrough`. Parametric tail risk estimates.
+**Performance caching** — tab switch no longer triggers refetch for same portfolio:
+| Tab | Cache key |
+|---|---|
+| Stress test | `isins + weights` |
+| Rolling returns | `isins + weights` |
+| Overlap | `equity fund isins` |
+| Correlation | `isins` |
 
-**Pending tabs:** Sensitivity, What-If
+**What-If tab**:
+- Fund substitution: up to 3 swaps, R1/R2 candidates + per-swap search, 8 delta metrics, persisted to localStorage
+- Allocation shift: Option D (only pure equity/debt scaled, hybrids unchanged), trade-off chart, Apply+Revert buttons persisted to localStorage
+- Growth projection moved to Returns tab
 
-### Model Portfolios
-See `MODEL_PORTFOLIOS_RULEBOOK.md` for full documentation.
+**Portfolio X-Ray — Stress section**:
+- Fetched when X-Ray tab opens (same trigger as Stress Test tab)
+- Shows real NAV-based returns: Portfolio, Nifty 500, Blended BM
+- Falls back to "Computing..." message while loading
+- Footnote: "Returns calculated from actual NAV history. '—' means fund not active or NAV unavailable."
+
+### Retirement Planner
+- **Canonical file:** 425 lines — `RetirementPlanner.jsx` stored in session Aug 2026
+- `Field` component at module level (fixes focus/cursor loss on keystroke)
+- `type="text"` with `inputMode="decimal"` (fixes leading zero bug)
+- Chip nav scrolls to sections via `id="rt-section-{code}"`
+- `retAge < age` validation — allows already-retired clients (retAge = currentAge)
+- Goals/lumps stored as raw strings, parsed to numbers in `collectInputs`
+- P10 corpus clamped to `—` after depletion in cashflow table
+- Single column layout for goals/inflows rows
+
+### Fund Detail
+- Period toggle (1Y/3Y/5Y) — `rk()` returns null for missing periods (no 3Y fallback)
+- Toggle stays visible even when selected period has no data — shows "No Xy data — select shorter period"
+
+### Build Portfolio
+- Weight warning: red background + bold message when weights exceed 100%
 
 ---
 
 ## Asset Class Classification
 
-Single source of truth: `blendAssetClass()` function in `Analyse.jsx`.
+Single source of truth: `blendAssetClass()` in `Analyse.jsx`.
 
 | Fund type | Classified as |
 |---|---|
@@ -363,11 +391,13 @@ Single source of truth: `blendAssetClass()` function in `Analyse.jsx`.
 | Equity, Index, Passive ETF | Equity |
 | REITs, convertibles, preferred | REITs/Other |
 
+**Allocation shift (What-If):** Pure equity = equity_pct ≥ 80%, pure debt = bond_pct ≥ 80%. Hybrids unchanged. Shift limit = min(pureEqW, pureDebtW, 30pp).
+
 ---
 
 ## Overlap Analysis
 
-Excluded from overlap: all debt categories, precious metals, India OE.
+Excluded: all debt categories, precious metals, India OE.
 API limit: 20 funds maximum.
 
 ---
@@ -375,10 +405,10 @@ API limit: 20 funds maximum.
 ## Deployment
 
 ### Frontend (Vercel)
-Push to `main` → auto-builds and deploys.
+Push to `main` → auto-builds and deploys (~90 sec).
 
 ### Backend (Render)
-Push to `main` → auto-deploys (~3 minutes). On startup: runs DB migrations → seeds accesscode → launches Gmail poll loop (MF + benchmark emails) + NAV cron + holdings cron.
+Push to `main` → auto-deploys (~3 min). On startup: DB migrations → Gmail poll loop + NAV cron + holdings cron.
 
 ---
 
@@ -391,41 +421,47 @@ Push to `main` → auto-deploys (~3 minutes). On startup: runs DB migrations →
 | Frequency | Every trading day (auto) | Daily at 6AM (staleness check) |
 | Tables | `DailyFundData` | `FundHolding`, `FundPortfolioStats` |
 
-### Staleness check
-Runs daily at 6AM. Finds most recent `portfolio_date` across all funds. Re-fetches only funds where `portfolio_date < latest_known_date`.
-
-### Tables only on Render
-`fund_holding`, `fund_portfolio_stats`, `holdings_fetch_log`, `morningstar_access_code`
-
----
-
-## Model Portfolios
-
-Constraint-based LP solver using HiGHS via `scipy.optimize.linprog`. R1/R2 funds only. See `MODEL_PORTFOLIOS_RULEBOOK.md` for full documentation.
-
-### API endpoints
-- `GET /api/models/portfolios`
-- `GET /api/models/detail?key=balanced`
-- `GET /api/models/debug`
+Full Holdings V2 used when available (up to 99,999 holdings). Falls back to Top 25 if V2 unavailable.
 
 ---
 
 ## Pending Features
 
-1. **Cost basis (WACB) tax** — Retirement Planner proper LTCG tax calculation
-2. **Model Portfolio presets** — Pre-fill Retirement Planner Section G from real blended returns
-3. **Old Cloud project cleanup** — Shut down tejas.s@buglerock.asia project
-4. **User auth** — Google OAuth login, per-user saved portfolios and watchlists
-5. **Fund substitution (What-If tab)** — swap one holding for another with live delta preview
+1. **User auth** — Google OAuth login, per-user saved portfolios and watchlists
+2. **Portfolio NAV series** — actual drawdown/ulcer/recovery from computed portfolio daily returns
+3. **Cost basis (WACB)** — Retirement Planner LTCG tax calculation
+4. **Model Portfolio presets** — Pre-fill Retirement Planner from real blended returns
+5. **Old Cloud project cleanup** — Shut down tejas.s@buglerock.asia project
+6. **CY 2026 column** — add to calendar year chart when year completes (do not add before year-end)
+7. **Nifty Indices daily DB sync** — cron to read sheet tail and upsert to benchmark_nav
 
-## Completed Features (Aug 2026)
+---
 
-- **Nifty Indices daily DB sync** — 5-min poll loop reads sheet tail, upserts to benchmark_nav
-- **Sensitivity tab** — risk posture, VaR/ES (parametric + historical simulation), rate/market sensitivity, heatmap, tornado chart
-- **What-If tab** — allocation shift with live delta, growth projection, reverse SIP calculator
-- **Benchmark returns pipeline** — benchmark_returns table, computed daily from NAV using Morningstar period dates, feeds Section E of IPS
-- **Duplicate fund fix** — advisory lock in save_parsed_data prevents concurrent save duplication
-- **Historical VaR** — hybrid historical (overlapping period returns from nav_history) + parametric fallback for short-history funds
+## Output Files (always use these, not repo)
+
+| File | Deploy to |
+|---|---|
+| `Analyse.jsx` | `frontend/src/components/PortfolioBuilder/steps/` |
+| `PortfolioXRay.jsx` | `frontend/src/components/PortfolioBuilder/steps/analyseTabs/` |
+| `BuildPortfolio.jsx` | `frontend/src/components/PortfolioBuilder/steps/` |
+| `PortfolioBuilder.jsx` | `frontend/src/components/PortfolioBuilder/` |
+| `ClientIPS.jsx` | `frontend/src/components/PortfolioBuilder/steps/` |
+| `FundExplorer.jsx` | `frontend/src/components/FundExplorer/` |
+| `FundDetail.jsx` | `frontend/src/components/FundDetail/` |
+| `CompareFunds.jsx` | `frontend/src/components/PeerComparison/` |
+| `Watchlist.jsx` | `frontend/src/components/Watchlist/` |
+| `Navbar.jsx` | `frontend/src/components/Layout/` |
+| `Navbar.css` | `frontend/src/components/Layout/` |
+| `RetirementPlanner.jsx` | `frontend/src/components/RetirementPlanner/` |
+| `RetirementPlanner.css` | `frontend/src/components/RetirementPlanner/` |
+| `rtEngine.js` | `frontend/src/components/RetirementPlanner/` |
+| `rtReport.js` | `frontend/src/components/RetirementPlanner/` |
+| `holdings.py` | `backend/routers/` |
+| `benchmarks.py` | `backend/routers/` |
+| `nav.py` | `backend/routers/` |
+| `db_service.py` | `backend/services/` |
+| `benchmark_db_service.py` | `backend/services/` |
+| `parser.py` | `backend/services/` |
 
 ---
 

@@ -100,7 +100,7 @@ const RANK_STYLE = {
   R5: { bg:'rgba(239,68,68,0.08)',  color:'#EF4444', border:'rgba(239,68,68,0.2)'  },
 };
 
-export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, benchmarks = [], bmRets, ips, overlapData, histVar, histVarLoading }) {
+export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, benchmarks = [], bmRets, ips, overlapData, histVar, histVarLoading, stressData, bmStress }) {
   const [lookthrough, setLookthrough] = useState(null);
   const [ltLoading, setLtLoading] = useState(false);
   const [ltError, setLtError] = useState(null);
@@ -434,26 +434,50 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
       </>
       )}
       {/* Section 6: Stress testing */}
-      <SectionH n={sn()} title="Stress testing" sub={`Estimated impact on this portfolio under historical shocks, scaled to its actual equity weight (${eqShare.toFixed(0)}%).`} />
+      <SectionH n={sn()} title="Stress testing" sub={stressData ? `Actual portfolio returns during historical stress periods from NAV history.` : `Historical stress scenario analysis.`} />
       <div className="ptf-card" style={{ marginBottom: 14 }}>
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr>
-              <th style={{ textAlign: 'left', padding: '7px 12px', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--brand-mid, #A795AE)', background: 'var(--bg-secondary)' }}>Historical scenario</th>
-              <th style={{ textAlign: 'right', padding: '7px 12px', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--brand-mid, #A795AE)', background: 'var(--bg-secondary)' }}>Broad market fall</th>
-              <th style={{ textAlign: 'right', padding: '7px 12px', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--brand-mid, #A795AE)', background: 'var(--bg-secondary)' }}>Est. impact on this portfolio</th>
-            </tr></thead>
-            <tbody>
-              {stressRows.map((r, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '7px 12px', fontSize: 11.5, color: 'var(--text-primary)' }}>{r.label}</td>
-                  <td style={{ padding: '7px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-muted)' }}>{r.marketFall}%</td>
-                  <td style={{ padding: '7px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: r.portfolioImpact < 0 ? 'var(--neg)' : 'var(--pos)' }}>{r.portfolioImpact.toFixed(1)}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {stressData?.scenarios ? (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr>
+                <th style={{ textAlign: 'left', padding: '7px 12px', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--brand-mid, #A795AE)', background: 'var(--bg-secondary)' }}>Scenario</th>
+                <th style={{ textAlign: 'right', padding: '7px 12px', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--brand-mid, #A795AE)', background: 'var(--bg-secondary)' }}>Period</th>
+                <th style={{ textAlign: 'right', padding: '7px 12px', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--brand-mid, #A795AE)', background: 'var(--bg-secondary)' }}>Portfolio</th>
+                <th style={{ textAlign: 'right', padding: '7px 12px', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--brand-mid, #A795AE)', background: 'var(--bg-secondary)' }}>Nifty 500</th>
+                {bmStress && !bmStress.error && <th style={{ textAlign: 'right', padding: '7px 12px', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#1A5C3A', background: 'var(--bg-secondary)' }}>Blended BM</th>}
+              </tr></thead>
+              <tbody>
+                {stressData.scenarios.filter(s => !['gfc','euro'].includes(s.id)).map((s, i) => {
+                  const pr = s.portfolio_return;
+                  const nr = s.nifty500_return;
+                  const bmR = bmStress && !bmStress.error ? bmStress.returns?.[s.id] : null;
+                  return (
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '7px 12px', fontSize: 11.5, color: 'var(--text-primary)' }}>{s.name}</td>
+                      <td style={{ padding: '7px 12px', textAlign: 'right', fontSize: 10.5, color: 'var(--text-muted)' }}>{s.label}</td>
+                      <td style={{ padding: '7px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: pr == null ? 'var(--text-muted)' : pr < 0 ? 'var(--neg)' : 'var(--pos)' }}>
+                        {pr == null ? '—' : (pr >= 0 ? '+' : '') + pr.toFixed(1) + '%'}
+                      </td>
+                      <td style={{ padding: '7px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 11.5, color: nr == null ? 'var(--text-muted)' : nr < 0 ? 'var(--neg)' : 'var(--pos)' }}>
+                        {nr == null ? '—' : (nr >= 0 ? '+' : '') + nr.toFixed(1) + '%'}
+                      </td>
+                      {bmStress && !bmStress.error && (
+                        <td style={{ padding: '7px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 11.5, fontWeight: 600, color: bmR == null ? 'var(--text-muted)' : bmR < 0 ? 'var(--neg)' : 'var(--pos)' }}>
+                          {bmR == null ? '—' : (bmR >= 0 ? '+' : '') + bmR.toFixed(1) + '%'}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12.5 }}>
+              ⏳ Computing stress scenarios from NAV history…
+            </div>
+          )}
         </div>
+        {stressData && <div style={{ padding: '8px 12px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>Returns calculated from actual NAV history. "—" means the fund was not active or NAV data is unavailable for that period.</div>}
       </div>
 
       {/* Section 7: Compliance — hidden until ready */}
