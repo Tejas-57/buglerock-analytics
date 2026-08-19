@@ -8,12 +8,9 @@ function BenchmarkPicker({ selectedDate, value, onChange }) {
   const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().slice(0, 10) : (selectedDate || '');
 
   useEffect(() => {
-    // Use our NAV-computed benchmark returns (12 indices from benchmark_nav)
-    // instead of the old Morningstar benchmark list
-    const url = dateStr
-      ? `${API}/api/benchmarks/returns?date=${dateStr}`
-      : `${API}/api/benchmarks/returns`;
-    fetch(url)
+    // Always fetch latest available benchmark returns — don't filter by selectedDate
+    // because benchmark_returns may lag by 1-2 days (computed after Morningstar parse)
+    fetch(`${API}/api/benchmarks/returns`)
       .then(r => r.json())
       .then(d => {
         const bms = (d.benchmarks || []).map(b => ({
