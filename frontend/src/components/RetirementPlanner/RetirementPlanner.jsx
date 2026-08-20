@@ -3,17 +3,49 @@ import { rtRunSimulation, rtFmt, rtFmtK } from './rtEngine';
 import { rtBuildFullSections, rtOpenReport } from './rtReport';
 import './RetirementPlanner.css';
 
+// Indian number formatting utilities
+function toIndianStr(val) {
+  // Format a number with Indian comma separations (e.g. 10000000 → "1,00,00,000")
+  if (val === '' || val === null || val === undefined) return '';
+  const n = parseFloat(String(val).replace(/,/g, ''));
+  if (isNaN(n)) return String(val);
+  const parts = n.toFixed(0).split('');
+  if (parts.length <= 3) return parts.join('');
+  const last3 = parts.splice(-3).join('');
+  const rest = parts.join('');
+  // Group remaining in pairs of 2 from right
+  const groups = [];
+  let i = rest.length;
+  while (i > 0) { groups.unshift(rest.slice(Math.max(0, i - 2), i)); i -= 2; }
+  return groups.join(',') + ',' + last3;
+}
+
+function fromIndianStr(str) {
+  // Parse Indian comma-formatted string to number
+  if (str === '' || str === null || str === undefined) return '';
+  const cleaned = String(str).replace(/,/g, '');
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? '' : n;
+}
+
+// Fields that use Indian comma formatting (absolute ₹ amounts)
+const INDIAN_FMT_FIELDS = new Set([
+  'corpus', 'epf', 'nps', 'onetime',   // lump sum amounts
+  'sip', 'epfm', 'npsm',               // monthly contributions
+  'expenses', 'health', 'otherinc',    // monthly income/expense fields
+]);
+
 const DEFAULTS = {
   name: '', age: 35, retage: 60, lifeexp: 90, spouse: '', rm: 'BugleRock Capital',
-  corpus: 50, sip: 50000, stepup: 8, sipuntil: 60,
-  epf: 15, epfm: 12000, epfr: 8.1, nps: 8, npsm: 10000, npsr: 10, annrate: 6,
+  corpus: 5000000, sip: 50000, stepup: 8, sipuntil: 60,
+  epf: 1500000, epfm: 12000, epfr: 8.1, nps: 800000, npsm: 10000, npsr: 10, annrate: 6,
   expenses: 100000, replace: 80, health: 10000, healthinfl: 10,
   otherinc: 0, otherindexed: '1', onetime: 0, tax: 10,
   preret: 12, prevol: 14, postret: 8, postvol: 7, inflation: 6, sims: 5000,
 };
 const DEFAULT_GOALS = [
-  { name: 'Child education', age: 48, amt: 40 },
-  { name: 'Child marriage', age: 55, amt: 25 },
+  { name: "Child's Education", age: 48, amt: 4000000 },
+  { name: "Child's Marriage", age: 55, amt: 2500000 },
 ];
 const DEFAULT_LUMPS = [{ name: 'Property sale', age: 50, amt: 0 }];
 
@@ -55,24 +87,26 @@ export default function RetirementPlanner() {
   useEffect(() => { lsSet(LS_RESULT, result); }, [result]);
 
   const set = (k) => (e) => setF((prev) => ({ ...prev, [k]: e.target.value }));
-  const num = (k) => (parseFloat(f[k]) || 0);
+  const num = (k) => (parseFloat(String(f[k] || '0').replace(/,/g, '')) || 0);
 
   const collectInputs = () => ({
     name: (f.name || '').trim(),
     age: Math.round(num('age')), retAge: Math.round(num('retage')), lifeExp: Math.round(num('lifeexp')),
     spouse: num('spouse') || null,
-    corpus0: num('corpus'), sipM: num('sip'), stepUp: num('stepup') / 100, sipTill: Math.round(num('sipuntil')),
-    epf: num('epf'), epfM: num('epfm'), epfR: num('epfr') / 100,
-    nps: num('nps'), npsM: num('npsm'), npsR: num('npsr') / 100, annRate: num('annrate') / 100,
+    // Engine works in Lakhs — convert absolute ₹ inputs to Lakhs here
+    corpus0: num('corpus') / 100000, sipM: num('sip'), stepUp: num('stepup') / 100, sipTill: Math.round(num('sipuntil')),
+    epf: num('epf') / 100000, epfM: num('epfm'), epfR: num('epfr') / 100,
+    nps: num('nps') / 100000, npsM: num('npsm'), npsR: num('npsr') / 100, annRate: num('annrate') / 100,
     expM: num('expenses'), replace: num('replace') / 100,
     healthM: num('health'), healthInfl: num('healthinfl') / 100,
     otherIncM: num('otherinc'), otherIndexed: f.otherindexed === '1',
-    oneTime: num('onetime'), tax: num('tax') / 100,
+    oneTime: num('onetime') / 100000,  // absolute ₹ → Lakhs for engine
+    tax: num('tax') / 100,
     preMu: num('preret') / 100, preSig: num('prevol') / 100,
     postMu: num('postret') / 100, postSig: num('postvol') / 100,
     infl: num('inflation') / 100,
-    goals: goals.map(g => ({ ...g, age: parseFloat(g.age) || 0, amt: parseFloat(g.amt) || 0 })),
-    lumps: lumps.map(l => ({ ...l, age: parseFloat(l.age) || 0, amt: parseFloat(l.amt) || 0 })),
+    goals: goals.map(g => ({ ...g, age: parseFloat(g.age) || 0, amt: (parseFloat(g.amt) || 0) / 100000 })), // absolute ₹ → Lakhs
+    lumps: lumps.map(l => ({ ...l, age: parseFloat(l.age) || 0, amt: (parseFloat(l.amt) || 0) / 100000 })), // absolute ₹ → Lakhs
   });
 
   const run = () => {
@@ -128,14 +162,63 @@ export default function RetirementPlanner() {
 // ══════════════ Field component — must be outside InputForm to keep stable identity ══════════════
 function Field({ k, label, type = 'number', f, set, ...rest }) {
   const isNum = type === 'number';
+  const useFmt = INDIAN_FMT_FIELDS.has(k);
+
+  // For Indian-formatted fields: display formatted, store raw on blur
+  const [display, setDisplay] = React.useState(
+    useFmt ? (f[k] ? toIndianStr(f[k]) : '') : (f[k] ?? '')
+  );
+
+  // Sync display when f[k] changes externally (e.g. reset)
+  React.useEffect(() => {
+    if (useFmt) setDisplay(f[k] ? toIndianStr(f[k]) : '');
+    else setDisplay(f[k] ?? '');
+  }, [f[k]]);
+
+  if (!useFmt) {
+    return (
+      <div className="rt-f">
+        <label>{label}</label>
+        <input
+          type="text"
+          inputMode={isNum ? 'decimal' : 'text'}
+          value={f[k] ?? ''}
+          onChange={set(k)}
+          {...rest}
+        />
+      </div>
+    );
+  }
+
+  // Indian comma formatted field
   return (
     <div className="rt-f">
       <label>{label}</label>
       <input
         type="text"
-        inputMode={isNum ? 'decimal' : 'text'}
-        value={f[k] ?? ''}
-        onChange={set(k)}
+        inputMode="numeric"
+        value={display}
+        onChange={(e) => {
+          // Allow only digits and commas while typing
+          const raw = e.target.value.replace(/[^\d]/g, '');
+          if (raw === '') { setDisplay(''); return; }
+          const num = parseFloat(raw);
+          if (!isNaN(num)) setDisplay(toIndianStr(num));
+        }}
+        onBlur={(e) => {
+          // On blur: parse and store the raw number, reformat display
+          const raw = e.target.value.replace(/,/g, '');
+          const num = parseFloat(raw);
+          const stored = isNaN(num) ? 0 : num;
+          setDisplay(toIndianStr(stored));
+          // Trigger state update with raw number string
+          set(k)({ target: { value: String(stored) } });
+        }}
+        onFocus={(e) => {
+          // On focus: show raw number without commas for easier editing
+          const raw = String(f[k] || '').replace(/,/g, '');
+          setDisplay(raw === '0' ? '' : raw);
+        }}
         {...rest}
       />
     </div>
@@ -168,7 +251,7 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
         <div className="rt-grid rt-grid-5">
           <div className="rt-f" style={{ gridColumn: 'span 2' }}>
             <label>Client name</label>
-            <input type="text" value={f.name} onChange={set('name')} placeholder="e.g. Priya Sharma" />
+            <input type="text" value={f.name} onChange={set('name')} placeholder="e.g. XXX" />
           </div>
           <Field f={f} set={set} k="age" label="Current age" min="18" max="70" />
           <Field f={f} set={set} k="retage" label="Retirement age" min="40" max="75" />
@@ -184,7 +267,7 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
       {/* B — Corpus & SIP */}
       <Section code="B" title="Investment corpus & SIP" sub="Existing savings and ongoing contributions">
         <div className="rt-grid rt-grid-4">
-          <Field f={f} set={set} k="corpus" label="Current corpus (₹ L)" min="0" />
+          <Field f={f} set={set} k="corpus" label="Current corpus (₹)" min="0" />
           <Field f={f} set={set} k="sip" label="Monthly SIP (₹)" min="0" step="5000" />
           <Field f={f} set={set} k="stepup" label="Annual SIP step-up (%)" min="0" max="25" />
           <Field f={f} set={set} k="sipuntil" label="SIP continue until age" min="30" max="75" />
@@ -197,7 +280,7 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
           <div>
             <div className="rt-subgroup-label">EPF / PPF</div>
             <div className="rt-grid rt-grid-3">
-              <Field f={f} set={set} k="epf" label="Current corpus (₹ L)" min="0" />
+              <Field f={f} set={set} k="epf" label="Current corpus (₹)" min="0" />
               <Field f={f} set={set} k="epfm" label="Monthly contribution (₹)" min="0" step="1000" />
               <Field f={f} set={set} k="epfr" label="Expected return (%)" min="5" max="10" step="0.1" />
             </div>
@@ -205,7 +288,7 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
           <div>
             <div className="rt-subgroup-label">NPS</div>
             <div className="rt-grid rt-grid-4">
-              <Field f={f} set={set} k="nps" label="Current corpus (₹ L)" min="0" />
+              <Field f={f} set={set} k="nps" label="Current corpus (₹)" min="0" />
               <Field f={f} set={set} k="npsm" label="Monthly contribution (₹)" min="0" step="1000" />
               <Field f={f} set={set} k="npsr" label="Expected return (%)" min="6" max="14" step="0.5" />
               <Field f={f} set={set} k="annrate" label="Annuity rate (%)" min="4" max="8" step="0.5" />
@@ -238,7 +321,7 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
               <option value="0">No — fixed</option>
             </select>
           </div>
-          <Field f={f} set={set} k="onetime" label="One-time expense at retirement (₹ L)" min="0" />
+          <Field f={f} set={set} k="onetime" label="One-time expense at retirement (₹)" min="0" />
           <Field f={f} set={set} k="tax" label="Tax on withdrawals (%)" min="0" max="30" step="1" />
         </div>
       </Section>
@@ -323,9 +406,20 @@ function RowEditor({ rows, setRows, kind, placeholder, defAge, defAmt = 0, empty
                 <label>Age</label>
                 <input type="text" inputMode="numeric" value={r.age} min="25" max="95" onChange={(e) => update(i, 'age', e.target.value)} onBlur={(e) => { if (!e.target.value) update(i, 'age', defAge); }} />
               </div>
-              <div className="rt-f" style={{ width: 72 }}>
-                <label>₹ L</label>
-                <input type="text" inputMode="decimal" value={r.amt} min="0" onChange={(e) => update(i, 'amt', e.target.value)} onBlur={(e) => { if (!e.target.value) update(i, 'amt', 0); }} />
+              <div className="rt-f" style={{ width: 120 }}>
+                <label>₹</label>
+                <input type="text" inputMode="numeric"
+                  value={r.amt ? toIndianStr(r.amt) : ''}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^\d]/g, '');
+                    update(i, 'amt', raw === '' ? 0 : parseFloat(raw) || 0);
+                  }}
+                  onBlur={(e) => {
+                    const raw = e.target.value.replace(/,/g, '');
+                    const n = parseFloat(raw) || 0;
+                    update(i, 'amt', n);
+                  }}
+                />
               </div>
               <button className="rt-row-rm" onClick={() => remove(i)} title="Remove">✕</button>
             </div>
