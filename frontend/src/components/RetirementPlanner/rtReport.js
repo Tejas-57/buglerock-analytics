@@ -69,9 +69,17 @@ export function rtBuildFullSections(R) {
   Object.keys(R.goalsByYear).forEach((yr) => {
     const gxp = fx(+yr), gvp = R.P50[+yr];
     const gl = IN.goals.find((g) => g.age === (IN.age + (+yr))) || {};
-    goalMk += `<line x1="${gxp}" y1="${fy(gvp)}" x2="${gxp}" y2="${+fy(gvp) - 22}" stroke="${WARN}" stroke-width="1.3"/>`
-      + `<circle cx="${gxp}" cy="${+fy(gvp) - 25}" r="4.5" fill="${WARN}" stroke="white" stroke-width="1"/>`
-      + (gl.name ? `<text x="${gxp}" y="${+fy(gvp) - 30}" text-anchor="middle" font-size="8" fill="${WARN}" font-family="DM Sans,sans-serif">${gl.name.split(' ')[0]}</text>` : '');
+    const goalLabel = gl.name || '';
+    const glWords = goalLabel.split(' ');
+    // Multi-line label: up to 2 lines of 2 words each
+    const glLine1 = glWords.slice(0, 2).join(' ');
+    const glLine2 = glWords.length > 2 ? glWords.slice(2).join(' ') : '';
+    const glLines = glLine2 ? 2 : 1;
+    const glTopY  = +fy(gvp) - 28 - (glLines > 1 ? 13 : 0);
+    goalMk += `<line x1="${gxp}" y1="${fy(gvp)}" x2="${gxp}" y2="${+fy(gvp) - 20}" stroke="${WARN}" stroke-width="1.5"/>`
+      + `<circle cx="${gxp}" cy="${+fy(gvp) - 23}" r="5" fill="${WARN}" stroke="white" stroke-width="1.5"/>`
+      + (goalLabel ? `<text x="${gxp}" y="${glTopY}" text-anchor="middle" font-size="10.5" font-weight="600" fill="${WARN}" font-family="DM Sans,sans-serif">${glLine1}</text>` : '')
+      + (glLine2   ? `<text x="${gxp}" y="${glTopY + 13}" text-anchor="middle" font-size="10.5" font-weight="600" fill="${WARN}" font-family="DM Sans,sans-serif">${glLine2}</text>` : '');
   });
   const areaD = lpath(R.P50) + ' L' + fx(R.years) + ',' + fy(0) + ' L' + fx(0) + ',' + fy(0) + ' Z';
   const fanSvg = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible">`
@@ -86,8 +94,8 @@ export function rtBuildFullSections(R) {
     + `<path d="${lpath(R.P25)}" fill="none" stroke="${BERRY}" stroke-width=".8" opacity=".3"/>`
     + `<path d="${lpath(R.P50)}" fill="none" stroke="${BERRY}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>`
     + `<line x1="${retX}" y1="${PADT}" x2="${retX}" y2="${H - PADB}" stroke="${PLUM}" stroke-width="1.5" stroke-dasharray="7 4"/>`
-    + `<rect x="${+retX - 42}" y="${PADT - 20}" width="84" height="16" rx="4" fill="${PLUM}"/>`
-    + `<text x="${retX}" y="${PADT - 9}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#fff" font-family="DM Sans,sans-serif">Retirement · age ${IN.retAge}</text>`
+    + `<rect x="${+retX - 56}" y="${PADT - 24}" width="112" height="19" rx="4" fill="${PLUM}"/>`
+    + `<text x="${retX}" y="${PADT - 10}" text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff" font-family="DM Sans,sans-serif">Retirement · age ${IN.retAge}</text>`
     + goalMk + `</svg>`;
 
   // ── CHART 2: SIP growth bars ──
