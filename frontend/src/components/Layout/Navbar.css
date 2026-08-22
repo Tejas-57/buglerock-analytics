@@ -16,8 +16,20 @@
 .navbar-logo {
   display: flex;
   align-items: center;
+  gap: 10px;
   padding: 0 20px 0 18px;
   margin-bottom: 8px;
+}
+
+.logo-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #912F63, #3E3452);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .logo-text {
@@ -31,7 +43,7 @@
   align-items: baseline;
 }
 
-.logo-bu {
+.logo-fund {
   font-family: "Cormorant Garamond", "Garamond", serif;
   font-size: 20px;
   font-weight: 700;
@@ -39,7 +51,7 @@
   letter-spacing: 0.01em;
 }
 
-.logo-glerock {
+.logo-iq {
   font-family: "Cormorant Garamond", "Garamond", serif;
   font-size: 20px;
   font-weight: 700;
@@ -48,9 +60,9 @@
 }
 
 .logo-secondary {
-  font-size: 10px;
+  font-size: 9.5px;
   color: #A795AE;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   font-weight: 400;
   margin-top: 1px;

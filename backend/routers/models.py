@@ -1276,11 +1276,30 @@ def _build_portfolio(model_key, all_funds, db=None):
             "Gold":           round(sum(f["weight"] for f in result if f["asset_class"] == "Precious Metals"), 1),
         },
         "blended": {
-            "return_1y": wavg("return_1y"), "return_3y": wavg("return_3y"),
-            "return_5y": wavg("return_5y"), "sharpe_3y": wavg("sharpe_ratio_3y"),
-            "alpha_3y": wavg("alpha_3y"), "std_dev_3y": wavg("std_dev_3y"),
-            "std_dev_5y": wavg("std_dev_5y"),
-            "expense_ratio": wavg("expense_ratio"),
+            # Returns
+            "return_1y":   wavg("return_1y"),
+            "return_3y":   wavg("return_3y"),
+            "return_5y":   wavg("return_5y"),
+            "return_1m":   wavg("return_1m"),
+            "return_3m":   wavg("return_3m"),
+            "return_6m":   wavg("return_6m"),
+            "return_ytd":  wavg("return_ytd"),
+            # Calendar year returns
+            "return_cy2021": wavg("return_cy2021"),
+            "return_cy2022": wavg("return_cy2022"),
+            "return_cy2023": wavg("return_cy2023"),
+            "return_cy2024": wavg("return_cy2024"),
+            "return_cy2025": wavg("return_cy2025"),
+            # Risk metrics
+            "sharpe_3y":      wavg("sharpe_ratio_3y"),
+            "sortino_3y":     wavg("sortino_ratio_3y"),
+            "alpha_3y":       wavg("alpha_3y"),
+            "beta_3y":        wavg("beta_3y"),
+            "up_capture_3y":  wavg("up_capture_3y"),
+            "down_capture_3y": wavg("down_capture_3y"),
+            "std_dev_3y":     wavg("std_dev_3y"),
+            "std_dev_5y":     wavg("std_dev_5y"),
+            "expense_ratio":  wavg("expense_ratio"),
         },
         "funds": [
             {
@@ -1304,8 +1323,12 @@ def _get_funds(db, data_date):
     rows = db.execute(text("""
         SELECT isin, name, asset_class, ranking, category,
                equity_pct, bond_pct, large_cap, mid_cap, small_cap,
-               sharpe_ratio_3y, return_1y, return_3y, return_5y,
-               expense_ratio, std_dev_3y, std_dev_5y, alpha_3y,
+               sharpe_ratio_3y, sortino_ratio_3y,
+               return_1y, return_3y, return_5y,
+               return_1m, return_3m, return_6m, return_ytd,
+               return_cy2021, return_cy2022, return_cy2023, return_cy2024, return_cy2025,
+               expense_ratio, std_dev_3y, std_dev_5y,
+               alpha_3y, beta_3y, up_capture_3y, down_capture_3y,
                fund_size, amfi_code, nav, morningstar_rating, branding_name
         FROM daily_fund_data
         WHERE data_date = :date AND nav IS NOT NULL
