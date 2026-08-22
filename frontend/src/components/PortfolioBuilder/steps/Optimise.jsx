@@ -281,14 +281,6 @@ export default function Optimise({ funds, weights, snapshots = {}, setSnapshots,
     return (
       <div style={{ flex: 1, overflowY: 'auto' }}>
         <div style={{ background: GR10, borderBottom: `1px solid ${GR20}`, padding: '10px 20px', display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-          <div style={{ minWidth: 210 }}>
-            <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: GR60, marginBottom: 4 }}>Optimisation objective</div>
-            <select value={objective} onChange={e => setObjective(e.target.value)}
-              style={{ padding: '7px 10px', border: `1.5px solid ${GR20}`, borderRadius: 8, fontSize: 12, background: '#fff', outline: 'none', color: GR80, width: '100%' }}>
-              {OBJECTIVES.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-            </select>
-            <div style={{ fontSize: 10, color: GR60, marginTop: 3 }}>{OBJECTIVES.find(o => o.id === objective)?.desc}</div>
-          </div>
           <div style={{ minWidth: 170 }}>
             <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: GR60, marginBottom: 4 }}>Monte Carlo simulations</div>
             <select value={nSims} onChange={e => setNSims(+e.target.value)}
