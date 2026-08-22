@@ -264,13 +264,15 @@ def get_historical_var(
             pvar99 += pw * T99  * std_period
             pes99  += pw * ES99M * std_period
 
+        # Clamp to 0 — negative VaR/ES means the tail return is positive (profit),
+        # which is mathematically valid but meaningless as a risk metric display.
         var_table.append({
             "horizon":     h_label,
             "days":        h_days,
-            "var_95":      round(hvar95_1d + pvar95, 4),
-            "es_95":       round(hes95_1d  + pes95,  4),
-            "var_99":      round(hvar99_1d + pvar99, 4),
-            "es_99":       round(hes99_1d  + pes99,  4),
+            "var_95":      round(max(0.0, hvar95_1d + pvar95), 4),
+            "es_95":       round(max(0.0, hes95_1d  + pes95),  4),
+            "var_99":      round(max(0.0, hvar99_1d + pvar99), 4),
+            "es_99":       round(max(0.0, hes99_1d  + pes99),  4),
             "hist_funds":  len(hist_isins_h),
             "param_funds": len(param_isins_h),
             "common_days": common_days_h,
