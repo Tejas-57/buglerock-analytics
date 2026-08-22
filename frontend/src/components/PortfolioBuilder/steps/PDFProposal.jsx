@@ -99,7 +99,7 @@ function rcL(v, good, bad) { return v==null?'#A2A0A0':parseFloat(v)<=good?'#1A7A
 
 export default function PDFProposal({ funds, weights, originalWeights, snapshots={}, benchmarks=[], ips, selectedPortfolio, setSelectedPortfolio, onEditPortfolio, onCompare, analyseData={} }) {
   const hasOpt = Object.keys(originalWeights || {}).length > 0;
-  const { stressData, overlapData, corrData } = analyseData || {};
+  const { stressData, overlapData, corrData, bmStress } = analyseData || {};
 
   function blendBmVal(getter) {
     let val = 0, cov = 0;
@@ -961,23 +961,34 @@ ${sec("stress") ? `<!-- ═══ PAGE 6b: STRESS TEST ═══ -->
   ${(()=>{
     const scenarios = resolvedStress?.scenarios?.filter(s => s.has_data && s.portfolio_return != null) || [];
     if (!scenarios.length) return callout('Stress test data not available. Visit the Stress test tab in Analyse to load scenario data before generating the proposal.','info');
+    const hasBM = bmStress && !bmStress.error && bmStress.returns && Object.keys(bmStress.returns).length > 0;
+    const cushionLabel = hasBM ? 'Cushion vs Blended BM' : 'Cushion vs Nifty 500';
+    const hdr = TH('Scenario','left') + TH('Period','left') + TH('Portfolio') + TH('Nifty 500')
+      + (hasBM ? TH('Blended BM') : '')
+      + TH(cushionLabel);
     const stressRows = scenarios.map(sc => {
-      const v = sc.portfolio_return;
-      const bm2 = sc.benchmark_return;
-      const delta = bm2 != null ? v - bm2 : null;
-      const label = sc.label || '';
-      const vStr = (v>=0?'+':'')+v.toFixed(1)+'%';
-      const bStr = bm2!=null?(bm2>=0?'+':'')+bm2.toFixed(1)+'%':'—';
-      const dStr = delta!=null?(delta>=0?'↑ +':'↓ ')+delta.toFixed(1)+'% vs market':'—';
-      const dClr = delta!=null?(delta>=0?POS:NEG):GR60;
-      return `<tr>${TDL(sc.name+'<div style="font-size:9px;color:'+GR60+'">'+label+'</div>')}
-        ${TD(vStr,v>=0?POS:NEG,'1')}
-        ${TD(bStr,bm2!=null?(bm2>=0?POS:NEG):GR60)}
-        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right"><span style="font-size:10px;font-weight:700;color:${dClr}">${dStr}</span></td></tr>`;
+      const v       = sc.portfolio_return;
+      const nifty   = sc.nifty500_return;
+      const blBM    = hasBM ? (bmStress.returns[sc.id] ?? null) : null;
+      const ref     = hasBM ? blBM : nifty;
+      const cushion = v != null && ref != null ? v - ref : null;
+      const period  = sc.label || sc.period || '';
+      const fmt  = x => x == null ? '—' : (x>=0?'+':'')+x.toFixed(1)+'%';
+      const clr  = x => x == null ? GR60 : x >= 0 ? POS : NEG;
+      const cClr = cushion == null ? GR60 : cushion >= 0 ? POS : NEG;
+      const cStr = cushion == null ? '—' : (cushion>=0?'+':'')+cushion.toFixed(1)+'%';
+      return `<tr>
+        ${TDL(sc.name)}
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};font-size:10px;color:${GR60};white-space:nowrap">${period}</td>
+        ${TD(fmt(v), clr(v), '1')}
+        ${TD(fmt(nifty), clr(nifty))}
+        ${hasBM ? TD(fmt(blBM), clr(blBM)) : ''}
+        <td style="padding:7px 12px;border-bottom:1px solid ${GR20};text-align:right"><span style="font-size:10px;font-weight:700;color:${cClr}">${cStr}</span></td>
+      </tr>`;
     }).join('');
     return tblBox('Crash scenario stress test — actual NAV returns',
-      `<table><thead><tr>${TH('Scenario','left')}${TH('Portfolio return')}${TH('Benchmark')}${TH('Cushion vs market')}</tr></thead><tbody>${stressRows}</tbody></table>`,
-      'Returns calculated from actual NAV history in the database for the exact funds and weights in this portfolio.');
+      `<table><thead><tr>${hdr}</tr></thead><tbody>${stressRows}</tbody></table>`,
+      'Portfolio returns from actual NAV history. Nifty 500 from benchmark_nav table.' + (hasBM ? ' Blended BM weighted per IPS.' : ''));
   })()}
 </section>
 

@@ -671,8 +671,6 @@ def get_correlation(isins: str, as_of_date: str = None):
 # ── Stress Test ────────────────────────────────────────────────────────────────
 
 STRESS_SCENARIOS = [
-    {"id": "gfc",        "name": "Global Financial Crisis",                    "label": "Jan 2008 – Oct 2008",  "start": "2008-01-01", "end": "2008-10-31"},
-    {"id": "euro",       "name": "European Sovereign Debt Crisis",             "label": "Nov 2010 – Dec 2011",  "start": "2010-11-01", "end": "2011-12-31"},
     {"id": "china",      "name": "China Slowdown & Yuan Devaluation",          "label": "Mar 2015 – Feb 2016",  "start": "2015-03-01", "end": "2016-02-29"},
     {"id": "ilfs",       "name": "IL&FS / NBFC Credit Crisis",                 "label": "Aug 2018 – Oct 2018",  "start": "2018-08-01", "end": "2018-10-31"},
     {"id": "covid",      "name": "Covid-19 Crash",                             "label": "Jan 2020 – Mar 2020",  "start": "2020-01-01", "end": "2020-03-31"},
