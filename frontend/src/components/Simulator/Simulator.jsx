@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import './Simulator.css';
 
+const API = process.env.REACT_APP_API_URL || '';
+const LS  = 'sim_cache_v1';
+
 function fmt(v, prefix = '', suffix = '') {
   if (v == null) return '—';
   return `${prefix}${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}${suffix}`;
@@ -35,7 +38,7 @@ function FundSearchBar({ selectedDate, onSelect }) {
     }
     setLoading(true);
     const timer = setTimeout(() => {
-      fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/search?q=${encodeURIComponent(query.trim())}&date=${dateStr}`)
+      fetch(`${API}/api/funds/search?q=${encodeURIComponent(query.trim())}&date=${dateStr}`)
         .then(r => r.json())
         .then(d => {
           setResults(d.funds || []);
@@ -129,36 +132,54 @@ function FundSearchBar({ selectedDate, onSelect }) {
 }
 
 export default function Simulator({ selectedDate }) {
-  const [fund, setFund]         = useState(null);
-  const [mode, setMode]         = useState('lumpsum');
-  const [amount, setAmount]     = useState('100000');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate]   = useState('');
-  const [sipDate, setSipDate]   = useState('1');
-  const [result, setResult]     = useState(null);
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState(null);
+  // ── Restore from localStorage on mount ───────────────────────────────────
+  const saved = (() => { try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch { return {}; } })();
 
-  const handleGo = () => {
-    if (!fund || !amount || !startDate || !endDate) return;
+  const [fund, setFund]           = useState(saved.fund      || null);
+  const [mode, setMode]           = useState(saved.mode      || 'lumpsum');
+  const [amount, setAmount]       = useState(saved.amount    || '100000');
+  const [startDate, setStartDate] = useState(saved.startDate || '');
+  const [endDate, setEndDate]     = useState(saved.endDate   || '');
+  const [sipDate, setSipDate]     = useState(saved.sipDate   || '1');
+  const [result, setResult]       = useState(null);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState(null);
+
+  // ── Persist inputs to localStorage on every change ───────────────────────
+  useEffect(() => {
+    try { localStorage.setItem(LS, JSON.stringify({ fund, mode, amount, startDate, endDate, sipDate })); }
+    catch {}
+  }, [fund, mode, amount, startDate, endDate, sipDate]);
+
+  const runSimulation = useCallback((f, m, amt, sd, ed, sipD) => {
+    if (!f || !amt || !sd || !ed) return;
     setLoading(true);
     setError(null);
     setResult(null);
 
     const params = new URLSearchParams({
-      amfi_code: fund.amfi_code,
-      mode,
-      amount,
-      start_date: startDate,
-      end_date: endDate,
-      ...(mode === 'sip' ? { sip_date: sipDate } : {}),
+      amfi_code: f.amfi_code,
+      mode: m,
+      amount: amt,
+      start_date: sd,
+      end_date: ed,
+      ...(m === 'sip' ? { sip_date: sipD } : {}),
     });
 
-    fetch(`${process.env.REACT_APP_API_URL || ''}/api/simulator/run?${params}`)
+    fetch(`${API}/api/simulator/run?${params}`)
       .then(r => r.json())
       .then(d => { setResult(d); setLoading(false); })
       .catch(() => { setError('Simulation failed. Please check inputs.'); setLoading(false); });
-  };
+  }, []);
+
+  // ── Auto re-run on mount if complete saved inputs exist ───────────────────
+  useEffect(() => {
+    if (saved.fund && saved.startDate && saved.endDate && saved.amount) {
+      runSimulation(saved.fund, saved.mode || 'lumpsum', saved.amount, saved.startDate, saved.endDate, saved.sipDate || '1');
+    }
+  }, []); // run once on mount
+
+  const handleGo = () => runSimulation(fund, mode, amount, startDate, endDate, sipDate);
 
   const canGo = fund && amount && startDate && endDate;
 

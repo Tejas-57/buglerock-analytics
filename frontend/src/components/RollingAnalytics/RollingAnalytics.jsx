@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import './RollingAnalytics.css';
+
+const API = process.env.REACT_APP_API_URL || '';
+const LS  = 'rolling_cache_v1';
 
 const ROLLING_PERIODS = [
   { label: '1 Year', value: 1 },
@@ -135,30 +138,39 @@ function FundSearchBar({ selectedDate, onSelect }) {
 }
 
 export default function RollingAnalytics({ selectedDate }) {
-  const [fund, setFund]           = useState(null);
-  const [rollingYears, setRollingYears] = useState(1);
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate]     = useState('');
-  const [result, setResult]       = useState(null);
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState(null);
+  // ── Restore from localStorage on mount ───────────────────────────────────
+  const saved = (() => { try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch { return {}; } })();
+
+  const [fund, setFund]                   = useState(saved.fund         || null);
+  const [rollingYears, setRollingYears]   = useState(saved.rollingYears || 1);
+  const [startDate, setStartDate]         = useState(saved.startDate    || '');
+  const [endDate, setEndDate]             = useState(saved.endDate      || '');
+  const [result, setResult]               = useState(null);
+  const [loading, setLoading]             = useState(false);
+  const [error, setError]                 = useState(null);
   const [validationMsg, setValidationMsg] = useState(null);
 
-  const handleGo = () => {
-    if (!fund || !startDate || !endDate) return;
+  // ── Persist inputs to localStorage on every change ───────────────────────
+  useEffect(() => {
+    try { localStorage.setItem(LS, JSON.stringify({ fund, rollingYears, startDate, endDate })); }
+    catch {}
+  }, [fund, rollingYears, startDate, endDate]);
+
+  const runAnalysis = useCallback((f, ry, sd, ed) => {
+    if (!f || !sd || !ed) return;
     setLoading(true);
     setError(null);
     setResult(null);
     setValidationMsg(null);
 
     const params = new URLSearchParams({
-      amfi_code: fund.amfi_code,
-      rolling_years: rollingYears,
-      start_date: startDate,
-      end_date: endDate,
+      amfi_code: f.amfi_code,
+      rolling_years: ry,
+      start_date: sd,
+      end_date: ed,
     });
 
-    fetch(`${process.env.REACT_APP_API_URL || ''}/api/rolling/analysis?${params}`)
+    fetch(`${API}/api/rolling/analysis?${params}`)
       .then(r => r.json())
       .then(d => {
         if (d.error === 'insufficient_data') {
@@ -169,7 +181,16 @@ export default function RollingAnalytics({ selectedDate }) {
         setLoading(false);
       })
       .catch(() => { setError('Analysis failed. Please check inputs.'); setLoading(false); });
-  };
+  }, []);
+
+  // ── Auto re-run on mount if complete saved inputs exist ───────────────────
+  useEffect(() => {
+    if (saved.fund && saved.startDate && saved.endDate) {
+      runAnalysis(saved.fund, saved.rollingYears || 1, saved.startDate, saved.endDate);
+    }
+  }, []); // run once on mount
+
+  const handleGo = () => runAnalysis(fund, rollingYears, startDate, endDate);
 
   const canGo = fund && startDate && endDate;
 
