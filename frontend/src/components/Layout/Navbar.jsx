@@ -40,11 +40,18 @@ export default function Navbar() {
   return (
     <nav className="navbar">
       <div className="navbar-logo">
+        <div className="logo-mark">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <rect x="2" y="9.5" width="3" height="7" rx="1" fill="rgba(255,255,255,.6)"/>
+            <rect x="7.5" y="5" width="3" height="11.5" rx="1" fill="rgba(255,255,255,.8)"/>
+            <rect x="13" y="2" width="3" height="14.5" rx="1" fill="white"/>
+          </svg>
+        </div>
         <div className="logo-text">
           <div className="logo-brand">
-            <span className="logo-bu">Bügle</span><span className="logo-glerock">Rock</span>
+            <span className="logo-fund">Fünd</span><span className="logo-iq">IQ</span>
           </div>
-          <span className="logo-secondary">Analytics</span>
+          <span className="logo-secondary">By BugleRock</span>
         </div>
       </div>
 
