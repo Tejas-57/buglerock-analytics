@@ -310,9 +310,16 @@ def fetch_latest(check_days: int = 5, force: bool = False, skip_holdings: bool =
 
                 try:
                     from services.morningstar_service import refresh_stale_holdings
-                    refresh_result = refresh_stale_holdings()
-                    if not refresh_result.get("skipped") and refresh_result.get("stale_found", 0) > 0:
-                        logger.info(f"Holdings freshness check: {refresh_result}")
+                    # Run only on even days from 10th-30th (~11 runs/month).
+                    # Morningstar publishes updated holdings disclosures in this
+                    # window — running outside it downloads nothing new and wastes bandwidth.
+                    if 10 <= today.day <= 30 and today.day % 2 == 0:
+                        logger.info(f"Holdings freshness check: running (day={today.day})")
+                        refresh_result = refresh_stale_holdings()
+                        if not refresh_result.get("skipped") and refresh_result.get("stale_found", 0) > 0:
+                            logger.info(f"Holdings freshness check: {refresh_result}")
+                    else:
+                        logger.info(f"Holdings freshness check: skipped (day={today.day}, outside 10-30 even-day window)")
                 except Exception as e:
                     logger.error(f"Holdings freshness check failed (non-fatal): {e}", exc_info=True)
 
