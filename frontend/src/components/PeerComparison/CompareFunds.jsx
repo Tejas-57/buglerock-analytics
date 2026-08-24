@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
-const CMP_COLORS = ['#912F63', '#3E3452', '#0F6E56', '#B46B10', '#1558A8'];
+const CMP_COLORS = ['#912F63', '#3E3452', '#0F6E56', '#B46B10', '#1558A8', '#7B2D8B', '#C0392B', '#16A085'];
 
 function fmt(v, decimals = 2) {
   if (v === null || v === undefined || v === '-') return '—';
@@ -51,6 +52,67 @@ function highlight(vals, lowerBetter = false) {
   });
 }
 
+// Renders the search result dropdown via a portal so it always sits above every stacking context
+function SlotDropdown({ anchorRef, results, funds, onSelect }) {
+  const [rect, setRect] = useState(null);
+
+  useEffect(() => {
+    if (!anchorRef.current) return;
+    function update() {
+      const r = anchorRef.current?.getBoundingClientRect();
+      if (r) setRect(r);
+    }
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [anchorRef]);
+
+  if (!rect || !results.length) return null;
+
+  return createPortal(
+    <div style={{
+      position: 'fixed',
+      top: rect.bottom + 2,
+      left: rect.left,
+      width: rect.width,
+      maxHeight: 280,
+      overflowY: 'auto',
+      background: '#fff',
+      border: '1px solid var(--border)',
+      borderRadius: 8,
+      boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+      zIndex: 99999,
+    }}>
+      {results.filter(r => !funds.find(f => f.isin === r.isin)).map((result, ri, arr) => (
+        <div key={result.isin}
+          onMouseDown={e => { e.preventDefault(); onSelect(result); }}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: ri < arr.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
+          onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{result.name}</div>
+            <span style={{ fontSize: 10, color: 'var(--brand-mid)', background: 'rgba(109,84,121,0.08)', padding: '1px 5px', borderRadius: 3 }}>
+              {result.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}
+            </span>
+          </div>
+          {result.return_1y !== null && result.return_1y !== undefined && (
+            <span style={{ fontSize: 11, fontWeight: 600, color: result.return_1y >= 0 ? '#059669' : '#DC2626', flexShrink: 0, textAlign: 'right' }}>
+              {(result.return_1y >= 0 ? '+' : '') + parseFloat(result.return_1y).toFixed(2) + '%'}
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 400 }}>1Y</div>
+            </span>
+          )}
+        </div>
+      ))}
+    </div>,
+    document.body
+  );
+}
+
 export default function CompareFunds({ selectedDate }) {
   const [funds, setFunds] = useState(() => {
     try {
@@ -65,10 +127,11 @@ export default function CompareFunds({ selectedDate }) {
     try { localStorage.setItem('br_compare_tab', tab); } catch {}
     setActiveTab(tab);
   }
-  const [slotSearchQ, setSlotSearchQ] = useState(['', '', '', '']);
-  const [slotResults, setSlotResults] = useState([[], [], [], []]);
-  const [slotOpen, setSlotOpen] = useState([false, false, false, false]);
-  const [slotLoading, setSlotLoading] = useState([false, false, false, false]);
+  const [slotCount, setSlotCount] = useState(4); // visible slot count: 4–8, grows on +, shrinks on remove
+  const [slotSearchQ, setSlotSearchQ] = useState(['', '', '', '', '', '', '', '']);
+  const [slotResults, setSlotResults] = useState([[], [], [], [], [], [], [], []]);
+  const [slotOpen, setSlotOpen] = useState([false, false, false, false, false, false, false, false]);
+  const [slotLoading, setSlotLoading] = useState([false, false, false, false, false, false, false, false]);
   const [loadingIsins, setLoadingIsins] = useState(new Set());
   const [wlDropdownOpen, setWlDropdownOpen] = useState(false);
   const [watchlistFunds, setWatchlistFunds] = useState([]);
@@ -78,10 +141,11 @@ export default function CompareFunds({ selectedDate }) {
   const [overlapError, setOverlapError] = useState(null);
   const [sectorData, setSectorData] = useState({});   // { [isin]: [{sector, weight_pct}] }
   const [sectorLoading, setSectorLoading] = useState(false);
-  const slotRefs = [useRef(null), useRef(null), useRef(null), useRef(null)];
+  const slotRefs = [useRef(null), useRef(null), useRef(null), useRef(null), useRef(null), useRef(null), useRef(null), useRef(null)];
+  const inputRefs = [useRef(null), useRef(null), useRef(null), useRef(null), useRef(null), useRef(null), useRef(null), useRef(null)];
 
   const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
-  const MAX = 4;
+  const MAX = 8;
 
   // Suggested peers — R1/R2 funds in the same category as the first fund
   const [peerSuggestions, setPeerSuggestions] = useState([]);
@@ -112,7 +176,7 @@ export default function CompareFunds({ selectedDate }) {
         const preselected = JSON.parse(stored);
         sessionStorage.removeItem('compareFunds');
         setFunds([]); // clear existing before loading watchlist selection
-        preselected.slice(0, MAX).forEach((fund, idx) => {
+        preselected.slice(0, 4).forEach((fund, idx) => { // watchlist loads into first 4 slots only
           fetchFundData(fund.isin).then(data => {
             const color = CMP_COLORS[idx % CMP_COLORS.length];
             setFunds(prev => {
@@ -175,7 +239,12 @@ export default function CompareFunds({ selectedDate }) {
   }
 
   function removeFund(isin) {
-    setFunds(prev => prev.filter(f => f.isin !== isin));
+    setFunds(prev => {
+      const next = prev.filter(f => f.isin !== isin);
+      // Shrink slot count: max(4, number of remaining funds) — never below 4
+      setSlotCount(sc => Math.max(4, Math.min(sc, next.length > 4 ? next.length + 1 : 4)));
+      return next;
+    });
   }
 
   // Load watchlist for dropdown
@@ -200,7 +269,10 @@ export default function CompareFunds({ selectedDate }) {
 
   // ── Table helpers ──────────────────────────────────────────────────────────
 
+  const COL_MIN_WIDTH = 220; // must match FUND_COL in the shared scroll wrapper
+
   function Row({ label, vals, fmtFn, lowerBetter, showBar, noHighlight }) {
+    const numSlots = slotCount;
     const hl = noHighlight ? vals.map(() => '') : highlight(vals, lowerBetter);
     const nums = vals.map(v => (v !== null && v !== undefined && v !== '-') ? parseFloat(v) : null);
     const maxAbs = Math.max(...nums.filter(v => v !== null && !isNaN(v)).map(Math.abs), 1);
@@ -212,22 +284,23 @@ export default function CompareFunds({ selectedDate }) {
           if (i === 0) return;
           const idx = i - 1;
           const cls = hl[idx];
-          c.style.background = cls === 'best' ? 'rgba(16,185,129,0.08)' : cls === 'worst' ? 'rgba(239,68,68,0.08)' : vals[idx] === undefined ? 'var(--bg-secondary)' : '#fff';
+          const isEmpty = vals[idx] === undefined || vals[idx] === null || vals[idx] === '-' || funds[idx] === undefined;
+          c.style.background = cls === 'best' ? 'rgba(16,185,129,0.08)' : cls === 'worst' ? 'rgba(239,68,68,0.08)' : isEmpty ? 'var(--bg-secondary)' : '#fff';
         })}
       >
         <td style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500, whiteSpace: 'nowrap', width: 160, minWidth: 160, background: '#fff' }}>{label}</td>
-        {[0,1,2,3].map((idx) => {
-          const v = vals[idx];
-          const i = idx;
-          const cls = hl[i];
+        {Array.from({ length: numSlots }, (_, idx) => {
+          const noFund = funds[idx] === undefined;
+          const v = noFund ? undefined : vals[idx];
+          const cls = noFund ? '' : hl[idx];
           const bg = cls === 'best' ? 'rgba(16,185,129,0.08)' : cls === 'worst' ? 'rgba(239,68,68,0.08)' : '#fff';
           const color = cls === 'best' ? '#059669' : cls === 'worst' ? '#DC2626' : 'var(--text-primary)';
-          const txt = fmtFn(v);
-          const barW = (showBar && v !== null && v !== undefined && v !== '-') ? (Math.abs(parseFloat(v)) / maxAbs * 100).toFixed(0) : 0;
+          const txt = noFund ? '' : fmtFn(v);
+          const barW = (showBar && !noFund && v !== null && v !== undefined && v !== '-') ? (Math.abs(parseFloat(v)) / maxAbs * 100).toFixed(0) : 0;
           const barClr = cls === 'best' ? '#059669' : cls === 'worst' ? '#DC2626' : '#A795AE';
-          const isEmpty = v === undefined || v === null || v === '-';
+          const isEmpty = noFund || v === undefined || v === null || v === '-';
           return (
-            <td key={i} style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, background: isEmpty ? 'var(--bg-secondary)' : bg, color, borderLeft: '1px solid var(--border)', transition: 'background .1s' }}>
+            <td key={idx} style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, minWidth: COL_MIN_WIDTH, background: isEmpty ? 'var(--bg-secondary)' : bg, color, borderLeft: '1px solid var(--border)', transition: 'background .1s' }}>
               {showBar && !isEmpty ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                   <div style={{ width: 40, height: 4, background: 'var(--bg-secondary)', borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
@@ -244,24 +317,26 @@ export default function CompareFunds({ selectedDate }) {
   }
 
   function SectionHead({ label }) {
+    const numSlots = slotCount;
     return (
       <tr>
         <td style={{ padding: '7px 14px', fontSize: 9, fontWeight: 700, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--brand-primary)', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>{label}</td>
-        {[0,1,2,3].map((i) => (
-          <td key={i} style={{ padding: '7px 14px', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', borderLeft: '1px solid var(--border)' }} />
+        {Array.from({ length: numSlots }, (_, i) => (
+          <td key={i} style={{ padding: '7px 14px', minWidth: COL_MIN_WIDTH, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', borderLeft: '1px solid var(--border)' }} />
         ))}
       </tr>
     );
   }
 
   function FundHeader() {
+    const numSlots = slotCount;
     return (
       <tr style={{ position: 'sticky', top: 0, zIndex: 10, background: '#fff', boxShadow: '0 1px 0 var(--border)' }}>
         <th style={{ padding: 0, width: 160, minWidth: 160, background: '#fff' }} />
-        {[0,1,2,3].map(idx => {
+        {Array.from({ length: numSlots }, (_, idx) => {
           const f = funds[idx];
           return f ? (
-            <th key={f.isin} style={{ padding: '12px 14px 10px', borderLeft: '1px solid var(--border)', borderTop: `3px solid ${f.color}`, verticalAlign: 'top', width: '25%', fontWeight: 'normal', background: '#fff' }}>
+            <th key={f.isin} style={{ padding: '12px 14px 10px', borderLeft: '1px solid var(--border)', borderTop: `3px solid ${f.color}`, verticalAlign: 'top', minWidth: COL_MIN_WIDTH, fontWeight: 'normal', background: '#fff' }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--brand-dark)', lineHeight: 1.3, marginBottom: 4 }}>{f.name}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <div>
@@ -288,7 +363,7 @@ export default function CompareFunds({ selectedDate }) {
               </div>
             </th>
           ) : (
-            <th key={`empty-${idx}`} style={{ padding: '12px 14px', borderLeft: '1px solid var(--border)', borderTop: '3px solid var(--border)', width: '25%', background: 'var(--bg-secondary)' }} />
+            <th key={`empty-${idx}`} style={{ padding: '12px 14px', borderLeft: '1px solid var(--border)', borderTop: '3px solid var(--border)', minWidth: COL_MIN_WIDTH, background: 'var(--bg-secondary)' }} />
           );
         })}
       </tr>
@@ -986,7 +1061,7 @@ export default function CompareFunds({ selectedDate }) {
                 {wins.map((w, i) => {
                   const isTop = w === maxWins;
                   return (
-                    <td key={i} style={{ padding: '10px 14px', textAlign: 'right', background: isTop ? 'rgba(145,47,99,0.06)' : 'var(--bg-secondary)', borderTop: '2px solid var(--border)', borderLeft: '1px solid var(--border)' }}>
+                    <td key={i} style={{ padding: '10px 14px', textAlign: 'right', minWidth: COL_MIN_WIDTH, background: isTop ? 'rgba(145,47,99,0.06)' : 'var(--bg-secondary)', borderTop: '2px solid var(--border)', borderLeft: '1px solid var(--border)' }}>
                       <span style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 600, display: 'block', color: isTop ? 'var(--brand-primary)' : 'var(--text-primary)' }}>{w}</span>
                       <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{isTop ? '★ leading' : 'periods'}</span>
                     </td>
@@ -1073,7 +1148,7 @@ export default function CompareFunds({ selectedDate }) {
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500, verticalAlign: 'top', width: 160 }}>Details</td>
                 {F.map((f, i) => (
-                  <td key={i} style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-secondary)', borderLeft: '1px solid var(--border)', verticalAlign: 'top', lineHeight: 1.6, textAlign: 'left' }}>
+                  <td key={i} style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-secondary)', borderLeft: '1px solid var(--border)', verticalAlign: 'top', lineHeight: 1.6, textAlign: 'left', minWidth: COL_MIN_WIDTH }}>
                     {f.data?.exit_load && f.data.exit_load !== '-' ? f.data.exit_load : '—'}
                   </td>
                 ))}
@@ -1094,9 +1169,23 @@ export default function CompareFunds({ selectedDate }) {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 26, fontWeight: 600, color: 'var(--brand-dark)', marginBottom: 3, letterSpacing: '-.02em' }}>Fund comparison</h1>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Compare up to 4 funds across returns, risk, calendar years and composition</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Compare up to 8 funds across returns, risk, calendar years and composition</div>
         </div>
-        <div ref={wlRef} style={{ position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* + button: adds one slot at a time, up to 8 */}
+          {slotCount < MAX && (
+          <button
+            onClick={() => setSlotCount(sc => Math.min(sc + 1, MAX))}
+            title="Add another fund slot"
+            style={{
+              width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)',
+              background: '#fff', color: 'var(--text-secondary)',
+              fontSize: 20, lineHeight: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 300, flexShrink: 0,
+            }}
+          >+</button>
+          )}
+          <div ref={wlRef} style={{ position: 'relative' }}>
           <button onClick={openWlDropdown} style={{ padding: '7px 14px', fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', cursor: 'pointer', color: 'var(--text-secondary)' }}>
             + From watchlist
           </button>
@@ -1136,127 +1225,139 @@ export default function CompareFunds({ selectedDate }) {
               )}
             </div>
           )}
-        </div>
-      </div>
+          </div>{/* end wlRef */}
+        </div>{/* end flex wrapper (+ button + watchlist) */}
+      </div>{/* end header */}
 
-            {/* 4-slot fund boxes */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
-        {[0, 1, 2, 3].map(idx => {
-          const fund = funds[idx];
-          const color = fund?.color || CMP_COLORS[idx];
-          const isLoading = fund && loadingIsins.has(fund.isin);
-          return (
-            <div key={idx} ref={slotRefs[idx]} style={{ position: 'relative' }} onBlur={e => handleSlotBlur(idx, e)}>
-              {fund ? (
-                // Filled slot
-                <div style={{ padding: '14px', borderRadius: 10, border: `1px solid var(--border)`, borderTop: `3px solid ${color}`, background: '#fff', boxShadow: 'var(--shadow-card)', minHeight: 100 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--brand-dark)', lineHeight: 1.3, marginBottom: 4 }}>{fund.name}</div>
-                      <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(145,47,99,0.08)', color: 'var(--brand-primary)', fontWeight: 500 }}>
-                        {fund.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}
-                      </span>
-                    </div>
-                    <button onClick={() => removeFund(fund.isin)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1, padding: '0 0 0 8px', flexShrink: 0 }}>×</button>
-                  </div>
-                  <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                    <span style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, color }}>
-                      {fund.data?.nav && fund.data.nav !== '-' ? `₹${parseFloat(fund.data.nav).toFixed(2)}` : '—'}
-                    </span>
-                    {fund.data?.returns?.['1y'] && fund.data.returns['1y'] !== '-' && (
-                      <span style={{ fontSize: 12, fontWeight: 600, color: parseFloat(fund.data.returns['1y']) >= 0 ? '#059669' : '#DC2626' }}>
-                        {pct(fund.data.returns['1y'])} 1Y
-                      </span>
-                    )}
-                  </div>
-                  {fund.data?.morningstar_rating && fund.data.morningstar_rating !== '-' && (
-                    <div style={{ fontSize: 11, color: '#B46B10', letterSpacing: -1, marginTop: 4 }}>{stars(fund.data.morningstar_rating)}</div>
-                  )}
-                </div>
-              ) : (
-                // Empty slot with search
-                <div style={{ borderRadius: 10, border: '1px dashed var(--border)', background: 'var(--bg-secondary)', minHeight: 100, padding: 12 }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 500 }}>Fund {idx + 1}</div>
-                  <div style={{ position: 'relative' }}>
-                    <input
-                      value={slotSearchQ[idx]}
-                      onChange={e => handleSlotSearch(idx, e.target.value)}
-                      onFocus={() => { if (slotResults[idx].length > 0) setSlotOpen(prev => { const s = [...prev]; s[idx] = true; return s; }); }}
-                      placeholder="Search fund, AMC or ISIN…"
-                      style={{ width: '100%', padding: '7px 28px 7px 10px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 12, outline: 'none', boxSizing: 'border-box', background: '#fff' }}
-                    />
-                    {slotLoading[idx] && <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: 'var(--text-muted)' }}>...</span>}
-                    {slotSearchQ[idx] && !slotLoading[idx] && (
-                      <span onClick={() => handleSlotSearch(idx, '')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 14, lineHeight: 1 }}>×</span>
-                    )}
-                  </div>
-                  {slotOpen[idx] && slotResults[idx].length > 0 && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: 280, overflowY: 'auto', background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 1000, marginTop: 2 }}>
-                      {slotResults[idx].filter(r => !funds.find(f => f.isin === r.isin)).map((result, ri, arr) => (
-                        <div key={result.isin}
-                          onClick={() => addFund(result, idx)}
-                          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: ri < arr.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
-                          tabIndex={0}
-                          onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                        >
+      {/* ── Shared horizontal scroll wrapper ──────────────────────────────────
+          The card grid and the comparison table live inside the same overflow:auto
+          container so they scroll as one unit and columns always line up.
+          LABEL_COL = 160px sticky label column; FUND_COL = per-fund column width.
+          numSlots = number of visible slot positions (4 default, 8 expanded).      */}
+      {(() => {
+        const LABEL_COL = 160;
+        const FUND_COL  = 220;
+        const numSlots  = slotCount;
+        const needsScroll = numSlots > 4;
+        const visibleSlots = Array.from({ length: numSlots }, (_, i) => i);
+
+        return (
+          <div style={{ overflowX: needsScroll ? 'auto' : 'visible', marginBottom: 16 }}>
+            {/* ── Card grid ── */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: needsScroll
+                ? `repeat(${numSlots}, ${FUND_COL}px)`
+                : `repeat(${numSlots}, 1fr)`,
+              gap: 10,
+              minWidth: needsScroll ? numSlots * FUND_COL + (numSlots - 1) * 10 : undefined,
+              marginBottom: 16,
+            }}>
+              {visibleSlots.map(idx => {
+                const fund = funds[idx];
+                const color = fund?.color || CMP_COLORS[idx];
+                return (
+                  <div key={idx} ref={slotRefs[idx]} style={{ position: 'relative' }} onBlur={e => handleSlotBlur(idx, e)}>
+                    {fund ? (
+                      <div style={{ padding: '14px', borderRadius: 10, border: `1px solid var(--border)`, borderTop: `3px solid ${color}`, background: '#fff', boxShadow: 'var(--shadow-card)', minHeight: 100 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{result.name}</div>
-                            <span style={{ fontSize: 10, color: 'var(--brand-mid)', background: 'rgba(109,84,121,0.08)', padding: '1px 5px', borderRadius: 3 }}>
-                              {result.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--brand-dark)', lineHeight: 1.3, marginBottom: 4 }}>{fund.name}</div>
+                            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(145,47,99,0.08)', color: 'var(--brand-primary)', fontWeight: 500 }}>
+                              {fund.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/, '')}
                             </span>
                           </div>
-                          {result.return_1y !== null && result.return_1y !== undefined && (
-                            <span style={{ fontSize: 11, fontWeight: 600, color: result.return_1y >= 0 ? '#059669' : '#DC2626', flexShrink: 0, textAlign: 'right' }}>
-                              {pct(result.return_1y)}<div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 400 }}>1Y</div>
+                          <button onClick={() => removeFund(fund.isin)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1, padding: '0 0 0 8px', flexShrink: 0 }}>×</button>
+                        </div>
+                        <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                          <span style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, color }}>
+                            {fund.data?.nav && fund.data.nav !== '-' ? `₹${parseFloat(fund.data.nav).toFixed(2)}` : '—'}
+                          </span>
+                          {fund.data?.returns?.['1y'] && fund.data.returns['1y'] !== '-' && (
+                            <span style={{ fontSize: 12, fontWeight: 600, color: parseFloat(fund.data.returns['1y']) >= 0 ? '#059669' : '#DC2626' }}>
+                              {pct(fund.data.returns['1y'])} 1Y
                             </span>
                           )}
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+                        {fund.data?.morningstar_rating && fund.data.morningstar_rating !== '-' && (
+                          <div style={{ fontSize: 11, color: '#B46B10', letterSpacing: -1, marginTop: 4 }}>{stars(fund.data.morningstar_rating)}</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ borderRadius: 10, border: '1px dashed var(--border)', background: 'var(--bg-secondary)', minHeight: 100, padding: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>Fund {idx + 1}</div>
+                          {slotCount > 4 && (
+                            <button onClick={() => setSlotCount(sc => sc - 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1, padding: 0 }}>×</button>
+                          )}
+                        </div>
+                        <div style={{ position: 'relative' }}>
+                          <input
+                            ref={inputRefs[idx]}
+                            value={slotSearchQ[idx]}
+                            onChange={e => handleSlotSearch(idx, e.target.value)}
+                            onFocus={() => { if (slotResults[idx].length > 0) setSlotOpen(prev => { const s = [...prev]; s[idx] = true; return s; }); }}
+                            onBlur={() => setTimeout(() => setSlotOpen(prev => { const s = [...prev]; s[idx] = false; return s; }), 150)}
+                            placeholder="Search fund, AMC or ISIN…"
+                            style={{ width: '100%', padding: '7px 28px 7px 10px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 12, outline: 'none', boxSizing: 'border-box', background: '#fff' }}
+                          />
+                          {slotLoading[idx] && <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: 'var(--text-muted)' }}>...</span>}
+                          {slotSearchQ[idx] && !slotLoading[idx] && (
+                            <span onClick={() => handleSlotSearch(idx, '')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 14, lineHeight: 1 }}>×</span>
+                          )}
+                        </div>
+                        {slotOpen[idx] && (
+                          <SlotDropdown
+                            anchorRef={inputRefs[idx]}
+                            results={slotResults[idx]}
+                            funds={funds}
+                            onSelect={result => addFund(result, idx)}
+                          />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
 
-      {/* Empty state */}
-      {funds.length === 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 60, color: 'var(--text-muted)', textAlign: 'center', background: '#fff', borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}>
-          <div style={{ fontSize: 32, opacity: .25 }}>⊞</div>
-          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, color: 'var(--brand-dark)' }}>Add funds to compare</div>
-          <div style={{ fontSize: 13, maxWidth: 240, color: 'var(--text-muted)' }}>
-            'Search and add 2–4 funds using the input above.'
-          </div>
-        </div>
-      )}
+            {/* ── Empty state ── */}
+            {funds.length === 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 60, color: 'var(--text-muted)', textAlign: 'center', background: '#fff', borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}>
+                <div style={{ fontSize: 32, opacity: .25 }}>⊞</div>
+                <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, color: 'var(--brand-dark)' }}>Add funds to compare</div>
+                <div style={{ fontSize: 13, maxWidth: 240, color: 'var(--text-muted)' }}>
+                  Search and add 2–8 funds. Hit + to unlock 4 more slots.
+                </div>
+              </div>
+            )}
 
-      {/* Comparison table */}
-      {funds.length >= 1 && (
-        <div style={activeTab === 'overlap' ? {} : { background: '#fff', borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
-          {/* Tabs */}
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 16px', background: '#fff', borderRadius: activeTab === 'overlap' ? '12px 12px 0 0' : 0 }}>
-            {tabs.map(t => (
-              <button key={t} onClick={() => setActiveTabPersist(t)} style={{
-                padding: '10px 14px', fontSize: 12, fontWeight: activeTab === t ? 500 : 400,
-                color: activeTab === t ? 'var(--brand-primary)' : 'var(--text-muted)',
-                border: 'none', background: 'none', borderBottom: `2px solid ${activeTab === t ? 'var(--brand-primary)' : 'transparent'}`,
-                cursor: 'pointer', transition: 'all .12s', whiteSpace: 'nowrap',
-              }}>{tabLabels[t]}</button>
-            ))}
+            {/* ── Comparison table (same scroll container as card grid) ── */}
+            {funds.length >= 1 && (
+              <div style={activeTab === 'overlap' ? {} : { background: '#fff', borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)', overflow: 'hidden', minWidth: needsScroll ? LABEL_COL + numSlots * FUND_COL : undefined }}>
+                {/* Tabs */}
+                <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 16px', background: '#fff', borderRadius: activeTab === 'overlap' ? '12px 12px 0 0' : 0 }}>
+                  {tabs.map(t => (
+                    <button key={t} onClick={() => setActiveTabPersist(t)} style={{
+                      padding: '10px 14px', fontSize: 12, fontWeight: activeTab === t ? 500 : 400,
+                      color: activeTab === t ? 'var(--brand-primary)' : 'var(--text-muted)',
+                      border: 'none', background: 'none', borderBottom: `2px solid ${activeTab === t ? 'var(--brand-primary)' : 'transparent'}`,
+                      cursor: 'pointer', transition: 'all .12s', whiteSpace: 'nowrap',
+                    }}>{tabLabels[t]}</button>
+                  ))}
+                </div>
+                {/* Table content */}
+                <div style={activeTab === 'overlap' ? { padding: '16px 0' } : {}}>
+                  {renderTable()}
+                </div>
+              </div>
+            )}
           </div>
-
-          {/* Table */}
-          <div style={activeTab === 'overlap' ? { padding: '16px 0' } : { overflowX: 'auto' }}>
-            {renderTable()}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Suggested peers — R1/R2 funds in the same category */}
-      {funds.length >= 1 && funds.length < MAX && peerSuggestions.length > 0 && (
+      {funds.length >= 1 && funds.length < 4 && peerSuggestions.length > 0 && (
         <div style={{ marginTop: 20, padding: '14px 16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 12 }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 12 }}>
             Suggested peers to compare
