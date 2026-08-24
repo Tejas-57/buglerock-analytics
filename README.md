@@ -253,6 +253,7 @@ buglerock-analytics/
 │           │   ├── rtReport.js        # 8-section report builder
 │           │   └── RetirementPlanner.css
 │           ├── Simulator/             # SIP Simulator (under CALCULATE nav section)
+│           ├── RollingAnalytics/      # Rolling CAGR analytics (under CALCULATE nav section)
 │           ├── ModelPortfolios/       # BugleRock multi-asset model portfolios
 │           ├── Watchlist/             # Fund watchlist with card/table/compare views
 │           └── PortfolioBuilder/      # 6-step portfolio workflow
@@ -330,6 +331,37 @@ Fund-level portfolio stats — asset allocation, market cap breakdown, sector we
 - **Overlap tab** — Export Overlap Report PDF button (same format as Portfolio Builder)
 - PDF uses `shortFundName()` for display names
 
+### Model Portfolios (`/ModelPortfolios/`)
+
+Five solver-constructed portfolios (Conservative → Aggressive) built from R1/R2 ranked funds only using HiGHS LP solver. Portfolio detail panel has two action buttons:
+
+#### 🔬 View Portfolio X-Ray (modal overlay)
+Full-screen modal reusing `PortfolioXRay` directly. On open fires three API calls in parallel:
+- `GET /api/nav/stress-test?isins=...&weights=...`
+- `GET /api/holdings/historical-var?isins=...&weights=...&categories=...&asset_classes=...&std_devs=...`
+- `GET /api/holdings/overlap?isins=...` (auto-triggers `/api/holdings/fetch/{isin}` POST for missing funds, polls 30×2s)
+
+Results keyed by `portfolio.key` — switching portfolios resets and re-fetches, reopening same portfolio reuses cached state. Modal subtitle shows live status ("Fetching holdings data…" / "Computing VaR…"). Modal positioned below 60px app header (`padding-top: 76px`, `align-items: flex-start`).
+
+#### 📄 Generate PDF (modal overlay)
+Reuses `PDFProposal` directly via `buildPDFProps()` adapter. Produces identical section-picker and multi-page HTML PDF as Portfolio Builder. If X-Ray was opened first, `stressData` and `overlapData` are passed through automatically.
+
+#### Backend (`models.py`) — blended fields
+`_get_funds` SQL and `blended{}` now include:
+`return_1m · return_3m · return_6m · return_ytd · return_cy2021–cy2025 · sortino_3y · beta_3y · up_capture_3y · down_capture_3y`
+(previously only `return_1y/3y/5y`, `sharpe_3y`, `alpha_3y`, `std_dev_3y/5y`, `expense_ratio`)
+
+### Simulator (`/Simulator/`)
+- SIP / Lumpsum backtest using actual NAV history
+- **localStorage cache** (`sim_cache_v1`): persists `fund`, `mode`, `amount`, `startDate`, `endDate`, `sipDate`
+- On mount: if valid saved inputs exist, auto re-runs the API and restores result
+- Navigating away and back fully restores state
+
+### Rolling Analytics (`/RollingAnalytics/`)
+- Daily rolling CAGR distribution with stats (avg, median, best, worst, % positive, % > 12%, std dev)
+- **localStorage cache** (`rolling_cache_v1`): persists `fund`, `rollingYears`, `startDate`, `endDate`
+- On mount: if valid saved inputs exist, auto re-runs and restores result
+
 ### Portfolio Builder — Analyse Tab
 Tab groups: `Portfolio X-Ray | Overview · Returns & projections · Risk metrics | Correlation · Overlap · Style & drift | Stress test · Sensitivity · What-If | Fund details`
 
@@ -377,6 +409,68 @@ Tab groups: `Portfolio X-Ray | Overview · Returns & projections · Risk metrics
 ### Build Portfolio
 - Weight warning: red background + bold message when weights exceed 100%
 
+### Optimise Tab
+- Runs **all three portfolios simultaneously** (Max Sharpe · Min Volatility · Max Return) on a single "Run optimisation" click
+- Optimisation Objective dropdown **removed** — it was redundant since all three are always computed
+
+---
+
+## Analytics Rules (uniform across all tabs and PDF)
+
+All verdict thresholds are consistent between `PortfolioXRay.jsx`, `Analyse.jsx`, and `PDFProposal.jsx`.
+
+### Overlap — 5-tier scale
+| Range | Label | Colour |
+|---|---|---|
+| < 5% | Negligible | Grey |
+| 5–15% | Low | Green |
+| 15–25% | Moderate | Amber `#F39C12` |
+| 25–35% | High | Orange `#E67E22` |
+| ≥ 35% | Very High | Red `#C0392B` |
+
+Applies to: average overlap between any two holdings, and highest overlapping pair.
+
+### Sharpe ratio
+`> 0.7` Strong · `> 0.4` Adequate · else Weak
+
+### Alpha
+`> 2` Outperforming · `> 0` Positive · else Lagging
+
+### Beta
+`< 0.8` Defensive · `< 1.1` Market-like · else Aggressive
+
+### Down capture
+`< 90` Protected · `< 100` Moderate (amber) · else Exposed
+
+---
+
+## Stress Test Scenarios
+
+Four scenarios active (Global Financial Crisis and European Sovereign Debt Crisis removed):
+
+| ID | Name | Period |
+|---|---|---|
+| `china` | China Slowdown & Yuan Devaluation | Mar 2015 – Feb 2016 |
+| `ilfs` | IL&FS / NBFC Credit Crisis | Aug 2018 – Oct 2018 |
+| `covid` | Covid-19 Crash | Jan 2020 – Mar 2020 |
+| `fiirerating` | FII-Driven Rerating | Sep 2024 – Mar 2026 |
+
+Defined in `STRESS_SCENARIOS` list in `backend/routers/nav.py`.
+
+---
+
+## PDF Proposal — Stress Section
+
+**Columns:** Scenario · Period · Portfolio · Nifty 500 · [Blended BM — only if `bmStress` available] · Cushion vs [Blended BM or Nifty 500]
+
+Column count is dynamic: 4 columns when no IPS benchmark, 5 when blended BM is present. `bmStress` is destructured from `analyseData` prop.
+
+---
+
+## VaR / ES (`holdings.py`)
+
+All four output values (`var_95`, `es_95`, `var_99`, `es_99`) clamped to `max(0.0, value)` before serialisation. Negative VaR (positive tail return) is mathematically valid but meaningless as a risk display and caused a `--0.6%` double-negative bug at 1Y horizon.
+
 ---
 
 ## Asset Class Classification
@@ -409,6 +503,8 @@ Push to `main` → auto-builds and deploys (~90 sec).
 
 ### Backend (Render)
 Push to `main` → auto-deploys (~3 min). On startup: DB migrations → Gmail poll loop + NAV cron + holdings cron.
+
+If the backend cannot resolve external hostnames (PostgreSQL, Gmail, Google APIs) — `Name or service not known` / `getaddrinfo failed` — this is a **Render infrastructure/DNS issue, not a code bug**. Check [status.render.com](https://status.render.com) and trigger a manual redeploy from the Render dashboard.
 
 ---
 
@@ -445,12 +541,18 @@ Full Holdings V2 used when available (up to 99,999 holdings). Falls back to Top 
 | `BuildPortfolio.jsx` | `frontend/src/components/PortfolioBuilder/steps/` |
 | `PortfolioBuilder.jsx` | `frontend/src/components/PortfolioBuilder/` |
 | `ClientIPS.jsx` | `frontend/src/components/PortfolioBuilder/steps/` |
+| `PDFProposal.jsx` | `frontend/src/components/PortfolioBuilder/steps/` |
+| `Optimise.jsx` | `frontend/src/components/PortfolioBuilder/steps/` |
 | `FundExplorer.jsx` | `frontend/src/components/FundExplorer/` |
 | `FundDetail.jsx` | `frontend/src/components/FundDetail/` |
 | `CompareFunds.jsx` | `frontend/src/components/PeerComparison/` |
 | `Watchlist.jsx` | `frontend/src/components/Watchlist/` |
 | `Navbar.jsx` | `frontend/src/components/Layout/` |
 | `Navbar.css` | `frontend/src/components/Layout/` |
+| `ModelPortfolios.jsx` | `frontend/src/components/ModelPortfolios/` |
+| `ModelPortfolios.css` | `frontend/src/components/ModelPortfolios/` |
+| `Simulator.jsx` | `frontend/src/components/Simulator/` |
+| `RollingAnalytics.jsx` | `frontend/src/components/RollingAnalytics/` |
 | `RetirementPlanner.jsx` | `frontend/src/components/RetirementPlanner/` |
 | `RetirementPlanner.css` | `frontend/src/components/RetirementPlanner/` |
 | `rtEngine.js` | `frontend/src/components/RetirementPlanner/` |
@@ -458,6 +560,7 @@ Full Holdings V2 used when available (up to 99,999 holdings). Falls back to Top 
 | `holdings.py` | `backend/routers/` |
 | `benchmarks.py` | `backend/routers/` |
 | `nav.py` | `backend/routers/` |
+| `models.py` | `backend/routers/` |
 | `db_service.py` | `backend/services/` |
 | `benchmark_db_service.py` | `backend/services/` |
 | `parser.py` | `backend/services/` |
