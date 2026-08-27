@@ -48,11 +48,13 @@ const ASSET_STRUCTURE = [
   },
   {
     id:'precious_metals', label:'Precious Metals', icon:'🥇',
-    subtypes:[{ id:'pm_all', label:'All', asset_classes:['Precious Metals'], groups:[
-      { label:'Gold', cats:['Cat: India Fund Sector - Precious Metals-Gold','India Fund Sector - Precious Metals'] },
-      { label:'Silver', cats:['Cat: India Fund Sector - Precious Metals-Silver'] },
-      { label:'ETF', cats:['India ETF Sector - Precious Metals','India ETF Gold','India ETF Silver'] },
-    ]}],
+    subtypes:[
+      { id:'pm_all', label:'All', asset_classes:['Precious Metals', 'ETF - Equity'], groups:[
+        { label:'Gold', cats:['Cat: India Fund Sector - Precious Metals-Gold', 'India ETF Gold'] },
+        { label:'Silver', cats:['Cat: India Fund Sector - Precious Metals-Silver', 'India ETF Silver'] },
+        { label:'Gold & Silver ETF FoFs', cats:['India Fund Sector - Precious Metals'] },
+      ]},
+    ],
   },
   {
     id:'sif', label:'SIF', icon:'🔬',
@@ -88,6 +90,14 @@ const MERGED_CATEGORIES = {
     asset_class: 'Hybrid',
     sub_cats: 'India Fund Equity Savings - Aggressive|India Fund Equity Savings - Conservative',
   },
+  'India ETF Gold': {
+    asset_class: 'ETF - Equity',
+    sub_cats: 'India ETF Gold',
+  },
+  'India ETF Silver': {
+    asset_class: 'ETF - Equity',
+    sub_cats: 'India ETF Silver',
+  },
 };
 
 const RANK_ORDER = { R1:1, R2:2, R3:3, R4:4, R5:5 };
@@ -102,6 +112,14 @@ const PIP_COLORS = { R1:'#059669', R2:'#059669', R3:'#2D1F2B', R4:'#EF4444', R5:
 
 function getRankOrder(r) { return !r || r==='-' || r==='0' ? 99 : (RANK_ORDER[r] || 98); }
 function cleanLabel(cat) { return cat.replace(/^(India Fund |India OE |India ETF |Cat: |Cat:)/,''); }
+
+const CAT_LABEL_OVERRIDE = {
+  'Cat: India Fund Sector - Precious Metals-Gold':   'Gold Funds',
+  'India ETF Gold':                                  'Gold ETFs',
+  'Cat: India Fund Sector - Precious Metals-Silver': 'Silver Funds',
+  'India ETF Silver':                                'Silver ETFs',
+  'India Fund Sector - Precious Metals':             'Gold & Silver ETF FoFs',
+};
 
 function RankBadge({ ranking }) {
   if (!ranking || ranking==='-' || ranking==='0') return null;
@@ -142,6 +160,9 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
   const [searchResults, setSearchResults]     = useState([]);
   const [searchOpen, setSearchOpen]           = useState(false);
   const [searchLoading, setSearchLoading]     = useState(false);
+  const [intelligence, setIntelligence]       = useState(null);
+  const [intelLoading, setIntelLoading]       = useState(false);
+  const [intelOpenTile, setIntelOpenTile]     = useState(null);
 
   const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().split('T')[0] : selectedDate;
   const assetItem   = ASSET_STRUCTURE.find(a => a.id === selectedAsset);
@@ -292,6 +313,15 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     return () => clearTimeout(timer);
   }, [searchQuery, dateStr]);
 
+  // Fetch Investment Intelligence once per date
+  useEffect(() => {
+    setIntelLoading(true);
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/funds/intelligence?date=${dateStr}`)
+      .then(r => r.json())
+      .then(d => { setIntelligence(d); setIntelLoading(false); })
+      .catch(() => setIntelLoading(false));
+  }, [dateStr]);
+
   const displayFunds = useMemo(() => {
     let funds = [...allFunds];
     if (effectiveWhitelisted) funds = funds.filter(f => f.ranking==='R1' || f.ranking==='R2');
@@ -312,8 +342,117 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     navigate('/home');
   };
 
+  const INTEL_TILES = [
+    { key:'best',          label:'Best Performers',        icon:'★', color:'var(--brand-primary)' },
+    { key:'improving',     label:'Improving Funds',         icon:'↗', color:'#059669' },
+    { key:'deteriorating', label:'Deteriorating Funds',     icon:'↘', color:'#DC2626' },
+    { key:'hi_risk',       label:'High Risk / High Return', icon:'⚡', color:'#B46B10' },
+    { key:'consistent',    label:'Consistent Performers',   icon:'●', color:'#3E3452' },
+  ];
+
+  const SIGNAL_METRIC = {
+    best:          f => `${f.blend_pctl}th pctl${f.completeness==='partial'?' *':''}`,
+    improving:     f => `+${f.momentum} pctl`,
+    deteriorating: f => `${f.momentum} pctl`,
+    hi_risk:       f => `${f.return_3y?.toFixed(1)}% / σ${f.std_dev_3y?.toFixed(1)}`,
+    consistent:    f => `${f.avg_pctl}th pctl avg`,
+  };
+
+  const IntelPanel = () => (
+    <div style={{ width:280, flexShrink:0, borderLeft:'1px solid var(--border)', paddingLeft:16, paddingTop:4 }}>
+      <div style={{ marginBottom:12 }}>
+        <div style={{ fontSize:13, fontWeight:700, color:'var(--brand-dark)', fontFamily:'var(--font-serif)', marginBottom:2 }}>
+          Investment Intelligence
+        </div>
+        <div style={{ fontSize:10, color:'var(--text-muted)' }}>
+          {intelligence ? `${intelligence.pool_size} funds across core equity & hybrid` : 'Loading signals...'}
+        </div>
+      </div>
+
+      {intelLoading && [1,2,3,4,5].map(i => (
+        <div key={i} className="loading-shimmer" style={{ height:48, borderRadius:8, marginBottom:6 }} />
+      ))}
+
+      {!intelLoading && INTEL_TILES.map(tile => {
+        const signal = intelligence?.signals?.[tile.key];
+        const count  = signal?.funds?.length ?? 0;
+        const isOpen = intelOpenTile === tile.key;
+        const funds  = signal?.funds || [];
+
+        return (
+          <div key={tile.key} style={{ marginBottom:6 }}>
+            {/* Tile header */}
+            <div
+              onClick={() => setIntelOpenTile(isOpen ? null : tile.key)}
+              style={{
+                display:'flex', alignItems:'center', justifyContent:'space-between',
+                padding:'9px 12px', borderRadius:8, cursor:'pointer', border:'1px solid',
+                borderColor: isOpen ? tile.color : 'var(--border)',
+                background: isOpen ? `${tile.color}10` : '#fff',
+                transition:'all .15s',
+              }}
+            >
+              <div style={{ display:'flex', alignItems:'center', gap:7 }}>
+                <span style={{ fontSize:14, color:tile.color }}>{tile.icon}</span>
+                <span style={{ fontSize:11, fontWeight:600, color: isOpen ? tile.color : 'var(--text-primary)' }}>{tile.label}</span>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <span style={{
+                  fontSize:11, fontWeight:700, padding:'1px 7px', borderRadius:10,
+                  background: isOpen ? tile.color : 'var(--bg-secondary)',
+                  color: isOpen ? '#fff' : 'var(--text-secondary)',
+                }}>{count}</span>
+                <span style={{ fontSize:10, color:'var(--text-muted)', transform: isOpen ? 'rotate(180deg)' : 'none', transition:'transform .15s' }}>▼</span>
+              </div>
+            </div>
+
+            {/* Expanded fund list */}
+            {isOpen && (
+              <div style={{ border:'1px solid var(--border)', borderTop:'none', borderRadius:'0 0 8px 8px', background:'#fff', maxHeight:320, overflowY:'auto' }}>
+                {funds.length === 0 ? (
+                  <div style={{ padding:'14px 12px', fontSize:11, color:'var(--text-muted)', textAlign:'center' }}>
+                    No funds meet this signal's threshold
+                  </div>
+                ) : funds.map((f, i) => (
+                  <div
+                    key={f.isin}
+                    onClick={() => handleFundClick(f)}
+                    style={{
+                      padding:'8px 12px', borderBottom: i < funds.length-1 ? '1px solid var(--border)' : 'none',
+                      cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'flex-start',
+                      gap:8, transition:'background .1s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background='var(--bg-secondary)'}
+                    onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                  >
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:11, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{f.name}</div>
+                      <div style={{ fontSize:9.5, color:'var(--text-muted)', marginTop:1 }}>
+                        {f.category?.replace(/^(India Fund |India OE |Cat: )/,'')}
+                        {f.ranking && f.ranking !== '0' && <span style={{ marginLeft:5, fontWeight:700, color:'#059669' }}>{f.ranking}</span>}
+                      </div>
+                    </div>
+                    <div style={{ fontSize:10.5, fontWeight:700, color:tile.color, flexShrink:0, textAlign:'right' }}>
+                      {SIGNAL_METRIC[tile.key]?.(f)}
+                    </div>
+                  </div>
+                ))}
+                {tile.key === 'best' && funds.some(f => f.completeness === 'partial') && (
+                  <div style={{ padding:'6px 12px', fontSize:9.5, color:'var(--text-muted)', borderTop:'1px solid var(--border)', background:'var(--bg-secondary)' }}>
+                    * Based on 1Y + 3Y only (no 5Y data available)
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div style={{ paddingBottom: 40 }}>
+      {/* ── Header ── */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
         <div>
           <h1 className="section-title" style={{ marginBottom:2 }}>Fund Explorer</h1>
@@ -359,7 +498,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
                     <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{fund.name}</div>
                     <div style={{ display:'flex', gap:6, marginTop:2 }}>
                       <span style={{ fontSize:10, color:'var(--brand-mid)', background:'rgba(109,84,121,0.08)', padding:'1px 5px', borderRadius:3 }}>
-                        {['Cat: India Fund Sector - Precious Metals-Gold','Cat: India Fund Sector - Precious Metals-Silver','India Fund Sector - Precious Metals','India ETF Sector - Precious Metals'].includes(fund.category) ? 'Precious Metals' : fund.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/,'')}
+                        {['Cat: India Fund Sector - Precious Metals-Gold','Cat: India Fund Sector - Precious Metals-Silver','India Fund Sector - Precious Metals','India ETF Gold','India ETF Silver'].includes(fund.category) ? 'Precious Metals' : fund.category?.replace(/^(India Fund |India OE |India ETF |Cat: )/,'')}
                       </span>
                     </div>
                   </div>
@@ -372,6 +511,12 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
           )}
         </div>
       </div>
+
+      {/* ── Two-column layout: main content + intel side panel ── */}
+      <div style={{ display:'flex', gap:20, alignItems:'flex-start' }}>
+
+        {/* ── Main content (filters + fund list) ── */}
+        <div style={{ flex:1, minWidth:0 }}>
 
       <div style={{ marginBottom:4 }}>
         <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', color:'var(--brand-mid)', textTransform:'uppercase', marginBottom:8 }}>Asset Class</div>
@@ -430,7 +575,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
                       color: sel ? 'var(--brand-primary)' : 'var(--text-secondary)',
                       fontWeight: sel ? 600 : 400,
                     }}>
-                      {cleanLabel(cat)}
+                      {CAT_LABEL_OVERRIDE[cat] || cleanLabel(cat)}
                       <span style={{ width:14, height:14, borderRadius:'50%', border:`1.5px solid ${sel?'var(--brand-primary)':'#ccc'}`, background:sel?'var(--brand-primary)':'transparent', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
                         {sel && <span style={{ width:5, height:5, borderRadius:'50%', background:'#fff' }} />}
                       </span>
@@ -508,7 +653,8 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
             'Cat: India Fund Sector - Precious Metals-Gold',
             'Cat: India Fund Sector - Precious Metals-Silver',
             'India Fund Sector - Precious Metals',
-            'India ETF Sector - Precious Metals',
+            'India ETF Gold',
+            'India ETF Silver',
           ];
           const catDisplay = PRECIOUS_METALS_CATS.includes(selectedCat) ? 'Precious Metals' : cleanLabel(selectedCat || '');
 
@@ -555,6 +701,13 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
           );
         })}
       </div>
+
+        </div>{/* end main content */}
+
+        {/* ── Intelligence side panel ── */}
+        <IntelPanel />
+
+      </div>{/* end two-column layout */}
     </div>
   );
 }
