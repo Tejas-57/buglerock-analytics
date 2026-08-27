@@ -530,7 +530,7 @@ def get_portfolio_lookthrough(
         for isin in isin_list:
             q = db.query(FundHolding).filter(
                 FundHolding.isin == isin,
-                FundHolding.holding_type == "E",
+                FundHolding.holding_type.in_(["E", "B", "BT", "BD", "ER", "EX"]),  # equity + bonds
                 FundHolding.weighting != None,
                 FundHolding.weighting > 0,
             )
@@ -577,10 +577,18 @@ def get_portfolio_lookthrough(
                 # canonical key: prefer ISIN, fall back to normalised name
                 key = r.holding_isin or ("NAME:" + (r.name or "").strip().upper())
                 if key not in stock_agg:
+                    # Determine holding type label
+                    ht = r.holding_type or 'E'
+                    if ht in ('B', 'BD'):   type_label = 'Bond'
+                    elif ht == 'BT':        type_label = 'Govt'
+                    elif ht == 'ER':        type_label = 'REIT'
+                    elif ht == 'EX':        type_label = 'InvIT'
+                    else:                   type_label = 'Equity'
                     stock_agg[key] = {
                         "name": r.name or "Unknown",
                         "isin": r.holding_isin,
                         "sector": r.global_sector or "Unclassified",
+                        "type": type_label,
                         "weight_pct": 0.0,
                     }
                 stock_agg[key]["weight_pct"] += contrib_pct
@@ -602,6 +610,7 @@ def get_portfolio_lookthrough(
                 "name": s["name"],
                 "isin": s["isin"],
                 "sector": s["sector"],
+                "type": s.get("type", "Equity"),
                 "weight_pct": round(s["weight_pct"], 3),
             }
             for s in top_stocks

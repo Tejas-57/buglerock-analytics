@@ -350,6 +350,14 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
     { key:'consistent',    label:'Consistent Performers',   icon:'●', color:'#3E3452' },
   ];
 
+  const SIGNAL_NOTE = {
+    best:          'Blend of 1Y (40%) + 3Y (40%) + 5Y (20%) percentile ranks within category. Needs min 1Y + 3Y; redistributes to 50/50 if no 5Y.',
+    improving:     '6M percentile − 1Y percentile > 35 points within category. Flags funds gaining momentum recently vs their full-year standing.',
+    deteriorating: '1Y percentile − 6M percentile > 35 points within category. Flags funds that were stronger over the year but have slipped recently.',
+    hi_risk:       'Ranked by 3Y return percentile ÷ std dev percentile within category. Highest return per unit of risk taken.',
+    consistent:    'Avg of 1Y + 3Y + 5Y percentiles ≥ 60th, scored by avg − (dispersion × 0.3). Rewards steady performers over lucky ones. Requires all 3 periods.',
+  };
+
   const SIGNAL_METRIC = {
     best:          f => `${f.blend_pctl}th pctl${f.completeness==='partial'?' *':''}`,
     improving:     f => `+${f.momentum} pctl`,
@@ -439,14 +447,26 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
                 ))}
                 {tile.key === 'best' && funds.some(f => f.completeness === 'partial') && (
                   <div style={{ padding:'6px 12px', fontSize:9.5, color:'var(--text-muted)', borderTop:'1px solid var(--border)', background:'var(--bg-secondary)' }}>
-                    * Based on 1Y + 3Y only (no 5Y data available)
+                    * Score based on 1Y + 3Y only (no 5Y data available)
                   </div>
                 )}
+                {/* Methodology note at bottom */}
+                <div style={{ padding:'7px 12px', background:'var(--bg-secondary)', borderTop:'1px solid var(--border)', fontSize:10, color:'var(--text-muted)', lineHeight:1.5 }}>
+                  {SIGNAL_NOTE[tile.key]}
+                </div>
               </div>
             )}
           </div>
         );
       })}
+
+      {/* General methodology note */}
+      <div style={{ marginTop:12, padding:'10px 12px', borderRadius:8, background:'var(--bg-secondary)', border:'1px solid var(--border)' }}>
+        <div style={{ fontSize:10, color:'var(--text-muted)', lineHeight:1.6 }}>
+          <span style={{ fontWeight:600, color:'var(--text-secondary)' }}>How signals work: </span>
+          Each fund is ranked within its own category peer group using percentiles (0–100th). Signals are computed separately per category — equity and hybrid only, min 5 funds per category. Top 10 funds across all categories are shown per signal.
+        </div>
+      </div>
     </div>
   );
 

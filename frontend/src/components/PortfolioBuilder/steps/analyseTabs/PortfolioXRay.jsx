@@ -104,17 +104,19 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
   const [lookthrough, setLookthrough] = useState(null);
   const [ltLoading, setLtLoading] = useState(false);
   const [ltError, setLtError] = useState(null);
+  const [debtComposition, setDebtComposition] = useState(null);
+  const [debtLoading, setDebtLoading] = useState(false);
 
   useEffect(() => {
-    const equityFunds = funds.filter((f) => {
+    const allFunds = funds.filter((f) => {
       const s = snapshots[f.isin] || {};
-      const ac = (s.asset_class || '').toLowerCase();
-      return ac === 'equity' || ac === 'hybrid' || ac === 'allocation' || ac === 'multi-asset' || !ac;
+      const w = weights[f.isin] || 0;
+      return w > 0; // include all funds with non-zero weight
     });
-    if (equityFunds.length === 0) { setLookthrough(null); return; }
+    if (allFunds.length === 0) { setLookthrough(null); return; }
 
-    const isins = equityFunds.map((f) => f.isin).join(',');
-    const ws = equityFunds.map((f) => weights[f.isin] || 0).join(',');
+    const isins = allFunds.map((f) => f.isin).join(',');
+    const ws = allFunds.map((f) => weights[f.isin] || 0).join(',');
     if (!isins) return;
 
     const API = process.env.REACT_APP_API_URL || '';
@@ -125,6 +127,115 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
       .catch((e) => setLtError(typeof e === 'string' ? e : e.message))
       .finally(() => setLtLoading(false));
   }, [funds.map((f) => f.isin).join(','), JSON.stringify(weights)]);
+
+  // Fetch holdings for debt/hybrid funds and compute weighted debt composition
+  useEffect(() => {
+    const API = process.env.REACT_APP_API_URL || '';
+    // Identify funds with meaningful debt exposure
+    const debtFunds = funds.filter(f => {
+      const s = snapshots[f.isin] || {};
+      const ac = (s.asset_class || f.asset_class || '').toLowerCase();
+      const bondPct = parseFloat(s.bond_pct) || 0;
+      const isDebt = ac === 'debt' || ac.includes('debt') || ac.includes('bond');
+      const isHybridWithDebt = (ac === 'hybrid' || ac.includes('hybrid') || ac.includes('allocation')) && bondPct >= 5;
+      console.log('[DebtComp] fund:', f.name, 'ac:', ac, 'bondPct:', bondPct, 'isDebt:', isDebt, 'isHybrid:', isHybridWithDebt);
+      return isDebt || isHybridWithDebt;
+    });
+    if (debtFunds.length === 0) { setDebtComposition(null); return; }
+
+    setDebtLoading(true);
+    Promise.all(
+      debtFunds.map(f =>
+        fetch(`${API}/api/holdings/${f.isin}`)
+          .then(r => r.ok ? r.json() : null)
+          .catch(() => null)
+      )
+    ).then(results => {
+      // Credit quality mapping — Indian ratings → standardised buckets
+      const CQ_MAP = {
+        'sovereign': 'AAA / Equiv', 'crisil aaa': 'AAA / Equiv', 'icra aaa': 'AAA / Equiv',
+        'care aaa': 'AAA / Equiv', 'ind aaa': 'AAA / Equiv',
+        'crisil aa+': 'AA', 'crisil aa': 'AA', 'crisil aa-': 'AA',
+        'icra aa+': 'AA', 'icra aa': 'AA', 'icra aa-': 'AA',
+        'care aa+': 'AA', 'care aa': 'AA', 'care aa-': 'AA',
+        'ind aa+': 'AA', 'ind aa': 'AA', 'ind aa-': 'AA',
+        'crisil a+': 'A', 'crisil a': 'A', 'crisil a-': 'A',
+        'icra a+': 'A', 'icra a': 'A', 'icra a-': 'A',
+        'care a+': 'A', 'care a': 'A', 'care a-': 'A',
+        'crisil bbb': 'BBB', 'icra bbb': 'BBB', 'care bbb': 'BBB',
+        'crisil bb': 'BB', 'icra bb': 'BB',
+        'crisil b': 'B', 'icra b': 'B',
+      };
+
+      const CQ_ORDER = ['AAA / Equiv', 'AA', 'A', 'BBB', 'BB', 'B', 'Below B', 'Not Rated'];
+
+      // Debt sector mapping from holding_type
+      const TYPE_SECTOR = {
+        'BT': 'Government', 'BD': 'Government',  // Govt bonds / SDL
+        'B':  'Corporate',
+        'CA': 'Cash & Equivalents', 'CR': 'Cash & Equivalents',
+        'DS': 'Government',
+        'EX': 'Other',
+      };
+
+      // Weighted aggregation
+      const cqTotals = {};
+      const secTotals = {};
+      let totalDebtWeight = 0;
+      let avgCqNumerator = 0;
+      const CQ_SCORE = { 'AAA / Equiv': 7, 'AA': 6, 'A': 5, 'BBB': 4, 'BB': 3, 'B': 2, 'Below B': 1, 'Not Rated': 0 };
+
+      debtFunds.forEach((f, i) => {
+        const data = results[i];
+        if (!data || !data.holdings) return;
+        const s = snapshots[f.isin] || {};
+        const ac = (s.asset_class || '').toLowerCase();
+        const bondPct = parseFloat(s.bond_pct) || (ac === 'debt' ? 100 : 0);
+        const fundW = (weights[f.isin] || 0) * (bondPct / 100); // portfolio weight × debt fraction
+        totalDebtWeight += fundW;
+
+        // Only look at bond/debt type holdings
+        const debtHoldings = data.holdings.filter(h =>
+          ['B','BT','BD','DS','CR','CA'].includes(h.holding_type) && h.weighting != null
+        );
+        const holdingTotal = debtHoldings.reduce((s, h) => s + h.weighting, 0) || 1;
+
+        debtHoldings.forEach(h => {
+          const holdingW = (h.weighting / holdingTotal) * fundW;
+          // Credit quality
+          const cqRaw = (h.indian_credit_quality || '').toLowerCase().trim();
+          const bucket = CQ_MAP[cqRaw] || (cqRaw === '' || cqRaw == null ? 'Not Rated' : 'Not Rated');
+          cqTotals[bucket] = (cqTotals[bucket] || 0) + holdingW;
+          avgCqNumerator += (CQ_SCORE[bucket] || 0) * holdingW;
+          // Debt sector
+          const sector = TYPE_SECTOR[h.holding_type] || 'Other';
+          secTotals[sector] = (secTotals[sector] || 0) + holdingW;
+        });
+      });
+
+      if (totalDebtWeight === 0) { setDebtComposition(null); setDebtLoading(false); return; }
+
+      // Normalise to % of debt sleeve
+      const cqBreakdown = CQ_ORDER.map(bucket => ({
+        label: bucket,
+        pct: totalDebtWeight > 0 ? (cqTotals[bucket] || 0) / totalDebtWeight * 100 : 0,
+      }));
+
+      const SEC_ORDER = ['Government', 'Corporate', 'Cash & Equivalents', 'Municipal', 'Securitized', 'Derivative', 'Other'];
+      const secBreakdown = SEC_ORDER.map(sec => ({
+        label: sec,
+        pct: totalDebtWeight > 0 ? (secTotals[sec] || 0) / totalDebtWeight * 100 : 0,
+      }));
+
+      // Average credit quality label
+      const avgScore = avgCqNumerator / totalDebtWeight;
+      const avgCqLabel = avgScore >= 6.5 ? 'AAA' : avgScore >= 5.5 ? 'AA+' : avgScore >= 5 ? 'AA'
+        : avgScore >= 4.5 ? 'AA-' : avgScore >= 4 ? 'A' : avgScore >= 3 ? 'BBB' : avgScore >= 2 ? 'BB' : 'B';
+
+      setDebtComposition({ cqBreakdown, secBreakdown, avgCqLabel, totalDebtWeight });
+      setDebtLoading(false);
+    });
+  }, [funds.map(f => f.isin).join(','), JSON.stringify(weights), Object.keys(snapshots).length]);
 
   const eqShare = ((B.large_cap || 0) + (B.mid_cap || 0) + (B.small_cap || 0));
   const adv = computeAdvancedRisk(B, funds, snapshots, weights);
@@ -358,7 +469,7 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
       {lookthrough && lookthrough.sector_breakdown?.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
           <div className="ptf-card">
-            <div className="ptf-card-hd">Sector mix (look-through)</div>
+            <div className="ptf-card-hd">Sector mix — equity look-through</div>
             <div style={{ padding: '12px 16px' }}>
               {lookthrough.sector_breakdown.slice(0, 10).map((s) => {
                 const maxW = lookthrough.sector_breakdown[0].weight_pct || 1;
@@ -379,21 +490,113 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
             </div>
           </div>
           <div className="ptf-card">
-            <div className="ptf-card-hd">Top 10 companies (look-through)</div>
+            <div className="ptf-card-hd">Top 10 holdings (look-through)</div>
             <div style={{ padding: '8px 16px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <tbody>
-                  {lookthrough.top_stocks.slice(0, 10).map((s, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '6px 4px', fontSize: 10.5, color: 'var(--text-muted)', width: 20 }}>{i + 1}</td>
-                      <td style={{ padding: '6px 4px', fontSize: 11.5, color: 'var(--text-primary)' }}>{s.name}</td>
-                      <td style={{ padding: '6px 4px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--brand-dark)' }}>{s.weight_pct.toFixed(2)}%</td>
-                    </tr>
-                  ))}
+                  {lookthrough.top_stocks.slice(0, 10).map((s, i) => {
+                    const typeColor = s.type === 'Equity' ? '#912F63'
+                      : s.type === 'Govt' ? '#3E3452'
+                      : s.type === 'Bond' ? '#B46B10'
+                      : s.type === 'REIT' || s.type === 'InvIT' ? '#1A7A52'
+                      : '#6D5479';
+                    return (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '6px 4px', fontSize: 10.5, color: 'var(--text-muted)', width: 20 }}>{i + 1}</td>
+                        <td style={{ padding: '6px 4px', fontSize: 11.5, color: 'var(--text-primary)' }}>
+                          {s.name}
+                          {s.type && s.type !== 'Equity' && (
+                            <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3, background: `${typeColor}15`, color: typeColor, border: `1px solid ${typeColor}30` }}>
+                              {s.type}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '6px 4px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--brand-dark)' }}>{s.weight_pct.toFixed(2)}%</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Debt portfolio composition — only shown when portfolio has debt/hybrid exposure */}
+      {(debtLoading || debtComposition) && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--brand-dark)', fontFamily: 'var(--font-display)', marginBottom: 10, marginTop: 6 }}>
+            Debt portfolio composition
+          </div>
+          {debtLoading ? (
+            <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading debt composition…</div>
+          ) : debtComposition && (
+            <div className="ptf-card">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, padding: '16px 20px' }}>
+                {/* Credit Quality */}
+                <div>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 12 }}>
+                    Credit Quality
+                  </div>
+                  {debtComposition.cqBreakdown.map(({ label, pct }) => {
+                    const clr = pct === 0 ? 'var(--text-muted)'
+                      : label === 'AAA / Equiv' ? '#1A7A52'
+                      : label === 'AA' ? '#2E7D32'
+                      : label === 'A'  ? '#D97706'
+                      : '#C0392B';
+                    const barClr = label === 'AAA / Equiv' ? '#1A7A52'
+                      : label === 'AA' ? '#4CAF50'
+                      : label === 'A'  ? '#D97706'
+                      : label === 'BBB' ? '#E67E22'
+                      : '#C0392B';
+                    return (
+                      <div key={label} style={{ marginBottom: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+                          <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{label}</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: clr }}>{pct.toFixed(1)}%</span>
+                        </div>
+                        <div style={{ background: 'var(--bg-secondary)', borderRadius: 4, height: 5, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: Math.min(100, pct).toFixed(1) + '%', background: barClr, borderRadius: 4, transition: 'width .3s' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{ marginTop: 14, padding: '8px 12px', background: 'rgba(145,47,99,0.08)', borderRadius: 8, border: '1px solid rgba(145,47,99,0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, color: 'var(--brand-primary)', fontWeight: 600 }}>Avg credit quality</span>
+                    <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--brand-primary)', fontFamily: 'var(--font-mono)' }}>{debtComposition.avgCqLabel}</span>
+                  </div>
+                </div>
+
+                {/* Debt Sector Breakdown */}
+                <div>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 12 }}>
+                    Sector Breakdown
+                  </div>
+                  {debtComposition.secBreakdown.map(({ label, pct }) => {
+                    const clr = pct === 0 ? 'var(--text-muted)'
+                      : label === 'Government' ? '#3E3452'
+                      : label === 'Corporate'  ? '#912F63'
+                      : label === 'Cash & Equivalents' ? '#A795AE'
+                      : '#6D5479';
+                    return (
+                      <div key={label} style={{ marginBottom: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+                          <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{label}</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: clr }}>{pct.toFixed(1)}%</span>
+                        </div>
+                        <div style={{ background: 'var(--bg-secondary)', borderRadius: 4, height: 5, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: Math.min(100, pct).toFixed(1) + '%', background: clr, borderRadius: 4, transition: 'width .3s' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ padding: '8px 20px 12px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>
+                Computed from underlying bond holdings of all debt and hybrid funds, weighted by portfolio allocation × debt fraction. Percentages are rebased to 100% of the debt sleeve — not the total portfolio.
+              </div>
+            </div>
+          )}
         </div>
       )}
 
