@@ -32,6 +32,7 @@ export function rtBuildFullSections(R) {
   };
   const td = (v, c, bold) => `<td style="padding:7px 12px;border-bottom:1px solid ${GR20};font-family:DM Mono,monospace;text-align:right;${bold ? 'font-weight:700;' : ''}${c ? 'color:' + c + ';' : ''}">${v}</td>`;
   const th = (v, align) => `<th style="padding:8px 12px;text-align:${align || 'right'};font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};white-space:nowrap;background:${GR10}">${v}</th>`;
+  const thc = (v, align) => `<th style="padding:5px 6px;text-align:${align || 'right'};font-size:8.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};white-space:nowrap;background:${GR10}">${v}</th>`;
   const secHd = (n, title, sub) =>
     `<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px">`
     + `<div style="background:${BERRY};color:#fff;font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;flex-shrink:0">${n}</div>`
@@ -196,18 +197,18 @@ export function rtBuildFullSections(R) {
 
   let cfRows = '', sipA2 = IN.sipM * 12 / 100000, p10Depleted = false;
 
-  const corpusLabel = IN.corpus0 > 0 ? `Today (opening — ${fmtCF(IN.corpus0)})` : 'Today (opening)';
+  const corpusLabel = IN.corpus0 > 0 ? `Today (${fmtCF(IN.corpus0)})` : 'Today';
   cfRows += `<tr style="background:${GR10}">`
-    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:center;font-family:DM Mono,monospace;font-size:11px;font-weight:700">${IN.age}</td>`
-    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:center;font-family:DM Mono,monospace;font-size:11px">${CY}</td>`
-    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};font-family:DM Sans,sans-serif;font-size:10px;font-weight:700;color:${PLUM}">${corpusLabel}</td>`
-    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
-    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
-    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
-    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
-    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
-    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;font-weight:700;color:${BERRY}">${fmtCF(IN.corpus0)}</td>`
-    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${NEG}">${fmtCF(IN.corpus0)}</td>`
+    + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:center;font-family:DM Mono,monospace;font-size:10px;font-weight:700">${IN.age}</td>`
+    + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:center;font-family:DM Mono,monospace;font-size:10px">${CY}</td>`
+    + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};font-family:DM Sans,sans-serif;font-size:10px;font-weight:700;color:${PLUM}">${corpusLabel}</td>`
+    + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;color:${GR60}">—</td>`
+    + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;color:${GR60}">—</td>`
+    + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;color:${GR60}">—</td>`
+    + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;color:${GR60}">—</td>`
+    + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;color:${GR60}">—</td>`
+    + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;font-weight:700;color:${BERRY}">${fmtCF(IN.corpus0)}</td>`
+    + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;color:${NEG}">${fmtCF(IN.corpus0)}</td>`
     + `</tr>`;
   for (let y = 1; y <= R.years; y++) {
     const ca = IN.age + y, isRet2 = ca > IN.retAge;
@@ -225,16 +226,16 @@ export function rtBuildFullSections(R) {
     const isRet1 = (ca === IN.retAge);
     const rowStyle = isRet1 ? 'background:#F7EEF3;' : ca % 5 === 0 ? 'background:' + GR10 + ';' : '';
     cfRows += `<tr style="${rowStyle}">`
-      + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:center;font-family:DM Mono,monospace;font-size:11px;font-weight:${isRet1 ? '700' : '400'}">${ca}${isRet1 ? ' ★' : ''}</td>`
-      + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:center;font-family:DM Mono,monospace;font-size:11px">${CY + y}</td>`
-      + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};font-family:DM Sans,sans-serif;font-size:10px;color:${GR60}">${isRet2 ? 'Retirement' : 'Accumulation'}</td>`
-      + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${POS}">${sipIn ? fmtCF(sipIn, '+') : '—'}</td>`
-      + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${POS}">${epfIn ? fmtCF(epfIn, '+') : '—'}</td>`
-      + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${POS}">${li2 ? fmtCF(li2, '+') : '—'}</td>`
-      + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${WARN}">${gi2 || oneT2 ? fmtCF(gi2 + oneT2, '−') : '—'}</td>`
-      + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${NEG}">${wd2 ? fmtCF(wd2, '−') : '—'}</td>`
-      + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;font-weight:${isRet1 ? '700' : '400'};color:${BERRY}">${fmtCF(R.P50[y])}</td>`
-      + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${NEG}">${(() => { if (p10Depleted) return '—'; if (R.P10[y] <= 0) { p10Depleted = true; return '—'; } return fmtCF(R.P10[y]); })()}</td>`
+      + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:center;font-family:DM Mono,monospace;font-size:10px;font-weight:${isRet1 ? '700' : '400'}">${ca}${isRet1 ? ' ★' : ''}</td>`
+      + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:center;font-family:DM Mono,monospace;font-size:10px">${CY + y}</td>`
+      + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};font-family:DM Sans,sans-serif;font-size:10px;color:${GR60}">${isRet2 ? 'Retirement' : 'Accumulation'}</td>`
+      + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;color:${POS}">${sipIn ? fmtCF(sipIn, '+') : '—'}</td>`
+      + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;color:${POS}">${epfIn ? fmtCF(epfIn, '+') : '—'}</td>`
+      + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;color:${POS}">${li2 ? fmtCF(li2, '+') : '—'}</td>`
+      + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;color:${WARN}">${gi2 || oneT2 ? fmtCF(gi2 + oneT2, '−') : '—'}</td>`
+      + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;color:${NEG}">${wd2 ? fmtCF(wd2, '−') : '—'}</td>`
+      + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;font-weight:${isRet1 ? '700' : '400'};color:${BERRY}">${fmtCF(R.P50[y])}</td>`
+      + `<td style="padding:4px 6px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:10px;color:${NEG}">${(() => { if (p10Depleted) return '—'; if (R.P10[y] <= 0) { p10Depleted = true; return '—'; } return fmtCF(R.P10[y]); })()}</td>`
       + `</tr>`;
   }
 
@@ -285,7 +286,7 @@ export function rtBuildFullSections(R) {
       + `<span style="color:${WARN}">● Goals</span><span style="color:${PLUM}">┊ Retirement age</span></div>`)
     + `</section>`
 
-    + `<section style="margin-bottom:32px">` + secHd('2', 'Corpus Milestones', 'Median and range at key accumulation ages')
+    + `<section class="pg" style="margin-bottom:32px">` + secHd('2', 'Corpus Milestones', 'Median and range at key accumulation ages')
     + card(cardHd('Corpus growth milestones — median scenario') + `<div style="padding:0 8px 16px">${growthSvg}</div>`)
     + `</section>`
 
@@ -340,9 +341,11 @@ export function rtBuildFullSections(R) {
 
     + `<section class="pg" style="margin-bottom:32px">` + secHd('7', 'Year-by-Year Cashflow', 'All inflows and outflows — median corpus and stress case (P10)')
     + card(cardHd('Annual cashflow statement — ★ = retirement year')
-      + `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>`
-      + th('Age', 'center') + th('Year', 'center') + th('Phase', 'left')
-      + th('SIP in') + th('EPF+NPS') + th('Lumps in') + th('Goals out') + th('Withdrawal') + th('Median corpus') + th('P10 corpus')
+      + `<div style="overflow-x:auto"><table class="cf-table" style="width:100%;border-collapse:collapse;font-size:10px;table-layout:fixed">`
+      + `<colgroup><col style="width:6%"><col style="width:6%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:12%"><col style="width:13%"><col style="width:13%"></colgroup>`
+      + `<thead><tr>`
+      + thc('Age', 'center') + thc('Year', 'center') + thc('Phase', 'left')
+      + thc('SIP in') + thc('EPF+NPS') + thc('Lumps in') + thc('Goals out') + thc('Withdrawal') + thc('Median') + thc('P10')
       + `</tr></thead><tbody>${cfRows}</tbody></table></div>`
       + `<div style="padding:10px 16px;font-size:10px;color:${GR60};background:${GR10};border-top:1px solid ${GR20}">EPF+NPS lump merges into corpus at retirement. Withdrawals are grossed up for ${(IN.tax * 100).toFixed(0)}% tax. NPS annuity income (${fmtL(R.npsAnnuityIncome)}/yr) deducted before computing withdrawal. Shaded rows every 5 years. Values shown in L / Cr as applicable.</div>`)
     + `</section>`
@@ -384,7 +387,9 @@ export function rtOpenReport(R) {
     + `body{font-family:"DM Sans",sans-serif;background:#fff;color:${GR80};font-size:13px;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact}`
     + '.page{max-width:1040px;margin:0 auto;padding:36px 44px}'
     + 'section{margin-bottom:32px}'
-    + '@media print{@page{margin:12mm 10mm;size:A4}.no-print{display:none!important}.pg{page-break-before:always;padding-top:24px}}'
+    + '.cf-table{font-size:9px}'
+    + '.cf-table td,.cf-table th{padding:3px 4px!important}'
+    + '@media print{@page{margin:10mm 8mm;size:A4}.no-print{display:none!important}.pg{page-break-before:always;padding-top:24px}.page{padding:20px 16px}}'
     + '</style></head><body>'
     + `<div class="no-print" style="background:${PLUM};padding:11px 28px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:99">`
     + `<div style="flex:1;color:rgba(255,255,255,.7);font-size:12px">Retirement plan · <strong style="color:#fff">${IN.name || 'Client'}</strong> · ${today}</div>`
