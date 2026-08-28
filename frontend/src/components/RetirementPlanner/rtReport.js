@@ -173,8 +173,7 @@ export function rtBuildFullSections(R) {
     if (!v || v === 0) return '—';
     const abs = Math.abs(v);
     let str;
-    if (abs >= 10000) str = (abs / 10000).toFixed(2) + ' Cr';
-    else if (abs >= 100) str = (abs / 100).toFixed(2) + ' Cr';
+    if (abs >= 100) str = (abs / 100).toFixed(2) + ' Cr';
     else if (abs < 0.1) str = (abs * 100).toFixed(0) + 'K';
     else str = abs.toFixed(1) + ' L';
     return (sign || '') + str;
