@@ -181,6 +181,20 @@ export function rtBuildFullSections(R) {
   };
 
   let cfRows = '', sipA2 = IN.sipM * 12 / 100000, p10Depleted = false;
+
+  const corpusLabel = IN.corpus0 > 0 ? `Today (opening — ${fmtCF(IN.corpus0)})` : 'Today (opening)';
+  cfRows += `<tr style="background:${GR10}">`
+    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:center;font-family:DM Mono,monospace;font-size:11px;font-weight:700">${IN.age}</td>`
+    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:center;font-family:DM Mono,monospace;font-size:11px">${CY}</td>`
+    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};font-family:DM Sans,sans-serif;font-size:10px;color:${GR60}">${corpusLabel}</td>`
+    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
+    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
+    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
+    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
+    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
+    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;font-weight:700;color:${BERRY}">${fmtCF(IN.corpus0)}</td>`
+    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${NEG}">${fmtCF(IN.corpus0)}</td>`
+    + `</tr>`;
   for (let y = 1; y <= R.years; y++) {
     const ca = IN.age + y, isRet2 = ca > IN.retAge;
     const sipIn = (ca <= IN.sipTill && ca <= IN.retAge) ? sipA2 : 0;
