@@ -106,24 +106,26 @@ export function rtBuildFullSections(R) {
     + goalMk + `</svg>`;
 
   // ── CHART 2: SIP growth bars ──
-  const milestones = [0, 5, 10, 15, Math.min(R.yearsToRet, 20), R.yearsToRet].filter((v, i, a) => a.indexOf(v) === i && v <= R.years);
-  const sipBW = 900, sipBH = 160;
-  const sipMaxV = R.P90[R.yearsToRet] * 1.05 || 10;
-  const sbx = (yr) => (20 + (yr / R.years) * (sipBW - 40)).toFixed(1);
-  const sipBars = milestones.map((yr) => {
-    const bx = sbx(yr), bw = Math.max(40, Math.min(100, (sipBW - 40) / R.years * 6));
-    const bh50 = Math.max(0, (R.P50[yr] / sipMaxV) * (sipBH - 20));
-    const bh90 = Math.max(0, (R.P90[yr] / sipMaxV) * (sipBH - 20));
-    const lbl = yr === 0 ? 'Now' : 'Age ' + (IN.age + yr);
-    const labelY = sipBH - 10 - bh50 - 8; // above bar
-    const insideY = sipBH - 10 - bh50 + 14; // inside bar near top
-    const useInside = bh50 > 25; // put label inside if bar is tall enough
-    return `<rect x="${+bx - bw / 2}" y="${sipBH - 10 - bh90}" width="${bw}" height="${bh90}" fill="${BERRY}" opacity=".15" rx="3"/>`
-      + `<rect x="${+bx - bw / 2 + 4}" y="${sipBH - 10 - bh50}" width="${bw - 8}" height="${bh50}" fill="${BERRY}" opacity=".7" rx="3"/>`
-      + `<text x="${bx}" y="${useInside ? insideY : labelY}" text-anchor="middle" font-size="9" font-weight="700" fill="${useInside ? '#fff' : BERRY}" font-family="DM Mono,monospace">${fmtL(R.P50[yr])}</text>`
-      + `<text x="${bx}" y="${sipBH + 12}" text-anchor="middle" font-size="9" fill="${GR60}" font-family="DM Sans,sans-serif">${lbl}</text>`;
-  }).join('');
-  const growthSvg = `<svg width="100%" viewBox="0 0 ${sipBW} ${sipBH + 24}" style="display:block"><line x1="20" y1="${sipBH - 10}" x2="${sipBW - 20}" y2="${sipBH - 10}" stroke="${GR20}" stroke-width="1"/>${sipBars}</svg>`;
+  const milestones = [0, 5, 10, 15, Math.min(R.yearsToRet, 20), R.yearsToRet]
+    .filter((v, i, a) => a.indexOf(v) === i && v <= R.years && v >= 0)
+    .sort((a, b) => a - b);
+  const sipMaxV = Math.max(...milestones.map(yr => R.P90[yr] || 0)) * 1.05 || 1;
+  const growthSvg = `<div style="display:flex;align-items:flex-end;gap:16px;padding:12px 24px 0;height:200px;box-sizing:border-box">`
+    + milestones.map((yr) => {
+      const lbl = yr === 0 ? 'Now' : 'Age ' + (IN.age + yr);
+      const h50 = Math.max(6, (R.P50[yr] / sipMaxV) * 160);
+      const h90 = Math.max(6, (R.P90[yr] / sipMaxV) * 160);
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center">`
+        + `<div style="width:100%;position:relative;display:flex;justify-content:center;align-items:flex-end;height:180px">`
+        // Label positioned just above the P50 bar
+        + `<div style="position:absolute;bottom:${h50.toFixed(0)}px;font-family:DM Mono,monospace;font-size:10.5px;font-weight:700;color:${BERRY};white-space:nowrap;padding-bottom:4px">${fmtL(R.P50[yr])}</div>`
+        + `<div style="position:absolute;bottom:0;width:75%;height:${h90.toFixed(0)}px;background:${BERRY};opacity:.15;border-radius:4px 4px 0 0"></div>`
+        + `<div style="position:absolute;bottom:0;width:55%;height:${h50.toFixed(0)}px;background:${BERRY};opacity:.75;border-radius:4px 4px 0 0"></div>`
+        + `</div>`
+        + `<div style="font-size:10px;color:${GR60};font-family:DM Sans,sans-serif;padding-top:6px;border-top:1px solid ${GR20};width:100%;text-align:center">${lbl}</div>`
+        + `</div>`;
+    }).join('')
+    + `</div>`;
 
   // ── CHART 3: Income waterfall ──
   const firstYr = R.yearsToRet;
@@ -182,10 +184,13 @@ export function rtBuildFullSections(R) {
   const fmtCF = (v, sign) => {
     if (!v || v === 0) return '—';
     const abs = Math.abs(v);
-    let str;
-    if (abs >= 100) str = (abs / 100).toFixed(2) + ' Cr';
-    else if (abs < 0.1) str = (abs * 100).toFixed(0) + 'K';
-    else str = abs.toFixed(1) + ' L';
+    let num, unit;
+    if (abs >= 100)     { num = abs / 100; unit = ' Cr'; }
+    else if (abs < 0.1) { num = abs * 100; unit = 'K';   }
+    else                { num = abs;       unit = ' L';  }
+    // Show decimals only if non-zero after rounding
+    const rounded = Math.round(num * 100) / 100;
+    const str = (rounded === Math.floor(rounded) ? rounded.toFixed(0) : rounded.toFixed(2)) + unit;
     return (sign || '') + str;
   };
 
@@ -195,7 +200,7 @@ export function rtBuildFullSections(R) {
   cfRows += `<tr style="background:${GR10}">`
     + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:center;font-family:DM Mono,monospace;font-size:11px;font-weight:700">${IN.age}</td>`
     + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:center;font-family:DM Mono,monospace;font-size:11px">${CY}</td>`
-    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};font-family:DM Sans,sans-serif;font-size:10px;color:${GR60}">${corpusLabel}</td>`
+    + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};font-family:DM Sans,sans-serif;font-size:10px;font-weight:700;color:${PLUM}">${corpusLabel}</td>`
     + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
     + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
     + `<td style="padding:5px 10px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-size:11px;color:${GR60}">—</td>`
@@ -281,7 +286,7 @@ export function rtBuildFullSections(R) {
     + `</section>`
 
     + `<section style="margin-bottom:32px">` + secHd('2', 'Corpus Milestones', 'Median and range at key accumulation ages')
-    + card(cardHd('Corpus growth milestones — median scenario') + `<div style="padding:18px 20px">${growthSvg}</div>`)
+    + card(cardHd('Corpus growth milestones — median scenario') + `<div style="padding:0 8px 16px">${growthSvg}</div>`)
     + `</section>`
 
     + `<section class="pg" style="margin-bottom:32px">` + secHd('3', 'Corpus Percentile Analysis', 'Range of outcomes at key ages')
