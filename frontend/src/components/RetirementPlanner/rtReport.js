@@ -107,20 +107,23 @@ export function rtBuildFullSections(R) {
 
   // ── CHART 2: SIP growth bars ──
   const milestones = [0, 5, 10, 15, Math.min(R.yearsToRet, 20), R.yearsToRet].filter((v, i, a) => a.indexOf(v) === i && v <= R.years);
-  const sipBW = 900, sipBH = 80;
+  const sipBW = 900, sipBH = 160;
   const sipMaxV = R.P90[R.yearsToRet] * 1.05 || 10;
   const sbx = (yr) => (20 + (yr / R.years) * (sipBW - 40)).toFixed(1);
   const sipBars = milestones.map((yr) => {
-    const bx = sbx(yr), bw = Math.max(8, Math.min(60, (sipBW - 40) / R.years * 3.5));
-    const bh50 = Math.max(0, (R.P50[yr] / sipMaxV) * (sipBH - 10));
-    const bh90 = Math.max(0, (R.P90[yr] / sipMaxV) * (sipBH - 10));
+    const bx = sbx(yr), bw = Math.max(40, Math.min(100, (sipBW - 40) / R.years * 6));
+    const bh50 = Math.max(0, (R.P50[yr] / sipMaxV) * (sipBH - 20));
+    const bh90 = Math.max(0, (R.P90[yr] / sipMaxV) * (sipBH - 20));
     const lbl = yr === 0 ? 'Now' : 'Age ' + (IN.age + yr);
-    return `<rect x="${+bx - bw / 2}" y="${sipBH - 10 - bh90}" width="${bw}" height="${bh90}" fill="${BERRY}" opacity=".15" rx="2"/>`
-      + `<rect x="${+bx - bw / 2 + 4}" y="${sipBH - 10 - bh50}" width="${bw - 8}" height="${bh50}" fill="${BERRY}" opacity=".7" rx="2"/>`
-      + `<text x="${bx}" y="${sipBH - 10 - bh50 - 5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="${BERRY}" font-family="DM Mono,monospace">${fmtL(R.P50[yr])}</text>`
-      + `<text x="${bx}" y="${sipBH + 5}" text-anchor="middle" font-size="8" fill="${GR60}" font-family="DM Sans,sans-serif">${lbl}</text>`;
+    const labelY = sipBH - 10 - bh50 - 8; // above bar
+    const insideY = sipBH - 10 - bh50 + 14; // inside bar near top
+    const useInside = bh50 > 25; // put label inside if bar is tall enough
+    return `<rect x="${+bx - bw / 2}" y="${sipBH - 10 - bh90}" width="${bw}" height="${bh90}" fill="${BERRY}" opacity=".15" rx="3"/>`
+      + `<rect x="${+bx - bw / 2 + 4}" y="${sipBH - 10 - bh50}" width="${bw - 8}" height="${bh50}" fill="${BERRY}" opacity=".7" rx="3"/>`
+      + `<text x="${bx}" y="${useInside ? insideY : labelY}" text-anchor="middle" font-size="9" font-weight="700" fill="${useInside ? '#fff' : BERRY}" font-family="DM Mono,monospace">${fmtL(R.P50[yr])}</text>`
+      + `<text x="${bx}" y="${sipBH + 12}" text-anchor="middle" font-size="9" fill="${GR60}" font-family="DM Sans,sans-serif">${lbl}</text>`;
   }).join('');
-  const growthSvg = `<svg width="100%" viewBox="0 0 ${sipBW} ${sipBH + 20}" style="display:block"><line x1="20" y1="${sipBH - 10}" x2="${sipBW - 20}" y2="${sipBH - 10}" stroke="${GR20}" stroke-width="1"/>${sipBars}</svg>`;
+  const growthSvg = `<svg width="100%" viewBox="0 0 ${sipBW} ${sipBH + 24}" style="display:block"><line x1="20" y1="${sipBH - 10}" x2="${sipBW - 20}" y2="${sipBH - 10}" stroke="${GR20}" stroke-width="1"/>${sipBars}</svg>`;
 
   // ── CHART 3: Income waterfall ──
   const firstYr = R.yearsToRet;
