@@ -455,8 +455,12 @@ function Results({ R, onEdit }) {
   const failCount = Math.round((100 - R.successRate) / 100 * R.NSIM);
 
   const atRet = { p10: R.P10[R.yearsToRet], p50: R.P50[R.yearsToRet], p90: R.P90[R.yearsToRet] };
-  const maxV = atRet.p90 || 1;
-  const pct10 = Math.max(0, atRet.p10 / maxV * 100), pct50 = Math.max(0, atRet.p50 / maxV * 100), pct90 = Math.max(0, atRet.p90 / maxV * 100);
+  const rangeMin = atRet.p10 || 0;
+  const rangeMax = atRet.p90 || 1;
+  const rangeSpan = rangeMax - rangeMin || 1;
+  const pct10 = 0;
+  const pct50 = Math.max(0, Math.min(100, (atRet.p50 - rangeMin) / rangeSpan * 100));
+  const pct90 = 100;
 
   const glossary = [
     ['Success rate', `The % of simulated futures (out of ${R.NSIM}) where the money lasted the whole plan without running out. Not a prediction — a range of "what could happen."`],
