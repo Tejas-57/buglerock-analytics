@@ -22,7 +22,14 @@ export function rtBuildFullSections(R) {
       : `The plan fails in <strong>${100 - R.successRate}%</strong> of scenarios${R.medianDepAge ? `, with the corpus typically depleting around age <strong>${R.medianDepAge}</strong>` : ''}. Immediate corrective action — higher SIP, delayed retirement, or reduced spending — is necessary.`;
 
   const fmtL = (v) => { if (v == null || isNaN(v)) return '—'; return Math.abs(v) >= 100 ? '₹' + (v / 100).toFixed(2) + ' Cr' : '₹' + v.toFixed(1) + ' L'; };
-  const fmtK = (v) => '₹' + Math.round(v / 1000) + 'K';
+  const fmtK = (v) => {
+    if (v == null || isNaN(v)) return '—';
+    const abs = Math.abs(v);
+    if (abs >= 10000000) return '₹' + (v / 10000000).toFixed(2) + ' Cr';
+    if (abs >= 100000)   return '₹' + (v / 100000).toFixed(1) + ' L';
+    if (abs >= 1000)     return '₹' + Math.round(v / 1000) + 'K';
+    return '₹' + Math.round(v);
+  };
   const td = (v, c, bold) => `<td style="padding:7px 12px;border-bottom:1px solid ${GR20};font-family:DM Mono,monospace;text-align:right;${bold ? 'font-weight:700;' : ''}${c ? 'color:' + c + ';' : ''}">${v}</td>`;
   const th = (v, align) => `<th style="padding:8px 12px;text-align:${align || 'right'};font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${LAV};border-bottom:2px solid ${GR20};white-space:nowrap;background:${GR10}">${v}</th>`;
   const secHd = (n, title, sub) =>
