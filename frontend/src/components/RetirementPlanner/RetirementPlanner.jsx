@@ -365,7 +365,7 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
               <div className="rt-f">
                 <label>No. of simulations</label>
                 <select value={f.sims} onChange={set('sims')}>
-                  <option>500</option><option>1000</option><option>2000</option><option>5000</option>
+                  <option>500</option><option>1000</option><option>2000</option><option>5000</option><option>10000</option>
                 </select>
               </div>
             </div>
