@@ -32,14 +32,14 @@ function fromIndianStr(str) {
 const INDIAN_FMT_FIELDS = new Set([
   'corpus', 'epf', 'nps', 'onetime',   // lump sum amounts
   'sip', 'epfm', 'npsm',               // monthly contributions
-  'expenses', 'health', 'otherinc',    // monthly income/expense fields
+  'expenses', 'otherinc',    // monthly income/expense fields
 ]);
 
 const DEFAULTS = {
   name: '', age: 35, retage: 60, lifeexp: 90, spouse: '', rm: 'BugleRock Capital',
   corpus: 5000000, sip: 50000, stepup: 8, sipuntil: 60,
   epf: 1500000, epfm: 12000, epfr: 8.1, nps: 800000, npsm: 10000, npsr: 10, annrate: 6,
-  expenses: 100000, replace: 80, health: 10000, healthinfl: 10,
+  expenses: 100000, replace: 80,
   otherinc: 0, otherindexed: '1', onetime: 0, tax: 10,
   preret: 12, prevol: 14, postret: 8, postvol: 7, inflation: 6, sims: 5000,
 };
@@ -79,6 +79,22 @@ export default function RetirementPlanner() {
   const [result, setResult] = useState(() => lsGet(LS_RESULT, null));
   const [running, setRunning] = useState(false);
 
+  // Clear any stale health/healthinfl values from localStorage (removed fields)
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(LS_FORM);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if ('health' in parsed || 'healthinfl' in parsed) {
+          delete parsed.health;
+          delete parsed.healthinfl;
+          localStorage.setItem(LS_FORM, JSON.stringify(parsed));
+          setF(prev => { const next = { ...prev }; delete next.health; delete next.healthinfl; return next; });
+        }
+      }
+    } catch {}
+  }, []);
+
   // Persist every change
   useEffect(() => { lsSet(LS_FORM,   f);     }, [f]);
   useEffect(() => { lsSet(LS_GOALS,  goals);  }, [goals]);
@@ -98,7 +114,6 @@ export default function RetirementPlanner() {
     epf: num('epf') / 100000, epfM: num('epfm'), epfR: num('epfr') / 100,
     nps: num('nps') / 100000, npsM: num('npsm'), npsR: num('npsr') / 100, annRate: num('annrate') / 100,
     expM: num('expenses'), replace: num('replace') / 100,
-    healthM: num('health'), healthInfl: num('healthinfl') / 100,
     otherIncM: num('otherinc'), otherIndexed: f.otherindexed === '1',
     oneTime: num('onetime') / 100000,  // absolute ₹ → Lakhs for engine
     tax: num('tax') / 100,

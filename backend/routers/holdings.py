@@ -490,6 +490,136 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None):
         db.close()
 
 
+@router.get("/debt-composition")
+def get_debt_composition(
+    isins: str = Query(..., description="Comma-separated fund ISINs"),
+    weights: str = Query(..., description="Comma-separated portfolio weights (0-100), aligned with isins"),
+    bond_pcts: str = Query(..., description="Comma-separated bond_pct per fund (0-100)"),
+):
+    """
+    Compute weighted debt portfolio composition in a single DB query.
+    Returns credit quality breakdown and debt sector breakdown,
+    rebased to 100% of the debt sleeve.
+    """
+    from models.database import SessionLocal, FundHolding
+    from sqlalchemy import text
+
+    isin_list    = [x.strip() for x in isins.split(",")    if x.strip()]
+    weight_list  = [float(x.strip()) for x in weights.split(",")  if x.strip()]
+    bond_pct_list= [float(x.strip()) for x in bond_pcts.split(",") if x.strip()]
+
+    if not (len(isin_list) == len(weight_list) == len(bond_pct_list)):
+        from fastapi import HTTPException
+        raise HTTPException(400, "isins, weights and bond_pcts must have same length")
+
+    # Effective debt weight per fund
+    weight_map   = dict(zip(isin_list, weight_list))
+    bond_pct_map = dict(zip(isin_list, bond_pct_list))
+
+    db = SessionLocal()
+    try:
+        # Single query — fetch all bond holdings for all funds at once
+        rows = db.query(FundHolding).filter(
+            FundHolding.isin.in_(isin_list),
+            FundHolding.holding_type.in_(["B", "BT", "BD", "DS", "CR", "CA"]),
+            FundHolding.weighting != None,
+            FundHolding.weighting > 0,
+        ).all()
+
+        # Credit quality bucket mapping
+        CQ_MAP = {
+            'sovereign': 'AAA / Equiv', 'crisil aaa': 'AAA / Equiv', 'icra aaa': 'AAA / Equiv',
+            'care aaa': 'AAA / Equiv', 'ind aaa': 'AAA / Equiv',
+            'crisil aa+': 'AA', 'crisil aa': 'AA', 'crisil aa-': 'AA',
+            'icra aa+': 'AA', 'icra aa': 'AA', 'icra aa-': 'AA',
+            'care aa+': 'AA', 'care aa': 'AA', 'care aa-': 'AA',
+            'ind aa+': 'AA', 'ind aa': 'AA', 'ind aa-': 'AA',
+            'crisil a+': 'A', 'crisil a': 'A', 'crisil a-': 'A',
+            'icra a+': 'A', 'icra a': 'A', 'icra a-': 'A',
+            'care a+': 'A', 'care a': 'A', 'care a-': 'A',
+            'crisil bbb': 'BBB', 'icra bbb': 'BBB', 'care bbb': 'BBB',
+            'crisil bb': 'BB', 'icra bb': 'BB',
+            'crisil b': 'B', 'icra b': 'B',
+        }
+        CQ_ORDER  = ['AAA / Equiv', 'AA', 'A', 'BBB', 'BB', 'B', 'Below B', 'Not Rated']
+        CQ_SCORE  = {'AAA / Equiv': 7, 'AA': 6, 'A': 5, 'BBB': 4, 'BB': 3, 'B': 2, 'Below B': 1, 'Not Rated': 0}
+        TYPE_SEC  = {
+            'BT': 'Government', 'BD': 'Government', 'DS': 'Government',
+            'B':  'Corporate',
+            'CA': 'Cash & Equivalents', 'CR': 'Cash & Equivalents',
+        }
+        SEC_ORDER = ['Government', 'Corporate', 'Cash & Equivalents', 'Municipal', 'Securitized', 'Derivative', 'Other']
+
+        # Group rows by fund isin
+        from collections import defaultdict
+        by_fund = defaultdict(list)
+        for r in rows:
+            by_fund[r.isin].append(r)
+
+        cq_totals  = defaultdict(float)
+        sec_totals = defaultdict(float)
+        total_debt_w   = 0.0
+        avg_cq_num     = 0.0
+
+        for isin in isin_list:
+            fund_w   = weight_map.get(isin, 0) / 100.0
+            bond_pct = bond_pct_map.get(isin, 0) / 100.0
+            eff_w    = fund_w * bond_pct          # effective debt weight (0–1)
+            if eff_w <= 0:
+                continue
+
+            fund_rows = by_fund.get(isin, [])
+            if not fund_rows:
+                continue
+
+            holding_total = sum(float(r.weighting) for r in fund_rows) or 1.0
+
+            for r in fund_rows:
+                h_w = (float(r.weighting) / holding_total) * eff_w * 100  # scaled weight
+
+                # Credit quality
+                cq_raw  = (r.indian_credit_quality or '').lower().strip()
+                bucket  = CQ_MAP.get(cq_raw, 'Not Rated')
+                cq_totals[bucket]  += h_w
+                avg_cq_num         += CQ_SCORE.get(bucket, 0) * h_w
+
+                # Debt sector
+                sector = TYPE_SEC.get(r.holding_type, 'Other')
+                sec_totals[sector] += h_w
+
+            total_debt_w += eff_w * 100
+
+        if total_debt_w <= 0:
+            return {"cq_breakdown": [], "sec_breakdown": [], "avg_credit_quality": None, "debt_weight_pct": 0}
+
+        # Normalise to debt sleeve %
+        cq_breakdown  = [
+            {"label": b, "pct": round(cq_totals.get(b, 0) / total_debt_w * 100, 1)}
+            for b in CQ_ORDER
+        ]
+        sec_breakdown = [
+            {"label": s, "pct": round(sec_totals.get(s, 0) / total_debt_w * 100, 1)}
+            for s in SEC_ORDER
+        ]
+
+        # Average credit quality label
+        avg_score = avg_cq_num / total_debt_w
+        avg_label = ('AAA' if avg_score >= 6.5 else 'AA+' if avg_score >= 5.5
+                     else 'AA' if avg_score >= 5 else 'AA-' if avg_score >= 4.5
+                     else 'A' if avg_score >= 4 else 'BBB' if avg_score >= 3
+                     else 'BB' if avg_score >= 2 else 'B')
+
+        return {
+            "cq_breakdown":      cq_breakdown,
+            "sec_breakdown":     sec_breakdown,
+            "avg_credit_quality": avg_label,
+            "debt_weight_pct":   round(total_debt_w, 1),
+        }
+
+    finally:
+        db.close()
+
+
 @router.get("/portfolio-lookthrough")
 def get_portfolio_lookthrough(
     isins: str = Query(..., description="Comma-separated fund ISINs"),

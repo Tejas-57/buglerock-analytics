@@ -52,7 +52,6 @@ export function rtSimulate(IN, NSIM) {
   const npsAnnuityIncome = npsAtRet * 0.4 * IN.annRate; // ₹L/yr fixed
 
   const annualExpToday = (IN.expM * 12 * IN.replace) / 100000;
-  const healthExpToday = (IN.healthM * 12) / 100000;
   const otherIncToday = (IN.otherIncM * 12) / 100000;
 
   const paths = [], depletions = [];
@@ -73,9 +72,8 @@ export function rtSimulate(IN, NSIM) {
       if (goalsByYear[y]) c -= goalsByYear[y];
       if (isRet) {
         const baseNeed = annualExpToday * Math.pow(1 + IN.infl, y);
-        const healthNeed = healthExpToday * Math.pow(1 + IN.healthInfl, y);
         const otherInc = IN.otherIndexed ? otherIncToday * Math.pow(1 + IN.infl, y) : otherIncToday;
-        const netNeed = Math.max(0, baseNeed + healthNeed - otherInc - npsAnnuityIncome);
+        const netNeed = Math.max(0, baseNeed - otherInc - npsAnnuityIncome);
         const grossWd = netNeed / (1 - IN.tax);
         c -= grossWd;
       }
@@ -106,7 +104,7 @@ export function rtSimulate(IN, NSIM) {
     medianDepAge: deps.length ? deps[Math.floor(deps.length / 2)] : null,
     epfAtRet, npsAtRet, npsLump, npsAnnuityIncome,
     goalsByYear, lumpsByYear,
-    annualExpToday, healthExpToday, otherIncToday,
+    annualExpToday, otherIncToday,
     years, yearsToRet,
   };
 }
@@ -120,15 +118,13 @@ export function rtRunSimulation(IN, NSIM) {
   const realR = (1 + IN.postMu) / (1 + IN.infl) - 1;
   const n = IN.lifeExp - IN.retAge;
   let firstNeed = R.annualExpToday * Math.pow(1 + IN.infl, R.yearsToRet)
-    + R.healthExpToday * Math.pow(1 + IN.healthInfl, R.yearsToRet)
     - (IN.otherIndexed ? R.otherIncToday * Math.pow(1 + IN.infl, R.yearsToRet) : R.otherIncToday)
     - R.npsAnnuityIncome;
   firstNeed = Math.max(0, firstNeed) / (1 - IN.tax);
   R.corpusNeeded = Math.abs(realR) < 0.0001
     ? firstNeed * n
     : firstNeed * (1 - Math.pow(1 + realR, -n)) / realR * (1 + realR);
-  R.incomeAtRet = (R.annualExpToday * Math.pow(1 + IN.infl, R.yearsToRet)
-    + R.healthExpToday * Math.pow(1 + IN.healthInfl, R.yearsToRet)) / 12 * 100000;
+  R.incomeAtRet = (R.annualExpToday * Math.pow(1 + IN.infl, R.yearsToRet)) / 12 * 100000;
 
   // Sensitivity scenarios (1000 sims each)
   const variant = (overrides) => {

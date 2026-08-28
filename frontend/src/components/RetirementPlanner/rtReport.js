@@ -118,15 +118,13 @@ export function rtBuildFullSections(R) {
   // ── CHART 3: Income waterfall ──
   const firstYr = R.yearsToRet;
   const baseNeed1 = R.annualExpToday * Math.pow(1 + IN.infl, firstYr) / 12 * 100000;
-  const hlthNeed1 = R.healthExpToday * Math.pow(1 + IN.healthInfl, firstYr) / 12 * 100000;
   const oi1 = (IN.otherIndexed ? R.otherIncToday * Math.pow(1 + IN.infl, firstYr) : R.otherIncToday) / 12 * 100000;
   const npsAnn1 = R.npsAnnuityIncome / 12 * 100000;
-  const grossWd1 = Math.max(0, baseNeed1 + hlthNeed1 - oi1 - npsAnn1);
+  const grossWd1 = Math.max(0, baseNeed1 - oi1 - npsAnn1);
   const taxAmt1 = grossWd1 * IN.tax;
   const netWd1 = grossWd1 - taxAmt1;
   const srcItems = [
     { l: 'Living expenses', v: baseNeed1, neg: true },
-    { l: 'Healthcare', v: hlthNeed1, neg: true },
     { l: 'Less: Pension/rental income', v: oi1, neg: false },
     { l: 'Less: NPS annuity', v: npsAnn1, neg: false },
     { l: 'Gross withdrawal', v: grossWd1, neg: true, bold: true },
@@ -193,9 +191,8 @@ export function rtBuildFullSections(R) {
     let wd2 = 0;
     if (isRet2) {
       const bn2 = R.annualExpToday * Math.pow(1 + IN.infl, y);
-      const hn2 = R.healthExpToday * Math.pow(1 + IN.healthInfl, y);
       const oi2 = IN.otherIndexed ? R.otherIncToday * Math.pow(1 + IN.infl, y) : R.otherIncToday;
-      wd2 = Math.max(0, bn2 + hn2 - oi2 - R.npsAnnuityIncome) / (1 - IN.tax);
+      wd2 = Math.max(0, bn2 - oi2 - R.npsAnnuityIncome) / (1 - IN.tax);
     }
     const isRet1 = (ca === IN.retAge);
     const rowStyle = isRet1 ? 'background:#F7EEF3;' : ca % 5 === 0 ? 'background:' + GR10 + ';' : '';
@@ -238,7 +235,6 @@ export function rtBuildFullSections(R) {
     ['NPS corpus', fmtL(IN.nps) + ' · ₹' + IN.npsM.toLocaleString('en-IN') + '/mo @ ' + (IN.npsR * 100).toFixed(1) + '%'],
     ['NPS annuity rate', (IN.annRate * 100).toFixed(1) + '% on 40% of NPS corpus'],
     ['Monthly expenses', '₹' + IN.expM.toLocaleString('en-IN') + ' · replacement ratio ' + (IN.replace * 100).toFixed(0) + '%'],
-    ['Healthcare', '₹' + IN.healthM.toLocaleString('en-IN') + '/mo · inflation ' + (IN.healthInfl * 100).toFixed(0) + '%'],
     ['Other income', IN.otherIncM > 0 ? '₹' + IN.otherIncM.toLocaleString('en-IN') + '/mo (' + (IN.otherIndexed ? 'indexed' : 'fixed') + ')' : 'None'],
     ['Tax on withdrawals', (IN.tax * 100).toFixed(0) + '%'],
     ['Pre-ret return', (IN.preMu * 100).toFixed(1) + '% ± ' + (IN.preSig * 100).toFixed(0) + '% (volatility)'],
@@ -283,7 +279,7 @@ export function rtBuildFullSections(R) {
           + `<td style="padding:8px 14px;border-bottom:1px solid ${s.hilite ? 'rgba(255,255,255,.1)' : GR20};text-align:right;font-family:DM Mono,monospace;font-weight:${s.bold ? '700' : '400'};${fg}">${fmtK(s.v)}/mo</td></tr>`;
       }).join('')
       + `</tbody></table>`
-      + `<div style="padding:10px 14px;font-size:10px;color:${GR60};background:${GR10};border-top:1px solid ${GR20}">Based on ${Math.round(IN.replace * 100)}% replacement ratio. Healthcare inflated at ${(IN.healthInfl * 100).toFixed(0)}% annually. All figures at age ${IN.retAge}.</div>`)
+      + `<div style="padding:10px 14px;font-size:10px;color:${GR60};background:${GR10};border-top:1px solid ${GR20}">Based on ${Math.round(IN.replace * 100)}% replacement ratio. All figures at age ${IN.retAge}.</div>`)
     + card(cardHd(`Retirement corpus sources at age ${IN.retAge}`)
       + `<table style="width:100%;border-collapse:collapse"><tbody>`
       + [
@@ -332,7 +328,7 @@ export function rtBuildFullSections(R) {
       + `<strong>Monte Carlo simulation:</strong> ${R.NSIM} independent paths. Each year's return is drawn from a normal distribution with the stated mean and standard deviation — pre-retirement ${(IN.preMu * 100).toFixed(1)}% ± ${(IN.preSig * 100).toFixed(0)}%, post-retirement ${(IN.postMu * 100).toFixed(1)}% ± ${(IN.postSig * 100).toFixed(0)}%. `
       + `<br><strong>EPF/PPF &amp; NPS:</strong> Accumulated deterministically at stated rates and merged into the investable corpus at retirement (EPF: 100%, NPS: 60% lump + 40% annuity at ${(IN.annRate * 100).toFixed(1)}%). `
       + `<br><strong>Goals:</strong> Amounts stated in today's value, compounded at general inflation (${(IN.infl * 100).toFixed(1)}%) to the goal year and deducted as a lump sum in that year. `
-      + `<br><strong>Withdrawals:</strong> Annual post-tax income need (living expenses + healthcare − other income − NPS annuity) grossed up by ${(IN.tax * 100).toFixed(0)}% for tax. `
+      + `<br><strong>Withdrawals:</strong> Annual post-tax income need (living expenses − other income − NPS annuity) grossed up by ${(IN.tax * 100).toFixed(0)}% for tax. `
       + `<br><strong>Sensitivity analysis:</strong> Each scenario re-runs 250 Monte Carlo paths changing one variable from the base plan. `
       + `<br><br>This analysis is prepared by BugleRock Capital for informational purposes. It is based on the stated assumptions and is not a guarantee or promise of future outcomes. Actual results will differ. Mutual fund investments are subject to market risk. Please consult your adviser before making investment decisions. © BugleRock Capital ${CY}.`
       + `</div></div>`)
