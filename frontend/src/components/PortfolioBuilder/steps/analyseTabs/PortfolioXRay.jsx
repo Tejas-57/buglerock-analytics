@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
-
 /**
  * Portfolio X-Ray — comprehensive single-page structural tear sheet.
  * 7 sections in order (Overview → Performance → Risk → Diversification →
  * Style → Stress → Compliance). Every metric appears exactly once.
  * Read-only report. Interactive tools live in Sensitivity / What-If tabs.
  */
-
 const CATEGORY_CAP_NORMS = {
   'Large Cap':       { lc: 85, mc: 12, sc: 3 },
   'Large & Mid Cap': { lc: 55, mc: 40, sc: 5 },
@@ -20,7 +18,6 @@ const CATEGORY_CAP_NORMS = {
   'Contra':          { lc: 60, mc: 25, sc: 15 },
   'Dividend Yield':  { lc: 65, mc: 25, sc: 10 },
 };
-
 const STRESS_SCENARIOS = [
   { label: '2008 Global Financial Crisis', marketFall: -52 },
   { label: '2020 COVID crash', marketFall: -38 },
@@ -29,10 +26,8 @@ const STRESS_SCENARIOS = [
   { label: '2013 Taper tantrum', marketFall: -14 },
   { label: '2022 rate hike cycle', marketFall: -12 },
 ];
-
 const f2 = (v) => v == null || isNaN(v) ? '—' : v.toFixed(2);
 const fp = (v) => v == null || isNaN(v) ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
-
 function computeAdvancedRisk(B, funds, snapshots, weights) {
   const std3y = B.std_dev_3y;
   if (std3y == null) return null;
@@ -55,7 +50,6 @@ function computeAdvancedRisk(B, funds, snapshots, weights) {
   const tailRiskLabel = kurt > 0.8 ? 'Elevated tail risk' : kurt > 0.3 ? 'Moderate tail risk' : 'Muted tails';
   return { maxDD, ulcer, recoveryMonths, cvar95, es99, worst3m, worst6m, worst1y, probLoss, skew, kurt, tailRiskLabel };
 }
-
 function normCdf(x) {
   const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741,
     a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
@@ -65,14 +59,12 @@ function normCdf(x) {
   const y = 1.0 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
   return 0.5 * (1 + sign * y);
 }
-
 const SECTOR_COLORS = {
   'Financial Services': '#912F63', 'Technology': '#3E3452', 'Consumer Cyclical': '#C46985',
   'Basic Materials': '#6D5479', 'Industrials': '#A795AE', 'Consumer Defensive': '#D97706',
   'Healthcare': '#1A7A52', 'Energy': '#B71C1C', 'Communication Services': '#4A5D8C',
   'Real Estate': '#8E5A3E', 'Utilities': '#616161', 'Unclassified': '#A2A0A0',
 };
-
 const RANK_STYLE = {
   R1: { bg:'rgba(16,185,129,0.12)', color:'#059669', border:'rgba(16,185,129,0.3)' },
   R2: { bg:'rgba(16,185,129,0.12)', color:'#059669', border:'rgba(16,185,129,0.3)' },
@@ -80,14 +72,12 @@ const RANK_STYLE = {
   R4: { bg:'rgba(239,68,68,0.08)',  color:'#EF4444', border:'rgba(239,68,68,0.2)'  },
   R5: { bg:'rgba(239,68,68,0.08)',  color:'#EF4444', border:'rgba(239,68,68,0.2)'  },
 };
-
 export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, benchmarks = [], bmRets, ips, overlapData, histVar, histVarLoading, stressData, bmStress }) {
   const [lookthrough, setLookthrough] = useState(null);
   const [ltLoading, setLtLoading] = useState(false);
   const [ltError, setLtError] = useState(null);
   const [debtComposition, setDebtComposition] = useState(null);
   const [debtLoading, setDebtLoading] = useState(false);
-
   // Lookthrough — all funds included (equity + debt)
   useEffect(() => {
     const allFunds = funds.filter((f) => (weights[f.isin] || 0) > 0);
@@ -103,7 +93,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
       .catch((e) => setLtError(typeof e === 'string' ? e : e.message))
       .finally(() => setLtLoading(false));
   }, [funds.map((f) => f.isin).join(','), JSON.stringify(weights)]);
-
   // Debt composition — single API call
   useEffect(() => {
     const API = process.env.REACT_APP_API_URL || '';
@@ -116,7 +105,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
       return isDebt || isHybridWithDebt;
     });
     if (debtFunds.length === 0) { setDebtComposition(null); return; }
-
     const isins    = debtFunds.map(f => f.isin).join(',');
     const weights_ = debtFunds.map(f => weights[f.isin] || 0).join(',');
     const bondPcts = debtFunds.map(f => {
@@ -124,7 +112,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
       const ac = (s.asset_class || f.asset_class || '').toLowerCase();
       return ac === 'debt' || ac.includes('debt') || ac.includes('bond') ? 100 : parseFloat(s.bond_pct) || 0;
     }).join(',');
-
     setDebtLoading(true);
     fetch(`${API}/api/holdings/debt-composition?isins=${isins}&weights=${weights_}&bond_pcts=${bondPcts}`)
       .then(r => r.ok ? r.json() : Promise.reject('fetch failed'))
@@ -139,15 +126,12 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
       })
       .catch(() => { setDebtComposition(null); setDebtLoading(false); });
   }, [funds.map(f => f.isin).join(','), JSON.stringify(weights), Object.keys(snapshots).length]);
-
   const eqShare = ((B.large_cap || 0) + (B.mid_cap || 0) + (B.small_cap || 0));
   const adv = computeAdvancedRisk(B, funds, snapshots, weights);
   const sortedFunds = [...funds].sort((a, b) => (weights[b.isin] || 0) - (weights[a.isin] || 0));
-
   const overlapPairs = overlapData?.pairwise_matrix ? Object.values(overlapData.pairwise_matrix) : [];
   const avgOverlap = overlapPairs.length ? overlapPairs.reduce((s, p) => s + p.overlap_pct, 0) / overlapPairs.length : null;
   const highestPair = overlapPairs.length ? overlapPairs.reduce((best, p) => p.overlap_pct > (best?.overlap_pct || 0) ? p : best, null) : null;
-
   const driftRows = funds.map((f) => {
     const snap = snapshots[f.isin] || {};
     const cat = snap.sub_category || snap.subCategory || f.subCategory || f.category || '';
@@ -158,13 +142,11 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
     const dev = Math.max(Math.abs(lc - norm.lc), Math.abs(mc - norm.mc), Math.abs(sc - norm.sc));
     return { fund: f, cat, dev, flagged: dev >= 20 };
   }).filter(Boolean);
-
   const stressRows = STRESS_SCENARIOS.map((s) => ({
     label: s.label,
     marketFall: s.marketFall,
     portfolioImpact: s.marketFall * (eqShare / 100) * (B.beta_3y || 1),
   }));
-
   const ipsIssues = [];
   if (ips) {
     const nz = (v) => v != null && v !== '' && !isNaN(parseFloat(v)) ? parseFloat(v) : null;
@@ -177,7 +159,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
     if (scMax != null && B.small_cap > scMax) ipsIssues.push(`Small cap (${B.small_cap.toFixed(0)}%) exceeds the IPS limit of ${scMax}%.`);
     if (maxfunds != null && funds.length > maxfunds) ipsIssues.push(`Portfolio has ${funds.length} funds, exceeding the IPS maximum of ${maxfunds}.`);
   }
-
   const bm = bmRets || {};
   let _sec = 0;
   const sn = () => ++_sec;
@@ -186,7 +167,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
   const cyLbls = ['2021', '2022', '2023', '2024', '2025'];
   const cyBeat = cyKeys.filter((k, i) => { const v = B['return_' + k]; const bv = bm[cyBmKeys[i]]; return v != null && bv != null && v >= bv; }).length;
   const cyTotal = cyKeys.filter((k, i) => { const v = B['return_' + k]; const bv = bm[cyBmKeys[i]]; return v != null && bv != null; }).length;
-
   const periods = [
     { k: 'return_1m', l: '1 Month' },
     { k: 'return_3m', l: '3 Months' },
@@ -194,7 +174,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
     { k: 'return_3y', l: '3 Years (annualised)' },
     { k: 'return_5y', l: '5 Years (annualised)' },
   ];
-
   return (
     <div>
       {/* Section 1: Overview */}
@@ -240,7 +219,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
           </table>
         </div>
       </div>
-
       {/* Section 2: Performance */}
       <SectionH n={sn()} title="Performance" sub="Point-to-point returns and year-by-year performance relative to the benchmark." />
       <div className="ptf-card" style={{ marginBottom: 14, padding: '4px 16px' }}>
@@ -275,12 +253,11 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
           <div style={{ fontSize: 10.5, color: 'var(--text-muted)', padding: '6px 0 4px', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>No benchmark set — configure in Client &amp; IPS → Section E.</div>
         )}
       </div>
-
       {/* Section 3: Risk */}
       <SectionH n={sn()} title="Risk metrics" sub="Volatility, risk-adjusted returns, drawdown potential and distribution shape — everything in one place." />
       <div className="ptf-card" style={{ marginBottom: 14, padding: '4px 16px' }}>
         <MetricRow label="Volatility (3Y annualised)" plainDesc="How much the portfolio's value swings around from year to year — higher means bumpier." value={B.std_dev_3y != null ? f2(B.std_dev_3y) + '%' : '—'} />
-        <MetricRow label="Sharpe ratio (3Y)" plainDesc="Return per unit of risk. Above 1.0 is genuinely good; below 0.5 means returns aren't compensating for the risk." value={f2(B.sharpe_ratio_3y)} verdict={B.sharpe_ratio_3y != null ? (B.sharpe_ratio_3y > 0.7 ? 'Strong' : B.sharpe_ratio_3y > 0.4 ? 'Adequate' : 'Weak') : null} verdictColor={B.sharpe_ratio_3y != null ? (B.sharpe_ratio_3y > 0.4 ? 'var(--pos)' : 'var(--neg)') : null} />
+        <MetricRow label="Sharpe ratio (3Y)" plainDesc="Return per unit of risk. Above 1.0 is genuinely good; below 0.5 means returns aren't compensating for the risk." value={f2(B.sharpe_ratio_3y)} />
         <MetricRow label="Sortino ratio (3Y)" plainDesc="Like Sharpe, but only counts the downside swings investors actually dislike." value={f2(B.sortino_ratio_3y)} />
         <MetricRow label="Beta (vs. benchmark)" plainDesc="How much the portfolio moves for every 1% the market moves. 1.0 = moves in step with the market." value={f2(B.beta_3y)} verdict={B.beta_3y != null ? (B.beta_3y < 0.8 ? 'Defensive' : B.beta_3y < 1.1 ? 'Market-like' : 'Aggressive') : null} />
         <MetricRow label="Alpha (3Y, vs. benchmark)" plainDesc="Extra return (or shortfall) after adjusting for risk — the value a manager genuinely added." value={fp(B.alpha_3y)} verdict={B.alpha_3y != null ? (B.alpha_3y > 2 ? 'Outperforming' : B.alpha_3y > 0 ? 'Positive' : 'Lagging') : null} verdictColor={B.alpha_3y != null ? (B.alpha_3y >= 0 ? 'var(--pos)' : 'var(--neg)') : null} />
@@ -303,6 +280,11 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
               return <>
                 <MetricRow label={cvar95Lbl} plainDesc="If a month is bad, how bad on average — more informative than a single cutoff." value={histVarLoading ? 'Loading…' : cvar95Val} />
                 <MetricRow label={es99Lbl} plainDesc="The same idea as CVaR, at a more conservative 99% confidence level." value={histVarLoading ? 'Loading…' : es99Val} />
+                {!histVarLoading && !histVar && (
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic', padding: '4px 0 6px', borderTop: '1px dashed var(--border)', marginTop: 4 }}>
+                    ⚠ Insufficient NAV history for this portfolio — CVaR and ES are estimated using a normal distribution approximation based on blended 3Y volatility. Actual tail losses may differ.
+                  </div>
+                )}
               </>;
             })()}
             <MetricRow label="Probability of loss, per month" plainDesc="Estimated chance of a negative return in any given month." value={adv.probLoss.toFixed(0) + '%'} />
@@ -313,7 +295,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
           <div style={{ padding: '10px 0', color: 'var(--text-muted)', fontSize: 11 }}>Not enough data to estimate drawdown and tail-risk figures.</div>
         )}
       </div>
-
       {/* Section 4: Diversification */}
       <SectionH n={sn()} title="Diversification & concentration" sub="Where the money actually sits once you look through the fund wrappers to the underlying companies." />
       <div className="ptf-card" style={{ marginBottom: 14, padding: '4px 16px' }}>
@@ -324,10 +305,8 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
           <MetricRow label="Effective equity look-through" plainDesc="Total portfolio-level equity exposure after weighting each fund's holdings." value={lookthrough.total_effective_equity_pct.toFixed(1) + '%'} />
         )}
       </div>
-
       {ltLoading && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading portfolio look-through…</div>}
       {ltError && <div style={{ padding: 20, textAlign: 'center', color: 'var(--neg)', fontSize: 12 }}>{ltError}</div>}
-
       {lookthrough && lookthrough.sector_breakdown?.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
           <div className="ptf-card">
@@ -383,7 +362,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
           </div>
         </div>
       )}
-
       {/* Debt portfolio composition */}
       {(debtLoading || debtComposition) && (
         <div style={{ marginBottom: 14 }}>
@@ -442,7 +420,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
           )}
         </div>
       )}
-
       {/* Section 5: Style & mandate — hidden until data available */}
       {false && (
       <>
@@ -477,7 +454,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
       )}
       </>
       )}
-
       {/* Section 6: Stress testing */}
       <SectionH n={sn()} title="Stress testing" sub={stressData ? `Actual portfolio returns during historical stress periods from NAV history.` : `Historical stress scenario analysis.`} />
       <div className="ptf-card" style={{ marginBottom: 14 }}>
@@ -522,7 +498,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
         </div>
         {stressData && <div style={{ padding: '8px 12px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>Returns calculated from actual NAV history. "—" means the fund was not active or NAV data is unavailable for that period.</div>}
       </div>
-
       {/* Section 7: Compliance — hidden until ready */}
       {false && (
       <>
@@ -542,7 +517,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
       )}
       </>
       )}
-
       {/* Footer note */}
       <div style={{ marginTop: 22, fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.6, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
         Every figure above is computed fresh from the current allocation and appears exactly once in this report. For interactive tools — scenario sliders, fund-swap comparisons, correlation matrices — use the Sensitivity and What-If tabs.
@@ -550,7 +524,6 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
     </div>
   );
 }
-
 function SectionH({ n, title, sub }) {
   return (
     <div style={{ margin: '26px 0 12px' }}>
@@ -562,7 +535,6 @@ function SectionH({ n, title, sub }) {
     </div>
   );
 }
-
 function MetricRow({ label, plainDesc, value, verdict, verdictColor }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '9px 0', borderBottom: '1px solid var(--border)' }}>
