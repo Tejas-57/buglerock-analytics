@@ -393,16 +393,15 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
   const bmR = benchmark?.returns || {};
 
   const retRows = [
-    ['1 Month',  r['1m'],  bmR['1m']],
-    ['3 Months', r['3m'],  bmR['3m']],
-    ['6 Months', r['6m'],  bmR['6m']],
-    ['1 Year',   r['1y'],  bmR['1y']],
-    ['2 Year',   r['2y'],  bmR['2y']],
-    ['3Y CAGR',  r['3y'],  bmR['3y']],
-    ['5Y CAGR',  r['5y'],  bmR['5y']],
-    ['7Y CAGR',  r['7y'],  bmR['7y']],
-    ['10Y CAGR', r['10y'], bmR['10y']],
-    ['YTD',      r['ytd'], bmR['ytd']],
+    ['1M',    r['1m'],  bmR['1m']],
+    ['3M',    r['3m'],  bmR['3m']],
+    ['6M',    r['6m'],  bmR['6m']],
+    ['1Y',    r['1y'],  bmR['1y']],
+    ['3Y',    r['3y'],  bmR['3y']],
+    ['5Y',    r['5y'],  bmR['5y']],
+    ['7Y',    r['7y'],  bmR['7y']],
+    ['10Y',   r['10y'], bmR['10y']],
+    ['YTD',   r['ytd'], bmR['ytd']],
   ].filter(([, fv]) => fv != null && fv !== '-');
 
   const bmRisk = benchmark?.risk || {};
@@ -564,29 +563,50 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
           </div>
         </Card>
 
-        {/* ③ RETURN TABLE */}
+        {/* ③ RETURN TABLE — transposed: periods as columns, 3 rows */}
         <Card title="All return periods" subtitle={bmName ? `vs ${bmName}` : null}>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ background: 'var(--bg-secondary)' }}>
-                  {['Period','Fund return', bmName&&'Benchmark', bmName&&'Outperformance'].filter(Boolean).map(h => (
-                    <th key={h} style={{ padding: '8px 12px', textAlign: h==='Period'?'left':'right', fontSize: 10, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                  </th>
+                  {retRows.map(([period]) => (
+                    <th key={period} style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{period}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {retRows.map(([period, fv, bv]) => {
-                  const diff = bv!=null&&bv!=='-' ? (parseFloat(fv)-parseFloat(bv)).toFixed(2) : null;
-                  return (
-                    <tr key={period} style={{ borderBottom: '1px solid var(--bg-secondary)' }}>
-                      <td style={{ padding: '9px 12px', color: 'var(--text-muted)' }}>{period}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 500, color: col(fv) }}>{pct(fv)}</td>
-                      {bmName && <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{bv!=null&&bv!=='-'?pct(bv):'—'}</td>}
-                      {bmName && <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: diff!=null?col(diff):'var(--text-muted)' }}>{diff!=null?(parseFloat(diff)>=0?'+':'')+diff+'%':'—'}</td>}
-                    </tr>
-                  );
-                })}
+                {/* Row 1: Fund return */}
+                <tr style={{ borderBottom: '1px solid var(--bg-secondary)' }}>
+                  <td style={{ padding: '9px 12px', color: 'var(--text-muted)', fontSize: 10, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Fund return</td>
+                  {retRows.map(([period, fv]) => (
+                    <td key={period} style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 500, color: col(fv) }}>{pct(fv)}</td>
+                  ))}
+                </tr>
+                {/* Row 2: Benchmark — only if benchmark set */}
+                {bmName && (
+                  <tr style={{ borderBottom: '1px solid var(--bg-secondary)' }}>
+                    <td style={{ padding: '9px 12px', color: 'var(--text-muted)', fontSize: 10, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Benchmark</td>
+                    {retRows.map(([period, , bv]) => (
+                      <td key={period} style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{bv!=null&&bv!=='-'?pct(bv):'—'}</td>
+                    ))}
+                  </tr>
+                )}
+                {/* Row 3: Outperformance — only if benchmark set */}
+                {bmName && (
+                  <tr>
+                    <td style={{ padding: '9px 12px', color: 'var(--text-muted)', fontSize: 10, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Outperformance</td>
+                    {retRows.map(([period, fv, bv]) => {
+                      const diff = bv!=null&&bv!=='-' ? (parseFloat(fv)-parseFloat(bv)).toFixed(2) : null;
+                      return (
+                        <td key={period} style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: diff!=null?col(diff):'var(--text-muted)' }}>
+                          {diff!=null?(parseFloat(diff)>=0?'+':'')+diff+'%':'—'}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
