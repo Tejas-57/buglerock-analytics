@@ -1586,6 +1586,18 @@ def _build_portfolio(model_key, all_funds, db=None):
         tw = sum(w for w,_ in vals)
         return round(sum(w*v for w,v in vals)/tw, 2) if tw else None
 
+    def wavg_exclude_precious(key):
+        """Weighted average excluding Precious Metals funds (gold/silver).
+        Their down_capture values are invalid (-300+) as they benchmark differently."""
+        vals = [(f["weight"], _sf(f.get(key))) for f in result
+                if _s(f.get(key)) is not None
+                and f.get("asset_class", "") != "Precious Metals"
+                and "gold" not in (f.get("category") or "").lower()
+                and "silver" not in (f.get("category") or "").lower()]
+        if not vals: return None
+        tw = sum(w for w,_ in vals)
+        return round(sum(w*v for w,v in vals)/tw, 2) if tw else None
+
     def wavg_coverage(key):
         """Returns % of total portfolio weight that contributed to this metric."""
         total_w = sum(f["weight"] for f in result)
@@ -1669,7 +1681,7 @@ def _build_portfolio(model_key, all_funds, db=None):
             "alpha_3y":       wavg("alpha_3y"),
             "beta_3y":        wavg("beta_3y"),
             "up_capture_3y":  wavg("up_capture_3y"),
-            "down_capture_3y": wavg("down_capture_3y"),
+            "down_capture_3y": wavg_exclude_precious("down_capture_3y"),
             "std_dev_3y":     wavg("std_dev_3y"),
             "std_dev_5y":     wavg("std_dev_5y"),
             "expense_ratio":  wavg("expense_ratio"),
