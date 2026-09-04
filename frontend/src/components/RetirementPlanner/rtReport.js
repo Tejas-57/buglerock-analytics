@@ -129,20 +129,21 @@ export function rtBuildFullSections(R) {
     + `</div>`;
 
   // ── CHART 3: Income waterfall ──
+  // Correct flow: lifestyle cost → less offsets → net need before tax → gross-up for tax → gross portfolio withdrawal
   const firstYr = R.yearsToRet;
-  const baseNeed1 = R.annualExpToday * Math.pow(1 + IN.infl, firstYr) / 12 * 100000;
-  const oi1 = (IN.otherIndexed ? R.otherIncToday * Math.pow(1 + IN.infl, firstYr) : R.otherIncToday) / 12 * 100000;
-  const npsAnn1 = R.npsAnnuityIncome / 12 * 100000;
-  const grossWd1 = Math.max(0, baseNeed1 - oi1 - npsAnn1);
-  const taxAmt1 = grossWd1 * IN.tax;
-  const netWd1 = grossWd1 - taxAmt1;
+  const baseNeed1 = R.annualExpToday * Math.pow(1 + IN.infl, firstYr) / 12 * 100000; // ₹/mo lifestyle at retirement
+  const oi1      = (IN.otherIndexed ? R.otherIncToday * Math.pow(1 + IN.infl, firstYr) : R.otherIncToday) / 12 * 100000;
+  const npsAnn1  = (R.npsAnnualAnnuity || 0) * 100000 / 12;
+  const netBeforeTax1 = Math.max(0, baseNeed1 - oi1 - npsAnn1); // net need after offsets, before tax gross-up
+  const taxGrossUp1   = IN.tax > 0 ? netBeforeTax1 * IN.tax / (1 - IN.tax) : 0; // additional amount needed to cover tax
+  const grossWd1      = netBeforeTax1 + taxGrossUp1; // what actually comes out of the portfolio
   const srcItems = [
-    { l: 'Living expenses', v: baseNeed1, neg: true },
-    { l: 'Less: Pension/rental income', v: oi1, neg: false },
-    { l: 'Less: NPS annuity', v: npsAnn1, neg: false },
-    { l: 'Gross withdrawal', v: grossWd1, neg: true, bold: true },
-    { l: `Less: Tax (${Math.round(IN.tax * 100)}%)`, v: taxAmt1, neg: true },
-    { l: 'Net monthly income needed', v: netWd1, neg: true, bold: true, hilite: true },
+    { l: 'Living expenses at retirement',                        v: baseNeed1,      pos: false },
+    ...(oi1      > 0 ? [{ l: 'Less: Pension / rental income',   v: oi1,            pos: true  }] : []),
+    ...(npsAnn1  > 0 ? [{ l: 'Less: NPS annuity',               v: npsAnn1,        pos: true  }] : []),
+    { l: 'Net need before tax',                                  v: netBeforeTax1,  pos: false, bold: true },
+    ...(taxGrossUp1 > 0 ? [{ l: `Tax gross-up (${Math.round(IN.tax * 100)}% — amount withheld)`, v: taxGrossUp1, pos: false }] : []),
+    { l: 'Gross portfolio withdrawal required',                  v: grossWd1,       pos: false, bold: true, hilite: true },
   ];
 
   // ── Percentile table ──
@@ -221,7 +222,7 @@ export function rtBuildFullSections(R) {
     if (isRet2) {
       const bn2 = R.annualExpToday * Math.pow(1 + IN.infl, y);
       const oi2 = IN.otherIndexed ? R.otherIncToday * Math.pow(1 + IN.infl, y) : R.otherIncToday;
-      wd2 = Math.max(0, bn2 - oi2 - R.npsAnnuityIncome) / (1 - IN.tax);
+      wd2 = Math.max(0, bn2 - oi2 - R.npsAnnualAnnuity || 0) / (1 - IN.tax);
     }
     const isRet1 = (ca === IN.retAge);
     const rowStyle = isRet1 ? 'background:#F7EEF3;' : ca % 5 === 0 ? 'background:' + GR10 + ';' : '';
@@ -268,7 +269,7 @@ export function rtBuildFullSections(R) {
     ['Tax on withdrawals', (IN.tax * 100).toFixed(0) + '%'],
     ['Pre-ret return', (IN.preMu * 100).toFixed(1) + '% ± ' + (IN.preSig * 100).toFixed(0) + '% (volatility)'],
     ['Post-ret return', (IN.postMu * 100).toFixed(1) + '% ± ' + (IN.postSig * 100).toFixed(0) + '% (volatility)'],
-    ...(IN.lateRMu != null ? [['Late-ret return (75+)', (IN.lateRMu * 100).toFixed(1) + '% ± ' + (IN.lateRSig * 100).toFixed(0) + '% (glide path)']] : []),
+    ...(IN.lateMu != null ? [['Late-ret return (75+)', (IN.lateMu * 100).toFixed(1) + '% ± ' + (IN.lateSig * 100).toFixed(0) + '% (glide path)']] : []),
     ['Inflation', (IN.infl * 100).toFixed(1) + '%' + (IN.inflUnc ? ' ± ' + (IN.inflUnc * 100).toFixed(1) + '% uncertainty per simulation' : '')],
     ...(IN.withdrawalStrategy === 'guardrail' ? [['Withdrawal strategy', `Guardrail — cut ${IN.guardrailCut}% if portfolio drops >${IN.guardrailTrigger}% below target`]] : [['Withdrawal strategy', 'Fixed real withdrawal']]),
     ['Simulations', R.NSIM + ' Monte Carlo paths'],
@@ -276,7 +277,237 @@ export function rtBuildFullSections(R) {
     `<tr><td style="padding:7px 14px;border-bottom:1px solid ${GR20};font-size:11.5px;font-weight:500;color:${GR80};width:200px">${r[0]}</td>`
     + `<td style="padding:7px 14px;border-bottom:1px solid ${GR20};font-size:11.5px;color:${GR60}">${r[1]}</td></tr>`).join('');
 
-  const sectionsHtml = ''
+  // ── Bug fixes: correct field names ──
+  // npsAnnuityIncome → npsAnnualAnnuity  |  planScore → score  |  lateRMu → lateMu
+
+  // ── Plan score badge (exactly matches HTML reference) ──
+  const score = R.score;
+  const POS2 = '#1A7A52', NEG2 = '#B71C1C', WARN2 = '#D97706';
+  let planScoreHtml = '';
+  if (score) {
+    const sc = score.composite;
+    const scoreColor = sc >= 80 ? POS2 : sc >= 60 ? WARN2 : NEG2;
+    const scoreVerdict = sc >= 80 ? 'Strong' : sc >= 60 ? 'Moderate' : 'Needs work';
+    planScoreHtml = `<div class="rt-score-badge rt-fade-in">`
+      + `<div><div class="rt-score-big" style="color:${scoreColor}">${sc}</div>`
+      + `<div style="text-align:center;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:${GR60}">/ 100</div>`
+      + `<div style="text-align:center;margin-top:4px"><span class="rt-pill" style="background:${scoreColor}18;color:${scoreColor}">${scoreVerdict}</span></div></div>`
+      + `<div style="flex:1;min-width:0">`
+      + `<div class="rt-score-meta"><h4>Retirement Readiness Score — composite of 5 dimensions</h4></div>`
+      + (score.components || []).map(c => {
+          const cc = parseFloat(c.score) >= 80 ? POS2 : parseFloat(c.score) >= 60 ? WARN2 : NEG2;
+          return `<div class="rt-score-row">`
+            + `<div class="rt-score-lbl">${c.label}</div>`
+            + `<div class="rt-score-wt">${c.weight}</div>`
+            + `<div class="rt-score-bar"><div class="rt-score-fill" style="width:${c.score}%;background:${cc}"></div></div>`
+            + `<div class="rt-score-num" style="color:${cc}">${c.score}</div>`
+            + `</div>`;
+        }).join('')
+      + `<div style="font-size:9px;color:${GR60};margin-top:6px">Score = Funding probability (35%) + Corpus buffer (25%) + Downside resilience (20%) + Goal coverage (12%) + Healthcare resilience (8%). BugleRock house methodology.</div>`
+      + `</div></div>`;
+  }
+
+  // ── Hero card (exactly matches HTML reference) ──
+  const conf = R.successRate;
+  const target = IN.targetConf || 85;
+  const onTrack = conf >= target;
+  const surplus = R.surplus || 0;
+  const surplusColor = surplus >= 0 ? '#86efac' : '#fca5a5';
+  const surplusLabel = surplus >= 0 ? 'Projected surplus' : 'Funding shortfall';
+  const statusLabel = conf >= target ? 'ON TRACK' : conf >= 65 ? 'NEEDS ATTENTION' : 'AT RISK';
+  const medianDepAge = R.medianDepAge;
+  const coverageRatio = (R.reqCorpus || 0) > 0 ? (R.p50c / R.reqCorpus * 100) : null;
+  const replacementRatio = (R.lifestyleAtRet || 0) > 0 ? (R.firstNeed / R.lifestyleAtRet * 100) : null;
+  const shortByLine = surplus >= 0
+    ? `Your projected corpus is <strong>${fmtL(surplus)} above</strong> the recommended retirement buffer.`
+    : `You are <strong>${fmtL(Math.abs(surplus))} short</strong> of the recommended retirement buffer.`;
+
+  const reqSIP      = R.reqSIP;
+  const altRetAge   = R.altRetAge;
+  const altSpendPct = R.altSpendPct;
+
+  const heroHtml = `<div class="rt-hero rt-fade-in"><div class="rt-hero-inner">`
+    + `<div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:16px">`
+      + `<div>`
+        + `<div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.55);margin-bottom:5px">Retirement readiness — ${IN.name || 'Client'}</div>`
+        + `<div style="font-size:27px;font-weight:700;line-height:1.1">${statusLabel}</div>`
+        + `<div style="font-size:13px;color:#fff;margin-top:8px;font-weight:600">${shortByLine}</div>`
+        + `<div style="font-size:10px;color:rgba(255,255,255,.4);margin-top:5px">House planning threshold — not a guarantee</div>`
+      + `</div>`
+      + `<div style="text-align:right;flex-shrink:0">`
+        + `<div style="font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:rgba(255,255,255,.5);margin-bottom:2px">Plan success probability</div>`
+        + `<div style="font-family:'DM Mono',monospace;font-size:54px;font-weight:700;line-height:1;color:${onTrack ? '#4ade80' : '#f87171'}">${conf}<span style="font-size:22px">%</span></div>`
+        + `<div style="font-size:9.5px;color:rgba(255,255,255,.45);margin-top:3px">Target ${target}% &nbsp;·&nbsp; Monte Carlo, ${IN.nSims} scenarios</div>`
+      + `</div>`
+    + `</div>`
+
+    // 5-cell KPI strip
+    + `<div class="rt-kpi-strip">`
+    + [
+        ['Corpus at retirement', fmtL(R.p50c),  'P50 median'],
+        ['Required corpus',      fmtL(R.reqCorpus || R.corpusNeeded), 'To sustain plan'],
+        [surplusLabel,           (surplus >= 0 ? '+' : '') + fmtL(surplus), 'At retirement (P50)'],
+        ['Gross withdrawal / month',  fmtK(R.firstNeed ? (R.firstNeed * 100000 / 12) : (R.incomeAtRet || 0)), 'From portfolio (pre-tax)'],
+        ['Plan to age',          String(IN.lifeExp), 'Retire at ' + IN.retAge],
+      ].map((kp, i) => {
+        const c2 = i === 2 ? surplusColor : 'rgba(255,255,255,.92)';
+        return `<div class="rt-kpi-cell">`
+          + `<div class="rt-kpi-val" style="color:${c2}">${kp[1]}</div>`
+          + `<div class="rt-kpi-lbl">${kp[0]}</div>`
+          + `<div class="rt-kpi-sub">${kp[2]}</div>`
+          + `</div>`;
+      }).join('')
+    + `</div>`
+
+    // "What needs to change?" decision table
+    + `<div style="margin-top:14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:10px;overflow:hidden">`
+      + `<div style="padding:9px 15px;font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.6);border-bottom:1px solid rgba(255,255,255,.12)">What needs to change?</div>`
+      + `<table style="width:100%;border-collapse:collapse">`
+        + `<thead><tr>`
+          + `<th style="padding:7px 15px;text-align:left;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:rgba(255,255,255,.4)">Option</th>`
+          + `<th style="padding:7px 15px;text-align:right;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:rgba(255,255,255,.4)">Change</th>`
+          + `<th style="padding:7px 15px;text-align:right;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:rgba(255,255,255,.4)">Result</th>`
+        + `</tr></thead><tbody>`
+        + (reqSIP != null && reqSIP != null && reqSIP > IN.sipM
+            ? `<tr style="border-top:1px solid rgba(255,255,255,.1)"><td style="padding:8px 15px;font-size:12px;color:#fff">Increase SIP</td><td style="padding:8px 15px;text-align:right;font-family:'DM Mono',monospace;font-size:12px;color:#fff">+${fmtK(reqSIP - IN.sipM)}/mo</td><td style="padding:8px 15px;text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:#4ade80">${target}% confidence</td></tr>`
+            : '')
+        + (altRetAge && altRetAge !== IN.retAge
+            ? `<tr style="border-top:1px solid rgba(255,255,255,.1)"><td style="padding:8px 15px;font-size:12px;color:#fff">Retire later</td><td style="padding:8px 15px;text-align:right;font-family:'DM Mono',monospace;font-size:12px;color:#fff">+${altRetAge - IN.retAge} year(s)</td><td style="padding:8px 15px;text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:#4ade80">${target}% confidence</td></tr>`
+            : '')
+        + (altSpendPct && altSpendPct < 1
+            ? `<tr style="border-top:1px solid rgba(255,255,255,.1)"><td style="padding:8px 15px;font-size:12px;color:#fff">Reduce retirement spending</td><td style="padding:8px 15px;text-align:right;font-family:'DM Mono',monospace;font-size:12px;color:#fff">−${Math.round((1 - altSpendPct) * 100)}%</td><td style="padding:8px 15px;text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:#4ade80">${target}% confidence</td></tr>`
+            : '')
+        + (!(reqSIP != null && reqSIP != null && reqSIP > IN.sipM) && !(altRetAge && altRetAge !== IN.retAge) && !(altSpendPct && altSpendPct < 1)
+            ? `<tr style="border-top:1px solid rgba(255,255,255,.1)"><td colspan="3" style="padding:8px 15px;font-size:12px;color:#4ade80;font-weight:600">No changes needed — plan already meets the ${target}% target</td></tr>`
+            : '')
+      + `</tbody></table>`
+    + `</div>`
+
+    // Secondary stat row: coverage ratio, depletion age, income replacement
+    + `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:rgba(255,255,255,.12);border-radius:8px;overflow:hidden;margin-top:12px">`
+      + `<div style="padding:10px 14px;background:rgba(0,0,0,.15)">`
+        + `<div style="font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:rgba(255,255,255,.5)">Median corpus ÷ required corpus</div>`
+        + `<div style="font-family:'DM Mono',monospace;font-size:17px;font-weight:700;color:#fff;margin-top:3px">${coverageRatio != null ? coverageRatio.toFixed(0) + '%' : '—'}</div>`
+        + `<div style="font-size:8.5px;color:rgba(255,255,255,.4);margin-top:2px">A corpus ratio — not the same as success probability</div>`
+      + `</div>`
+      + `<div style="padding:10px 14px;background:rgba(0,0,0,.15)">`
+        + `<div style="font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:rgba(255,255,255,.5)">If nothing changes, funds run out at</div>`
+        + `<div style="font-family:'DM Mono',monospace;font-size:17px;font-weight:700;color:${medianDepAge ? '#fca5a5' : '#4ade80'};margin-top:3px">${medianDepAge ? 'Age ' + medianDepAge : 'No depletion in ' + conf + '% of scenarios'}</div>`
+        + `<div style="font-size:8.5px;color:rgba(255,255,255,.4);margin-top:2px">Median across simulations that deplete</div>`
+      + `</div>`
+      + `<div style="padding:10px 14px;background:rgba(0,0,0,.15)">`
+        + `<div style="font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:rgba(255,255,255,.5)">Retirement income replacement</div>`
+        + `<div style="font-family:'DM Mono',monospace;font-size:17px;font-weight:700;color:#fff;margin-top:3px">${replacementRatio != null ? replacementRatio.toFixed(0) + '%' : '—'}</div>`
+        + `<div style="font-size:8.5px;color:rgba(255,255,255,.4);margin-top:2px">Net withdrawal ÷ lifestyle spending at retirement</div>`
+      + `</div>`
+    + `</div>`
+
+    // Funding gap / buffer bar
+    + `<div style="margin-top:8px;padding:11px 15px;background:rgba(0,0,0,.2);border-radius:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">`
+      + `<div style="font-size:11px;color:rgba(255,255,255,.6)">Funding gap / buffer in today's ₹ — PV at ${Math.round((IN.preMu || IN.preret || 0.09) * 100)}% p.a.</div>`
+      + `<div style="font-family:'DM Mono',monospace;font-size:17px;font-weight:700;color:${(R.fundingGapToday || 0) >= 0 ? '#86efac' : '#fca5a5'}">${(R.fundingGapToday || 0) >= 0 ? 'Buffer of ' + fmtL(Math.abs(R.fundingGapToday || 0)) : 'Gap of ' + fmtL(Math.abs(R.fundingGapToday || 0))}</div>`
+    + `</div>`
+  + `</div></div>`;
+
+  // ── What could derail the plan? (risks from sensitivity) ──
+  const sensDetailed = R.sensDetailed || [];
+  const riskRows = [
+    { label: `Equity crash at retirement (−${Math.round((IN.crashSeverity || 0.30) * 100)}% in year one, recovers after)`,          key: 'equityCrash' },
+    { label: 'Low-return / high-inflation regime — stagflation (−2% returns, +2% inflation for entire retirement)',                   key: 'stagflation' },
+    { label: 'Poor first 5 years of retirement — sequence risk (lower returns + higher swings early on)',                            key: 'sequenceRisk' },
+    { label: 'Extended retirement horizon (+5 years)',               key: 'longevity' },
+    { label: 'High inflation decade (+2% above expected, first 10 years of retirement only)',                                        key: 'inflDecade' },
+  ].map(r => {
+    const s = sensDetailed.find(x => x.key === r.key);
+    return { label: r.label, impactPts: s ? -s.delta : 0 };
+  }).filter(r => r.impactPts > 0).sort((a, b) => b.impactPts - a.impactPts);
+  const maxRisk = riskRows.length ? riskRows[0].impactPts : 1;
+  const biggestRisk = riskRows[0];
+
+  const riskSectionHtml = riskRows.length ? (
+    `<div class="rt-out-card rt-fade-in" style="margin-bottom:16px">`
+    + `<div class="rt-out-hdr"><div class="rt-out-title" style="color:${NEG}">What could derail the plan?</div></div>`
+    + `<div class="rt-out-body">`
+    + riskRows.map(r => {
+        const rel = r.impactPts / maxRisk;
+        const lvl = rel >= 0.66 ? { c: NEG, t: 'High impact' } : rel >= 0.33 ? { c: WARN, t: 'Medium impact' } : { c: '#CA8A04', t: 'Low impact' };
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid ${GR10}">`
+          + `<div style="width:8px;height:8px;border-radius:50%;background:${lvl.c};flex-shrink:0"></div>`
+          + `<div style="flex:1;font-size:12px;color:${GR80}">${r.label}</div>`
+          + `<div style="font-size:10px;font-weight:700;color:${lvl.c}">${lvl.t}</div>`
+          + `<div style="font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:${lvl.c};width:44px;text-align:right">−${r.impactPts.toFixed(0)}pt</div>`
+          + `</div>`;
+      }).join('')
+    + (biggestRisk ? `<div style="margin-top:10px;padding:9px 13px;background:${GR10};border-radius:8px;font-size:11px;color:${GR80}">Biggest sensitivity: <strong style="color:${PLUM}">${biggestRisk.label.toLowerCase()}</strong> — costs roughly ${biggestRisk.impactPts.toFixed(0)} confidence points if it occurs.</div>` : '')
+    + `</div></div>`
+  ) : '';
+
+  // ── Phase split card ──
+  const fmtMo = (lakhs) => '₹' + Math.round((lakhs * 100000) / 12).toLocaleString('en-IN') + '/mo';
+  const fmtAbs = (v) => '₹' + Math.round(v).toLocaleString('en-IN');
+  const npsAnnuityMonthly = fmtAbs((R.npsAnnualAnnuity || 0) * 100000 / 12) + '/mo';
+
+  const phaseSplitHtml = `<div class="rt-phase-grid rt-fade-in">`
+    + `<div class="rt-phase-build">`
+      + `<div class="rt-phase-label" style="color:${PLUM}">Phase 1 — Build wealth</div>`
+      + `<div class="rt-phase-period">Age ${IN.age} to ${IN.retAge} (${IN.retAge - IN.age} years)</div>`
+      + `<div class="rt-phase-grid2">`
+      + [
+          ['Current corpus', fmtL(IN.corpus0)],
+          ['Monthly SIP', fmtAbs(IN.sipM) + '/mo'],
+          ['Step-up', (IN.stepUp * 100).toFixed(0) + '% p.a.'],
+          ['Pre-ret. return', (IN.preMu * 100).toFixed(1) + '%'],
+        ].map(r => `<div><div class="rt-phase-item-lbl">${r[0]}</div><div class="rt-phase-item-val">${r[1]}</div></div>`).join('')
+      + `</div>`
+    + `</div>`
+    + `<div class="rt-phase-divider">RETIRE AT ${IN.retAge}</div>`
+    + `<div class="rt-phase-draw">`
+      + `<div class="rt-phase-label" style="color:${BERRY}">Phase 2 — Fund retirement</div>`
+      + `<div class="rt-phase-period">Age ${IN.retAge} to ${IN.lifeExp} (${IN.lifeExp - IN.retAge} years)</div>`
+      + `<div class="rt-phase-grid2">`
+      + [
+          ['Gross withdrawal / month', fmtMo(R.firstNeed)],
+          ['Post-ret. return', (IN.postMu * 100).toFixed(1) + '%'],
+          ['NPS annuity', fmtAbs((R.npsAnnualAnnuity || 0) * 100000) + '/yr'],
+          ['NPS monthly', npsAnnuityMonthly],
+        ].map(r => `<div><div class="rt-phase-item-lbl">${r[0]}</div><div class="rt-phase-item-val">${r[1]}</div></div>`).join('')
+      + `</div>`
+    + `</div>`
+  + `</div>`;
+
+  // ── Retirement readiness bridge ──
+  const goalsTotalFV = (R.goalsFV || []).reduce((s, g) => s + g.fv, 0);
+  const bridgeSteps = [
+    { label: "Today's corpus",      val: fmtL(IN.corpus0),                      color: PLUM },
+    { label: 'SIP contributions',   val: '+' + fmtL(R.totalSIPContrib || 0),    color: MUT },
+    { label: 'Market growth',       val: '+' + fmtL(R.marketGrowthEst || 0),    color: '#1558A8' },
+    { label: 'EPF / PPF',           val: '+' + fmtL(R.epfAtRet || 0),           color: POS },
+    { label: 'NPS 60% lump sum',    val: '+' + fmtL(R.npsLump || 0),            color: '#059669' },
+    { label: 'Goals / withdrawals', val: goalsTotalFV > 0 ? '−' + fmtL(goalsTotalFV) : 'none', color: NEG },
+    { label: 'Corpus at retirement',val: fmtL(R.p50c) + ' (P50)',               color: BERRY },
+  ];
+
+  const bridgeSectionHtml = `<div class="rt-out-card rt-fade-in" style="margin-bottom:16px">`
+    + `<div class="rt-out-hdr"><div class="rt-out-title" style="color:${MUT}">Retirement readiness bridge — how the corpus is built</div></div>`
+    + `<div class="rt-out-body">`
+    + `<div class="rt-bridge-wrap" style="display:flex;align-items:center">`
+    + bridgeSteps.map((s, i) =>
+        `<div class="rt-bridge-node">`
+        + `<div style="width:34px;height:34px;border-radius:50%;background:${s.color}14;border:1.5px solid ${s.color};margin:0 auto 6px;display:flex;align-items:center;justify-content:center">`
+        + (i === 0 || i === bridgeSteps.length - 1
+            ? `<div style="width:14px;height:14px;border-radius:50%;background:${s.color}"></div>`
+            : `<div style="width:6px;height:6px;border-radius:50%;background:${s.color}"></div>`)
+        + `</div>`
+        + `<div style="font-size:8.5px;color:${GR80};font-weight:600;line-height:1.3">${s.label}</div>`
+        + `<div style="font-size:8px;color:${s.color};font-weight:700;font-family:'DM Mono',monospace;margin-top:2px">${s.val}</div>`
+        + `</div>`
+        + (i < bridgeSteps.length - 1 ? `<div class="rt-bridge-sep">&middot;</div>` : '')
+      ).join('')
+    + `</div>`
+    + `<div style="font-size:9px;color:${GR60};margin-top:10px;text-align:center">SIP contributions = total nominal cash invested over ${IN.retAge - IN.age} years (not compounded). Market growth = net compounding the portfolio earned on everything that stayed invested (P50 corpus minus direct contributions). Goals are shown as a separate outflow — the bridge nodes will not sum exactly to the P50 corpus because money withdrawn for goals also loses future compounding, which is captured in the simulation but not separately shown here.</div>`
+    + `</div></div>`;
+
+  const sectionsHtml = planScoreHtml + heroHtml + riskSectionHtml + phaseSplitHtml + bridgeSectionHtml + ''
     + `<section style="margin-bottom:32px">` + secHd('1', 'Corpus Projection Fan Chart', `Monte Carlo simulation · ${R.NSIM} scenarios · age ${IN.age} to ${IN.lifeExp}`)
     + card(cardHd('Projected retirement corpus — all scenarios', '━ Median &nbsp; ▒ 25–75th pct &nbsp; ░ 10–90th pct &nbsp; ● Goals')
       + `<div style="padding:20px">${fanSvg}</div>`
@@ -304,13 +535,14 @@ export function rtBuildFullSections(R) {
       + `<table style="width:100%;border-collapse:collapse"><tbody>`
       + srcItems.map((s) => {
         const bg = s.hilite ? 'background:' + PLUM + ';' : '';
-        const fg = s.hilite ? 'color:#fff;' : s.neg ? 'color:' + NEG + ';' : 'color:' + POS + ';';
-        const lbl = s.hilite ? '<strong style="color:#fff">' + s.l + '</strong>' : s.l;
-        return `<tr style="${bg}"><td style="padding:8px 14px;border-bottom:1px solid ${s.hilite ? 'rgba(255,255,255,.1)' : GR20};font-family:DM Sans,sans-serif;${s.bold ? 'font-weight:700;' : ''}${s.hilite ? 'color:#fff;' : 'color:' + GR80 + ';'}">${lbl}</td>`
-          + `<td style="padding:8px 14px;border-bottom:1px solid ${s.hilite ? 'rgba(255,255,255,.1)' : GR20};text-align:right;font-family:DM Mono,monospace;font-weight:${s.bold ? '700' : '400'};${fg}">${fmtK(s.v)}/mo</td></tr>`;
+        const fg = s.hilite ? 'color:#fff;' : s.pos ? 'color:' + POS + ';' : 'color:' + GR80 + ';';
+        const lbl = s.hilite ? '<strong style="color:#fff">' + s.l + '</strong>' : (s.bold ? '<strong>' + s.l + '</strong>' : s.l);
+        const prefix = s.pos ? '−' : '';
+        return `<tr style="${bg}"><td style="padding:8px 14px;border-bottom:1px solid ${s.hilite ? 'rgba(255,255,255,.1)' : GR20};font-family:DM Sans,sans-serif;${s.hilite ? 'color:#fff;' : 'color:' + GR80 + ';'}">${lbl}</td>`
+          + `<td style="padding:8px 14px;border-bottom:1px solid ${s.hilite ? 'rgba(255,255,255,.1)' : GR20};text-align:right;font-family:DM Mono,monospace;font-weight:${s.bold ? '700' : '400'};${fg}">${prefix}${fmtK(s.v)}/mo</td></tr>`;
       }).join('')
       + `</tbody></table>`
-      + `<div style="padding:10px 14px;font-size:10px;color:${GR60};background:${GR10};border-top:1px solid ${GR20}">Based on ${Math.round(IN.replace * 100)}% replacement ratio. All figures at age ${IN.retAge}.</div>`)
+      + `<div style="padding:10px 14px;font-size:10px;color:${GR60};background:${GR10};border-top:1px solid ${GR20}">Based on ${Math.round(IN.replace * 100)}% replacement ratio. All figures at age ${IN.retAge}. Tax gross-up = extra amount portfolio releases so ${Math.round(IN.tax * 100)}% tax leaves the full spending need intact.</div>`)
     + card(cardHd(`Retirement corpus sources at age ${IN.retAge}`)
       + `<table style="width:100%;border-collapse:collapse"><tbody>`
       + [
@@ -324,7 +556,7 @@ export function rtBuildFullSections(R) {
         `<tr><td style="padding:8px 14px;border-bottom:1px solid ${GR20};font-family:DM Sans,sans-serif;font-weight:${r[3] ? '700' : '400'};color:${GR80}">${r[0]}</td>`
         + `<td style="padding:8px 14px;border-bottom:1px solid ${GR20};text-align:right;font-family:DM Mono,monospace;font-weight:${r[3] ? '700' : '400'};color:${r[2]}">${r[1]}</td></tr>`).join('')
       + `</tbody></table>`
-      + `<div style="padding:10px 14px;font-size:10px;color:${GR60};background:${GR10};border-top:1px solid ${GR20}">NPS annuity (40% @ ${(IN.annRate * 100).toFixed(1)}%) generates ${fmtL(R.npsAnnuityIncome)}/yr fixed income. Shown separately as it is not part of the investable corpus.</div>`)
+      + `<div style="padding:10px 14px;font-size:10px;color:${GR60};background:${GR10};border-top:1px solid ${GR20}">NPS annuity (40% @ ${(IN.annRate * 100).toFixed(1)}%) generates ${fmtL(R.npsAnnualAnnuity || 0)}/yr fixed income. Shown separately as it is not part of the investable corpus.</div>`)
     + `</div></section>`
 
     + `<section class="pg" style="margin-bottom:32px">` + secHd('5', 'Sensitivity Analysis', 'What moves the needle — plan success rate under alternative assumptions')
@@ -333,36 +565,33 @@ export function rtBuildFullSections(R) {
       + `<div style="padding:10px 20px 14px;font-size:11px;color:${GR60};border-top:1px solid ${GR20};line-height:1.7">Each scenario changes one variable from the base plan and re-runs 1,000 Monte Carlo simulations. The 85% threshold is a widely used rule-of-thumb for plan adequacy. Scenarios above the dashed line are considered robust.</div>`)
     + `</section>`
 
-    + (R.planScore != null ? (() => {
-      const ps = R.planScore;
-      const psColor = ps.total >= 80 ? POS : ps.total >= 55 ? WARN : NEG;
-      const psVerdict = ps.total >= 80 ? 'Excellent' : ps.total >= 65 ? 'Good' : ps.total >= 50 ? 'Fair' : 'Needs Work';
-      const components = [
-        { label: 'Funding adequacy', score: ps.funding, max: 35, color: BERRY },
-        { label: 'Corpus buffer', score: ps.buffer, max: 30, color: PLUM },
-        { label: 'Downside resilience', score: ps.downside, max: 22, color: MUT },
-        { label: 'Goal coverage', score: ps.goals, max: 13, color: WARN },
-      ];
-      return `<section style="margin-bottom:32px">` + secHd('6', 'Plan Score', 'Composite health rating across four dimensions')
+    + (R.score != null ? (() => {
+      const ps = R.score;
+      const psTotal = ps.composite;
+      const psColor = psTotal >= 80 ? POS : psTotal >= 55 ? WARN : NEG;
+      const psVerdict = psTotal >= 80 ? 'Excellent' : psTotal >= 65 ? 'Good' : psTotal >= 50 ? 'Fair' : 'Needs Work';
+      const compColors = [BERRY, PLUM, MUT, WARN, POS];
+      return `<section style="margin-bottom:32px">` + secHd('6', 'Plan Score', 'Composite health rating across dimensions')
         + card(cardHd('Retirement plan score — 100-point composite')
           + `<div style="display:grid;grid-template-columns:auto 1fr;gap:0">`
           + `<div style="padding:28px 32px;text-align:center;border-right:1px solid ${GR20};display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:160px">`
-          + `<div style="font-family:Cormorant Garamond,serif;font-size:64px;font-weight:700;color:${psColor};line-height:1">${ps.total}</div>`
+          + `<div style="font-family:Cormorant Garamond,serif;font-size:64px;font-weight:700;color:${psColor};line-height:1">${psTotal}</div>`
           + `<div style="font-size:11px;font-weight:700;color:${psColor};letter-spacing:.06em;text-transform:uppercase;margin-top:2px">${psVerdict}</div>`
           + `<div style="font-size:10px;color:${GR60};margin-top:6px">out of 100</div>`
           + `</div>`
           + `<div style="padding:20px 24px">`
-          + components.map(c => {
-            const pct = Math.min(100, Math.max(0, (c.score / c.max) * 100));
-            return `<div style="margin-bottom:14px">`
-              + `<div style="display:flex;justify-content:space-between;margin-bottom:5px">`
-              + `<span style="font-size:11.5px;color:${GR80};font-weight:500">${c.label}</span>`
-              + `<span style="font-family:DM Mono,monospace;font-size:12px;font-weight:700;color:${c.color}">${c.score.toFixed(1)} / ${c.max}</span>`
-              + `</div>`
-              + `<div style="height:8px;background:${GR20};border-radius:4px;overflow:hidden">`
-              + `<div style="width:${pct.toFixed(1)}%;height:100%;background:${c.color};border-radius:4px;opacity:.85"></div>`
-              + `</div></div>`;
-          }).join('')
+          + (ps.components || []).map((c, ci) => {
+              const col = compColors[ci % compColors.length];
+              const pct = Math.min(100, Math.max(0, parseFloat(c.score)));
+              return `<div style="margin-bottom:14px">`
+                + `<div style="display:flex;justify-content:space-between;margin-bottom:5px">`
+                + `<span style="font-size:11.5px;color:${GR80};font-weight:500">${c.label}</span>`
+                + `<span style="font-family:DM Mono,monospace;font-size:12px;font-weight:700;color:${col}">${c.score} <span style="font-size:10px;color:${GR60}">${c.weight}</span></span>`
+                + `</div>`
+                + `<div style="height:8px;background:${GR20};border-radius:4px;overflow:hidden">`
+                + `<div style="width:${pct.toFixed(1)}%;height:100%;background:${col};border-radius:4px;opacity:.85"></div>`
+                + `</div></div>`;
+            }).join('')
           + `</div></div>`)
         + `</section>`;
     })() : '')
@@ -383,7 +612,7 @@ export function rtBuildFullSections(R) {
       + thc('Age', 'center') + thc('Year', 'center') + thc('Phase', 'left')
       + thc('SIP in') + thc('EPF+NPS') + thc('Lumps in') + thc('Goals out') + thc('Withdrawal') + thc('Median') + thc('P10')
       + `</tr></thead><tbody>${cfRows}</tbody></table></div>`
-      + `<div style="padding:10px 16px;font-size:10px;color:${GR60};background:${GR10};border-top:1px solid ${GR20}">EPF+NPS lump merges into corpus at retirement. Withdrawals are grossed up for ${(IN.tax * 100).toFixed(0)}% tax. NPS annuity income (${fmtL(R.npsAnnuityIncome)}/yr) deducted before computing withdrawal. Shaded rows every 5 years. Values shown in L / Cr as applicable.</div>`)
+      + `<div style="padding:10px 16px;font-size:10px;color:${GR60};background:${GR10};border-top:1px solid ${GR20}">EPF+NPS lump merges into corpus at retirement. Withdrawals are grossed up for ${(IN.tax * 100).toFixed(0)}% tax. NPS annuity income (${fmtL(R.npsAnnualAnnuity || 0)}/yr) deducted before computing withdrawal. Shaded rows every 5 years. Values shown in L / Cr as applicable.</div>`)
     + `</section>`
 
     + `<section class="pg" style="margin-bottom:32px">` + secHd('9', 'Investment Policy & Assumptions')
@@ -425,7 +654,44 @@ export function rtOpenReport(R) {
     + 'section{margin-bottom:32px}'
     + '.cf-table{font-size:9px}'
     + '.cf-table td,.cf-table th{padding:3px 4px!important}'
+    + `.rt-score-badge{display:flex;align-items:center;gap:18px;background:#f8f6fa;border-radius:14px;padding:16px 22px;margin-bottom:16px;border:1px solid #E4E1E7;flex-wrap:wrap}`
+    + `.rt-score-big{font-family:'DM Mono',monospace;font-size:52px;font-weight:700;line-height:1;flex-shrink:0;width:80px;text-align:center}`
+    + `.rt-score-meta h4{font-size:11px;font-weight:700;color:${GR80};margin-bottom:6px;font-family:inherit}`
+    + `.rt-score-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f0ecf4}`
+    + `.rt-score-lbl{flex:1;font-size:11.5px;color:${GR80}}`
+    + `.rt-score-wt{font-size:9.5px;color:#A2A0A0;width:28px;text-align:right;flex-shrink:0}`
+    + `.rt-score-bar{width:90px;height:6px;background:#E8DDE5;border-radius:3px;overflow:hidden;flex-shrink:0}`
+    + '.rt-score-fill{height:100%;border-radius:3px}'
+    + `.rt-score-num{font-family:'DM Mono',monospace;font-size:11.5px;font-weight:700;width:26px;text-align:right;flex-shrink:0}`
+    + '.rt-pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700}'
+    + `.rt-hero{background:linear-gradient(135deg,#3E3452 0%,#6D5479 55%,#912F63 100%);border-radius:14px;padding:28px 32px;color:#fff;margin-bottom:18px;box-shadow:0 6px 28px rgba(62,52,82,.22);position:relative;overflow:hidden;-webkit-print-color-adjust:exact;print-color-adjust:exact}`
+    + '.rt-hero-inner{position:relative;z-index:1}'
+    + '.rt-kpi-strip{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border:1px solid rgba(255,255,255,.12);border-radius:10px;overflow:hidden;margin-top:20px}'
+    + `.rt-kpi-cell{padding:13px 16px;border-right:1px solid rgba(255,255,255,.1)}`
+    + `.rt-kpi-val{font-family:'DM Mono',monospace;font-size:16px;font-weight:700;line-height:1.1}`
+    + '.rt-kpi-lbl{font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:rgba(255,255,255,.45);margin-top:4px}'
+    + '.rt-kpi-sub{font-size:8px;color:rgba(255,255,255,.3);margin-top:1px}'
+    + `.rt-out-card{background:#fff;border:1px solid #E4E1E7;border-radius:14px;overflow:hidden;margin-bottom:16px;box-shadow:0 1px 6px rgba(62,52,82,.06)}`
+    + '.rt-out-hdr{padding:12px 20px;display:flex;align-items:center;gap:10px;background:#f8f6fa;border-bottom:1px solid #E4E1E7}'
+    + '.rt-out-num{width:24px;height:24px;border-radius:50%;background:#912F63;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}'
+    + '.rt-out-title{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#6D5479}'
+    + '.rt-out-body{padding:18px 20px}'
+    + '.rt-fade-in{animation:rtFadeIn .35s ease both}'
+    + '@keyframes rtFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}'
     + '@media print{@page{margin:10mm 8mm;size:A4}.no-print{display:none!important}.pg{page-break-before:always;padding-top:24px}.page{padding:20px 16px}}'
+    + '@media(max-width:860px){.rt-kpi-strip{grid-template-columns:repeat(3,1fr)}}'
+    + '.rt-phase-grid{display:grid;grid-template-columns:1fr auto 1fr;gap:0;margin-bottom:16px;border-radius:14px;overflow:hidden;border:1px solid #E4E1E7;box-shadow:0 1px 6px rgba(62,52,82,.06)}'
+    + '.rt-phase-build{background:#f7f4fb;padding:16px 20px}'
+    + '.rt-phase-divider{background:#912F63;color:#fff;padding:0 16px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;writing-mode:vertical-lr;letter-spacing:.08em;white-space:nowrap;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+    + '.rt-phase-draw{background:#fff0f5;padding:16px 20px}'
+    + '.rt-phase-label{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px}'
+    + '.rt-phase-period{font-size:10.5px;color:#6D5479;margin-bottom:10px}'
+    + '.rt-phase-grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}'
+    + '.rt-phase-item-lbl{font-size:8.5px;color:#6D5479}'
+    + `.rt-phase-item-val{font-size:12px;font-weight:700;color:#2D1F2B;font-family:'DM Mono',monospace}`
+    + '.rt-bridge-wrap{flex-wrap:wrap}'
+    + '.rt-bridge-node{flex:1;text-align:center;padding:11px 6px;min-width:80px}'
+    + '.rt-bridge-sep{color:#A2A0A0;font-size:13px;flex-shrink:0}'
     + '</style></head><body>'
     + `<div class="no-print" style="background:${PLUM};padding:11px 28px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:99">`
     + `<div style="flex:1;color:rgba(255,255,255,.7);font-size:12px">Retirement plan · <strong style="color:#fff">${IN.name || 'Client'}</strong> · ${today}</div>`

@@ -203,14 +203,23 @@ export function rtRunMC(IN, overrideSIP) {
   const p10DepAge = sortedDep.length ? IN.retAge + sortedDep[Math.floor(sortedDep.length * 0.1)] : null;
 
   // Bridge numbers
+  // Market growth = P50 corpus minus everything the client actually put in
+  // Simple and intuitive: what the market added on top of contributions
   let totalSIPContrib = 0;
-  let curS = (sip * 12) / 100000;
+  let curS2 = (sip * 12) / 100000;
   for (let y = 0; y < yrsAccum; y++) {
-    if (IN.age + y < IN.sipTill) totalSIPContrib += curS;
-    curS *= (1 + IN.stepUp);
+    if (IN.age + y < IN.sipTill) {
+      totalSIPContrib += curS2;
+      curS2 *= (1 + IN.stepUp);
+    }
   }
-  const compoundedCorpus = IN.corpus0 * Math.pow(1 + IN.preMu, yrsAccum);
-  const marketGrowthEst = Math.max(0, p50c - epfAtRet - npsLump - compoundedCorpus - totalSIPContrib);
+  const goalsTotalFVbridge = goalsFV.reduce((s, g) => s + g.fv, 0);
+  // Market growth = what compounding added on top of direct contributions
+  // Goals are shown as a separate outflow node — not factored into market growth
+  // Bridge is indicative and will not reconcile exactly to P50 (MC variance + goal timing)
+  const marketGrowthEst = Math.max(0,
+    p50c - IN.corpus0 - totalSIPContrib - epfAtRet - npsLump
+  );
 
   return {
     successRate: Math.round((successCount / nSims) * 100),
@@ -237,27 +246,35 @@ export function rtRunMC(IN, overrideSIP) {
 }
 
 /* ── Solvers ──────────────────────────────────────────────────────── */
+// Solvers run many iterations — cap at 150 sims each for speed.
+// Directional accuracy (is it above/below threshold?) needs far fewer paths than the main run.
+const SOLVER_SIMS = 150;
+const SENS_SIMS   = 200;
+
 export function rtSolveSIP(IN, targetRate) {
+  const INs = { ...IN, nSims: Math.min(IN.nSims, SOLVER_SIMS) };
   let lo = 0, hi = Math.max(IN.sipM * 10, 500000);
   for (let i = 0; i < 22; i++) {
     const mid = (lo + hi) / 2;
-    if (rtRunMC(IN, mid).successRate >= targetRate) hi = mid; else lo = mid;
+    if (rtRunMC(INs, mid).successRate >= targetRate) hi = mid; else lo = mid;
     if (hi - lo < 200) break;
   }
   return Math.ceil(hi / 500) * 500;
 }
 
 export function rtSolveRetAge(IN, targetRate) {
+  const INs = { ...IN, nSims: Math.min(IN.nSims, SOLVER_SIMS) };
   for (let a = IN.retAge; a <= 75; a++) {
-    const I2 = { ...IN, retAge: a, sipTill: Math.max(IN.sipTill, a) };
+    const I2 = { ...INs, retAge: a, sipTill: Math.max(INs.sipTill, a) };
     if (rtRunMC(I2).successRate >= targetRate) return a;
   }
   return null;
 }
 
 export function rtSolveSpend(IN, targetRate) {
+  const INs = { ...IN, nSims: Math.min(IN.nSims, SOLVER_SIMS) };
   for (let pct = 1; pct >= 0.5; pct -= 0.02) {
-    if (rtRunMC({ ...IN, expM: IN.expM * pct }).successRate >= targetRate) return pct;
+    if (rtRunMC({ ...INs, expM: IN.expM * pct }).successRate >= targetRate) return pct;
   }
   return null;
 }
@@ -265,19 +282,20 @@ export function rtSolveSpend(IN, targetRate) {
 /* ── Sensitivity scenarios ───────────────────────────────────────── */
 export function rtSensitivity(IN, base) {
   const yrsRetire = Math.max(0, IN.lifeExp - IN.retAge);
+  const INs = { ...IN, nSims: Math.min(IN.nSims, SENS_SIMS) }; // cap for speed — directional accuracy only
   const scenarios = [
-    { key: 'sip10k', label: '+₹10k/mo SIP', fn: () => rtRunMC({ ...IN, sipM: IN.sipM + 10000 }) },
-    { key: 'sip25k', label: '+₹25k/mo SIP', fn: () => rtRunMC({ ...IN, sipM: IN.sipM + 25000 }) },
-    { key: 'retLater', label: 'Retire 2 yrs later', fn: () => rtRunMC({ ...IN, retAge: IN.retAge + 2, sipTill: Math.max(IN.sipTill, IN.retAge + 2) }) },
-    { key: 'retEarlier', label: 'Retire 2 yrs earlier', fn: () => rtRunMC({ ...IN, retAge: Math.max(IN.age + 5, IN.retAge - 2) }) },
-    { key: 'lowReturns', label: 'Returns −2%', fn: () => rtRunMC({ ...IN, preMu: IN.preMu - 0.02, postMu: IN.postMu - 0.02 }) },
-    { key: 'expenses20', label: 'Expenses +20%', fn: () => rtRunMC({ ...IN, expM: IN.expM * 1.2 }) },
-    { key: 'sequenceRisk', label: 'Bad first 5 yrs (sequence risk)', fn: () => rtRunMC({ ...IN, postMu: IN.postMu - 0.04, postSig: IN.postSig + 0.04 }) },
-    { key: 'equityCrash', label: `Equity crash at retirement (−${Math.round((IN.crashSeverity || 0.30) * 100)}%)`, fn: () => rtRunMC({ ...IN, _crashReturn: -(IN.crashSeverity || 0.30) }) },
-    { key: 'inflDecade', label: 'High inflation decade (+2%, 10 yrs)', fn: () => rtRunMC({ ...IN, _inflShockYrs: 10, _inflShockExtra: 0.02 }) },
-    { key: 'stagflation', label: 'Stagflation (low return + high inflation)', fn: () => rtRunMC({ ...IN, postMu: IN.postMu - 0.02, _inflShockYrs: yrsRetire, _inflShockExtra: 0.02 }) },
-    { key: 'longevity', label: 'Longevity stress (+5 yrs)', fn: () => rtRunMC({ ...IN, lifeExp: IN.lifeExp + 5 }) },
-    { key: 'flexWithdrawal', label: 'Flexible withdrawal strategy', fn: () => rtRunMC({ ...IN, withdrawalStrategy: 'flexible' }) },
+    { key: 'sip10k',         label: '+₹10k/mo SIP',                                                                                    fn: () => rtRunMC({ ...IN, sipM: IN.sipM + 10000 }) },
+    { key: 'sip25k',         label: '+₹25k/mo SIP',                                                                                    fn: () => rtRunMC({ ...IN, sipM: IN.sipM + 25000 }) },
+    { key: 'retLater',       label: 'Retire 2 years later',                                                                             fn: () => rtRunMC({ ...IN, retAge: IN.retAge + 2, sipTill: Math.max(IN.sipTill, IN.retAge + 2) }) },
+    { key: 'retEarlier',     label: 'Retire 2 years earlier',                                                                           fn: () => rtRunMC({ ...IN, retAge: Math.max(IN.age + 5, IN.retAge - 2) }) },
+    { key: 'lowReturns',     label: 'Returns −2% across the board (both before and after retirement)',                                              fn: () => rtRunMC({ ...IN, preMu: IN.preMu - 0.02, postMu: IN.postMu - 0.02 }) },
+    { key: 'expenses20',     label: 'Retirement expenses 20% higher than planned',                                                                    fn: () => rtRunMC({ ...IN, expM: IN.expM * 1.2 }) },
+    { key: 'sequenceRisk',   label: 'Poor first 5 years of retirement — sequence risk (lower returns + higher swings early on)',                       fn: () => rtRunMC({ ...IN, postMu: IN.postMu - 0.04, postSig: IN.postSig + 0.04 }) },
+    { key: 'equityCrash',    label: `Equity crash at retirement (−${Math.round((IN.crashSeverity || 0.30) * 100)}% in year one, recovers after)`,     fn: () => rtRunMC({ ...IN, _crashReturn: -(IN.crashSeverity || 0.30) }) },
+    { key: 'inflDecade',     label: 'High inflation decade (+2% above expected, first 10 years of retirement only)',                                   fn: () => rtRunMC({ ...IN, _inflShockYrs: 10, _inflShockExtra: 0.02 }) },
+    { key: 'stagflation',    label: 'Low-return / high-inflation regime — stagflation (−2% returns, +2% inflation for entire retirement)',             fn: () => rtRunMC({ ...IN, postMu: IN.postMu - 0.02, _inflShockYrs: yrsRetire, _inflShockExtra: 0.02 }) },
+    { key: 'longevity',      label: 'Extended retirement horizon (+5 years)',                                                                          fn: () => rtRunMC({ ...IN, lifeExp: IN.lifeExp + 5 }) },
+    { key: 'flexWithdrawal', label: 'Flexible withdrawal — spending trims automatically when markets fall (guardrail strategy)',                       fn: () => rtRunMC({ ...IN, withdrawalStrategy: 'flexible' }) },
   ];
   return scenarios.map(s => {
     const r = s.fn();

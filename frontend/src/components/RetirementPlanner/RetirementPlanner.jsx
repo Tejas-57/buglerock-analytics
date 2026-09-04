@@ -766,7 +766,7 @@ function Results({ R, onEdit }) {
       <div className="rt-kpi-grid">
         <Kpi val={rtFmt(R.P50[R.yearsToRet])} lbl="Median corpus at retirement" note={`In half the simulations, you'd have more than this by age ${R.IN.retAge}; in half, less.`} color={BERRY} />
         <Kpi val={rtFmt(R.corpusNeeded)} lbl="Corpus needed at retirement" note={`What the plan calculates you'll actually need saved up by age ${R.IN.retAge}.`} color={PLUM} />
-        <Kpi val={`₹${Math.round(R.incomeAtRet / 1000)}K/mo`} lbl="Monthly income needed" note={`Estimated monthly spending needed starting at age ${R.IN.retAge}, after other income and any NPS annuity.`} color={vc} />
+        <Kpi val={`₹${Math.round((R.firstNeed ? R.firstNeed * 100000 / 12 : R.incomeAtRet) / 1000)}K/mo`} lbl="Gross monthly withdrawal" note={`What the portfolio must release each month at age ${R.IN.retAge}. Includes tax gross-up — your actual spending is ₹${Math.round(R.incomeAtRet / 1000)}K/mo.`} color={vc} />
       </div>
 
       {/* Range bar */}
