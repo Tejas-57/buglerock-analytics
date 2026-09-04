@@ -74,7 +74,7 @@ export function rtBuildFullSections(R) {
   }
   const retX = fx(R.yearsToRet);
   let goalMk = '';
-  Object.keys(R.goalsByYear).forEach((yr) => {
+  Object.keys(R.goalsByYear || {}).forEach((yr) => {
     const gxp = fx(+yr), gvp = R.P50[+yr];
     const gl = IN.goals.find((g) => g.age === (IN.age + (+yr))) || {};
     const goalLabel = gl.name || '';
@@ -215,7 +215,7 @@ export function rtBuildFullSections(R) {
     const sipIn = (ca <= IN.sipTill && ca <= IN.retAge) ? sipA2 : 0;
     if (sipIn) sipA2 *= (1 + IN.stepUp);
     const epfIn = ca === IN.retAge ? R.epfAtRet + R.npsLump : 0;
-    const li2 = R.lumpsByYear[y] || 0, gi2 = R.goalsByYear[y] || 0;
+    const li2 = (R.lumpsByYear || {})[y] || 0, gi2 = (R.goalsByYear || {})[y] || 0;
     const oneT2 = ca === IN.retAge && IN.oneTime ? IN.oneTime : 0;
     let wd2 = 0;
     if (isRet2) {
@@ -268,7 +268,9 @@ export function rtBuildFullSections(R) {
     ['Tax on withdrawals', (IN.tax * 100).toFixed(0) + '%'],
     ['Pre-ret return', (IN.preMu * 100).toFixed(1) + '% ± ' + (IN.preSig * 100).toFixed(0) + '% (volatility)'],
     ['Post-ret return', (IN.postMu * 100).toFixed(1) + '% ± ' + (IN.postSig * 100).toFixed(0) + '% (volatility)'],
-    ['Inflation', (IN.infl * 100).toFixed(1) + '%'],
+    ...(IN.lateRMu != null ? [['Late-ret return (75+)', (IN.lateRMu * 100).toFixed(1) + '% ± ' + (IN.lateRSig * 100).toFixed(0) + '% (glide path)']] : []),
+    ['Inflation', (IN.infl * 100).toFixed(1) + '%' + (IN.inflUnc ? ' ± ' + (IN.inflUnc * 100).toFixed(1) + '% uncertainty per simulation' : '')],
+    ...(IN.withdrawalStrategy === 'guardrail' ? [['Withdrawal strategy', `Guardrail — cut ${IN.guardrailCut}% if portfolio drops >${IN.guardrailTrigger}% below target`]] : [['Withdrawal strategy', 'Fixed real withdrawal']]),
     ['Simulations', R.NSIM + ' Monte Carlo paths'],
   ].map((r) =>
     `<tr><td style="padding:7px 14px;border-bottom:1px solid ${GR20};font-size:11.5px;font-weight:500;color:${GR80};width:200px">${r[0]}</td>`
@@ -331,15 +333,49 @@ export function rtBuildFullSections(R) {
       + `<div style="padding:10px 20px 14px;font-size:11px;color:${GR60};border-top:1px solid ${GR20};line-height:1.7">Each scenario changes one variable from the base plan and re-runs 1,000 Monte Carlo simulations. The 85% threshold is a widely used rule-of-thumb for plan adequacy. Scenarios above the dashed line are considered robust.</div>`)
     + `</section>`
 
+    + (R.planScore != null ? (() => {
+      const ps = R.planScore;
+      const psColor = ps.total >= 80 ? POS : ps.total >= 55 ? WARN : NEG;
+      const psVerdict = ps.total >= 80 ? 'Excellent' : ps.total >= 65 ? 'Good' : ps.total >= 50 ? 'Fair' : 'Needs Work';
+      const components = [
+        { label: 'Funding adequacy', score: ps.funding, max: 35, color: BERRY },
+        { label: 'Corpus buffer', score: ps.buffer, max: 30, color: PLUM },
+        { label: 'Downside resilience', score: ps.downside, max: 22, color: MUT },
+        { label: 'Goal coverage', score: ps.goals, max: 13, color: WARN },
+      ];
+      return `<section style="margin-bottom:32px">` + secHd('6', 'Plan Score', 'Composite health rating across four dimensions')
+        + card(cardHd('Retirement plan score — 100-point composite')
+          + `<div style="display:grid;grid-template-columns:auto 1fr;gap:0">`
+          + `<div style="padding:28px 32px;text-align:center;border-right:1px solid ${GR20};display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:160px">`
+          + `<div style="font-family:Cormorant Garamond,serif;font-size:64px;font-weight:700;color:${psColor};line-height:1">${ps.total}</div>`
+          + `<div style="font-size:11px;font-weight:700;color:${psColor};letter-spacing:.06em;text-transform:uppercase;margin-top:2px">${psVerdict}</div>`
+          + `<div style="font-size:10px;color:${GR60};margin-top:6px">out of 100</div>`
+          + `</div>`
+          + `<div style="padding:20px 24px">`
+          + components.map(c => {
+            const pct = Math.min(100, Math.max(0, (c.score / c.max) * 100));
+            return `<div style="margin-bottom:14px">`
+              + `<div style="display:flex;justify-content:space-between;margin-bottom:5px">`
+              + `<span style="font-size:11.5px;color:${GR80};font-weight:500">${c.label}</span>`
+              + `<span style="font-family:DM Mono,monospace;font-size:12px;font-weight:700;color:${c.color}">${c.score.toFixed(1)} / ${c.max}</span>`
+              + `</div>`
+              + `<div style="height:8px;background:${GR20};border-radius:4px;overflow:hidden">`
+              + `<div style="width:${pct.toFixed(1)}%;height:100%;background:${c.color};border-radius:4px;opacity:.85"></div>`
+              + `</div></div>`;
+          }).join('')
+          + `</div></div>`)
+        + `</section>`;
+    })() : '')
+
     + (goalRows ?
-      `<section style="margin-bottom:32px">` + secHd('6', 'Financial Goals', 'Future value and feasibility at each goal date')
+      `<section style="margin-bottom:32px">` + secHd('7', 'Financial Goals', 'Future value and feasibility at each goal date')
       + card(cardHd("Goals — today's value inflated to goal year")
         + `<table style="width:100%;border-collapse:collapse"><thead><tr>${th('Goal', 'left')}${th('Age')}${th('Year')}${th("Today's value")}${th('Future value')}${th('Median corpus')}${th('Feasibility')}</tr></thead>`
         + `<tbody>${goalRows}</tbody></table>`
         + `<div style="padding:10px 14px;font-size:10px;color:${GR60};background:${GR10};border-top:1px solid ${GR20}">Goal feasibility is based on the median corpus at that age vs the inflated goal amount. A goal is "At risk" if the median corpus is less than 1.25× the goal amount at that age.</div>`)
       + `</section>` : '')
 
-    + `<section class="pg" style="margin-bottom:32px">` + secHd('7', 'Year-by-Year Cashflow', 'All inflows and outflows — median corpus and stress case (P10)')
+    + `<section class="pg" style="margin-bottom:32px">` + secHd('8', 'Year-by-Year Cashflow', 'All inflows and outflows — median corpus and stress case (P10)')
     + card(cardHd('Annual cashflow statement — ★ = retirement year')
       + `<div style="overflow-x:auto"><table class="cf-table" style="width:100%;border-collapse:collapse;font-size:10px;table-layout:fixed">`
       + `<colgroup><col style="width:6%"><col style="width:6%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:12%"><col style="width:13%"><col style="width:13%"></colgroup>`
@@ -350,7 +386,7 @@ export function rtBuildFullSections(R) {
       + `<div style="padding:10px 16px;font-size:10px;color:${GR60};background:${GR10};border-top:1px solid ${GR20}">EPF+NPS lump merges into corpus at retirement. Withdrawals are grossed up for ${(IN.tax * 100).toFixed(0)}% tax. NPS annuity income (${fmtL(R.npsAnnuityIncome)}/yr) deducted before computing withdrawal. Shaded rows every 5 years. Values shown in L / Cr as applicable.</div>`)
     + `</section>`
 
-    + `<section class="pg" style="margin-bottom:32px">` + secHd('8', 'Investment Policy & Assumptions')
+    + `<section class="pg" style="margin-bottom:32px">` + secHd('9', 'Investment Policy & Assumptions')
     + card(cardHd('Plan parameters and methodology')
       + `<table style="width:100%;border-collapse:collapse"><tbody>${ipsRows}</tbody></table>`
       + `<div style="padding:14px 18px;background:${GR10};border-top:1px solid ${GR20}">`

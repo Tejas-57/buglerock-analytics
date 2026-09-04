@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { rtRunSimulation, rtFmt, rtFmtK } from './rtEngine';
+import { rtRunSimulation, rtFmt, rtFmtK, rtFmtCr, rtFmtA, rtFmtM } from './rtEngine';
 import { rtBuildFullSections, rtOpenReport } from './rtReport';
 import './RetirementPlanner.css';
 
@@ -32,8 +32,26 @@ function fromIndianStr(str) {
 const INDIAN_FMT_FIELDS = new Set([
   'corpus', 'epf', 'nps', 'onetime',   // lump sum amounts
   'sip', 'epfm', 'npsm',               // monthly contributions
-  'expenses', 'otherinc',    // monthly income/expense fields
+  'expenses', 'otherinc',               // monthly income/expense fields
 ]);
+
+/* ── Model portfolio presets — fallback values until API responds ── */
+const MODEL_PRESETS_DEFAULT = {
+  conservative:    { ret: 7.0,  vol: 5.5,  eq: 25,  debt: 60, label: 'Conservative' },
+  modConservative: { ret: 8.5,  vol: 7.5,  eq: 38,  debt: 45, label: 'Moderately Conservative' },
+  balanced:        { ret: 10.5, vol: 10.0, eq: 55,  debt: 25, label: 'Balanced' },
+  modAggressive:   { ret: 12.5, vol: 13.5, eq: 72,  debt: 10, label: 'Moderately Aggressive' },
+  aggressive:      { ret: 14.0, vol: 16.0, eq: 85,  debt: 5,  label: 'Aggressive' },
+};
+const SS_KEY = 'br_model_presets_v1';
+const API = process.env.REACT_APP_API_URL || '';
+const MODEL_PROFILES = [
+  { key: 'conservative',    label: 'Conservative' },
+  { key: 'modConservative', label: 'Mod Conservative' },
+  { key: 'balanced',        label: 'Balanced' },
+  { key: 'modAggressive',   label: 'Mod Aggressive' },
+  { key: 'aggressive',      label: 'Aggressive' },
+];
 
 const DEFAULTS = {
   name: '', age: 35, retage: 60, lifeexp: 90, spouse: '', rm: 'BugleRock Capital',
@@ -41,7 +59,12 @@ const DEFAULTS = {
   epf: 1500000, epfm: 12000, epfr: 8.1, nps: 800000, npsm: 10000, npsr: 10, annrate: 6,
   expenses: 100000, replace: 80,
   otherinc: 0, otherindexed: '1', onetime: 0, tax: 10,
-  preret: 12, prevol: 14, postret: 8, postvol: 7, inflation: 6, sims: 5000,
+  withdrawalStrategy: 'fixed', guardrailTrigger: 15, guardrailCut: 10,
+  assumpMode: 'model', accumModel: 'modAggressive', drawdownModel: 'modConservative',
+  preret: 12.5, prevol: 13.5, postret: 8.5, postvol: 7.5,
+  lateret: 7.0, latevol: 5.5,
+  inflation: 6, influnc: 1.5, sims: 500, targetconf: 85,
+  crashSeverity: 30,
 };
 const DEFAULT_GOALS = [
   { name: "Child's Education", age: 48, amt: 4000000 },
@@ -78,18 +101,60 @@ export default function RetirementPlanner() {
   const [step, setStep]   = useState(() => lsGet(LS_STEP,   'input'));
   const [result, setResult] = useState(() => lsGet(LS_RESULT, null));
   const [running, setRunning] = useState(false);
+  const [modelPresets, setModelPresets] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem(SS_KEY);
+      return cached ? JSON.parse(cached) : MODEL_PRESETS_DEFAULT;
+    } catch { return MODEL_PRESETS_DEFAULT; }
+  });
 
-  // Clear any stale health/healthinfl values from localStorage (removed fields)
+  // Fetch live model stats — one call per session, cached in sessionStorage
+  useEffect(() => {
+    if (sessionStorage.getItem(SS_KEY)) return; // already cached this session
+    fetch(`${API}/api/models/portfolios`)
+      .then(r => r.json())
+      .then(({ portfolios }) => {
+        if (!portfolios?.length) return;
+        // Map backend keys (mod_conservative) → frontend keys (modConservative)
+        const keyMap = { conservative: 'conservative', mod_conservative: 'modConservative', balanced: 'balanced', mod_aggressive: 'modAggressive', aggressive: 'aggressive' };
+        const built = { ...MODEL_PRESETS_DEFAULT };
+        portfolios.forEach(p => {
+          const fkey = keyMap[p.key];
+          if (!fkey) return;
+          const ret3y = p.blended?.return_3y;
+          const vol3y = p.blended?.std_dev_3y;
+          const eq    = p.actual?.equity_pct;
+          const debt  = p.actual?.debt_pct;
+          if (ret3y != null && vol3y != null && eq != null && debt != null) {
+            built[fkey] = {
+              ...built[fkey],
+              ret:  Math.round(ret3y * 10) / 10,
+              vol:  Math.round(vol3y * 10) / 10,
+              eq:   Math.round(eq),
+              debt: Math.round(debt),
+            };
+          }
+        });
+        sessionStorage.setItem(SS_KEY, JSON.stringify(built));
+        setModelPresets(built);
+      })
+      .catch(() => {}); // silently keep fallback on error
+  }, []);
+
+  // Migrate old localStorage: add new fields if missing
   useEffect(() => {
     try {
       const stored = localStorage.getItem(LS_FORM);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if ('health' in parsed || 'healthinfl' in parsed) {
-          delete parsed.health;
-          delete parsed.healthinfl;
+        let changed = false;
+        const newFields = { withdrawalStrategy: 'fixed', guardrailTrigger: 15, guardrailCut: 10, lateret: 7.0, latevol: 5.5, influnc: 1.5, targetconf: 85, crashSeverity: 30, assumpMode: 'model', accumModel: 'modAggressive', drawdownModel: 'modConservative' };
+        for (const [k, v] of Object.entries(newFields)) {
+          if (!(k in parsed)) { parsed[k] = v; changed = true; }
+        }
+        if (changed) {
           localStorage.setItem(LS_FORM, JSON.stringify(parsed));
-          setF(prev => { const next = { ...prev }; delete next.health; delete next.healthinfl; return next; });
+          setF(prev => ({ ...DEFAULTS, ...prev, ...Object.fromEntries(Object.entries(newFields).filter(([k]) => !(k in prev))) }));
         }
       }
     } catch {}
@@ -109,29 +174,33 @@ export default function RetirementPlanner() {
     name: (f.name || '').trim(),
     age: Math.round(num('age')), retAge: Math.round(num('retage')), lifeExp: Math.round(num('lifeexp')),
     spouse: num('spouse') || null,
-    // Engine works in Lakhs — convert absolute ₹ inputs to Lakhs here
     corpus0: num('corpus') / 100000, sipM: num('sip'), stepUp: num('stepup') / 100, sipTill: Math.round(num('sipuntil')),
     epf: num('epf') / 100000, epfM: num('epfm'), epfR: num('epfr') / 100,
     nps: num('nps') / 100000, npsM: num('npsm'), npsR: num('npsr') / 100, annRate: num('annrate') / 100,
     expM: num('expenses'), replace: num('replace') / 100,
     otherIncM: num('otherinc'), otherIndexed: f.otherindexed === '1',
-    oneTime: num('onetime') / 100000,  // absolute ₹ → Lakhs for engine
-    tax: num('tax') / 100,
+    oneTime: num('onetime') / 100000, tax: num('tax') / 100,
+    withdrawalStrategy: f.withdrawalStrategy || 'fixed',
+    guardrailTrigger: num('guardrailTrigger') / 100, guardrailCut: num('guardrailCut') / 100,
     preMu: num('preret') / 100, preSig: num('prevol') / 100,
     postMu: num('postret') / 100, postSig: num('postvol') / 100,
-    infl: num('inflation') / 100,
-    goals: goals.map(g => ({ ...g, age: parseFloat(g.age) || 0, amt: (parseFloat(g.amt) || 0) / 100000 })), // absolute ₹ → Lakhs
-    lumps: lumps.map(l => ({ ...l, age: parseFloat(l.age) || 0, amt: (parseFloat(l.amt) || 0) / 100000 })), // absolute ₹ → Lakhs
+    lateMu: num('lateret') / 100, lateSig: num('latevol') / 100,
+    infl: num('inflation') / 100, inflUnc: num('influnc') / 100,
+    nSims: parseInt(f.sims, 10) || 500,
+    targetConf: num('targetconf') || 85,
+    crashSeverity: num('crashSeverity') / 100,
+    goals: goals.map(g => ({ ...g, age: parseFloat(g.age) || 0, amt: (parseFloat(g.amt) || 0) / 100000 })),
+    lumps: lumps.map(l => ({ ...l, age: parseFloat(l.age) || 0, amt: (parseFloat(l.amt) || 0) / 100000 })),
   });
 
   const run = () => {
     const IN = collectInputs();
     if (IN.retAge < IN.age) { alert('Retirement age must be greater than or equal to current age.'); return; }
     if (IN.lifeExp <= IN.retAge) { alert('Plan-till age must be greater than retirement age.'); return; }
+    if (IN.postMu <= IN.infl) { alert(`Post-retirement return (${(IN.postMu*100).toFixed(1)}%) must exceed inflation (${(IN.infl*100).toFixed(1)}%).`); return; }
     setRunning(true);
     setTimeout(() => {
-      const NSIM = parseInt(f.sims, 10) || 500;
-      const R = rtRunSimulation(IN, NSIM);
+      const R = rtRunSimulation(IN, IN.nSims);
       setResult(R);
       setRunning(false);
       setStep('output');
@@ -165,7 +234,7 @@ export default function RetirementPlanner() {
       </div>
 
       {step === 'input' && (
-        <InputForm f={f} set={set} goals={goals} setGoals={setGoals} lumps={lumps} setLumps={setLumps} onRun={run} running={running} />
+        <InputForm f={f} set={set} setForm={setF} goals={goals} setGoals={setGoals} lumps={lumps} setLumps={setLumps} onRun={run} running={running} modelPresets={modelPresets} />
       )}
       {step === 'output' && result && (
         <Results R={result} onEdit={() => setStep('input')} />
@@ -241,7 +310,7 @@ function Field({ k, label, type = 'number', f, set, ...rest }) {
 }
 
 // ══════════════ Input Form ══════════════
-function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running }) {
+function InputForm({ f, set, setForm, goals, setGoals, lumps, setLumps, onRun, running, modelPresets }) {
 
   return (
     <>
@@ -339,36 +408,206 @@ function InputForm({ f, set, goals, setGoals, lumps, setLumps, onRun, running })
           <Field f={f} set={set} k="onetime" label="One-time expense at retirement (₹)" min="0" />
           <Field f={f} set={set} k="tax" label="Tax on withdrawals (%)" min="0" max="30" step="1" />
         </div>
+        <div style={{ marginTop: 16 }}>
+          <label className="rt-subgroup-label">Withdrawal strategy</label>
+          <div className="rt-wd-grid">
+            <div className={`rt-wd-card ${f.withdrawalStrategy !== 'flexible' ? 'selected' : ''}`}
+              onClick={() => setForm(p => ({ ...p, withdrawalStrategy: 'fixed' }))}>
+              <div className="rt-wd-card-top">
+                <div className="rt-wd-card-title" style={f.withdrawalStrategy !== 'flexible' ? { color: '#912F63' } : {}}>Fixed real withdrawal</div>
+                <div className="rt-wd-card-radio"></div>
+              </div>
+              <div className="rt-wd-card-tag" style={f.withdrawalStrategy !== 'flexible' ? { color: '#912F63', background: '#f5e2ec' } : {}}>Default · Simple</div>
+              <div className="rt-wd-card-desc">Withdrawal amount <strong>grows with inflation every year</strong>, regardless of how markets perform. Simple and predictable.</div>
+            </div>
+            <div className={`rt-wd-card ${f.withdrawalStrategy === 'flexible' ? 'selected' : ''}`}
+              onClick={() => setForm(p => ({ ...p, withdrawalStrategy: 'flexible' }))}>
+              <div className="rt-wd-card-top">
+                <div className="rt-wd-card-title" style={f.withdrawalStrategy === 'flexible' ? { color: '#912F63' } : {}}>Flexible (guardrail)</div>
+                <div className="rt-wd-card-radio"></div>
+              </div>
+              <div className="rt-wd-card-tag" style={f.withdrawalStrategy === 'flexible' ? { color: '#912F63', background: '#f5e2ec' } : {}}>Adaptive</div>
+              <div className="rt-wd-card-desc">
+                If the portfolio falls more than{' '}
+                <span className="rt-wd-cut-inline" onClick={e => e.stopPropagation()}>
+                  <input type="number" value={f.guardrailTrigger || 15} min="5" max="40" step="5"
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => { e.stopPropagation(); setForm(p => ({ ...p, guardrailTrigger: e.target.value, withdrawalStrategy: 'flexible' })); }} />%
+                </span>{' '}
+                year-over-year, that year's withdrawal is temporarily cut by{' '}
+                <span className="rt-wd-cut-inline" onClick={e => e.stopPropagation()}>
+                  <input type="number" value={f.guardrailCut || 10} min="5" max="40" step="5"
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => { e.stopPropagation(); setForm(p => ({ ...p, guardrailCut: e.target.value, withdrawalStrategy: 'flexible' })); }} />%
+                </span>, then returns to normal once the decline eases.
+              </div>
+            </div>
+          </div>
+        </div>
       </Section>
 
       {/* G — Assumptions */}
-      <Section code="G" title="Market assumptions & simulation" sub="Return expectations, volatility, inflation and Monte Carlo settings">
-        <div className="rt-grid rt-grid-3">
-          <div>
-            <div className="rt-subgroup-label">Pre-retirement (accumulation)</div>
-            <div className="rt-grid rt-grid-2">
-              <Field f={f} set={set} k="preret" label="Expected return (%)" min="4" max="20" step="0.5" />
-              <Field f={f} set={set} k="prevol" label="Volatility / std dev (%)" min="2" max="30" />
+      <Section code="G" title="Investment strategy & assumptions" sub="Choose model portfolios or enter custom return assumptions">
+        {/* Mode toggle */}
+        <div className="rt-mode-pill">
+          <button
+            className={`rt-mode-btn ${f.assumpMode !== 'custom' ? 'active' : ''}`}
+            onClick={() => setForm(p => ({ ...p, assumpMode: 'model' }))}
+          >FundIQ model portfolios</button>
+          <button
+            className={`rt-mode-btn ${f.assumpMode === 'custom' ? 'active' : ''}`}
+            onClick={() => setForm(p => ({ ...p, assumpMode: 'custom' }))}
+          >Custom assumptions</button>
+        </div>
+
+        {/* Panel A: Model portfolio mode */}
+        {f.assumpMode !== 'custom' && (
+          <div className="rt-model-panel">
+            <div className="rt-model-panel-hd">
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand-dark)', marginBottom: 3 }}>Link to FundIQ model portfolios</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Select accumulation and drawdown models. Return, volatility and equity glide path are auto-derived from the BL-posterior optimiser.</div>
+              </div>
             </div>
-          </div>
-          <div>
-            <div className="rt-subgroup-label">Post-retirement (drawdown)</div>
-            <div className="rt-grid rt-grid-2">
-              <Field f={f} set={set} k="postret" label="Expected return (%)" min="3" max="15" step="0.5" />
-              <Field f={f} set={set} k="postvol" label="Volatility / std dev (%)" min="1" max="20" />
+            <div className="rt-model-selectors">
+              <div className="rt-model-selector-box">
+                <div className="rt-model-selector-label" style={{ color: 'var(--brand)' }}>Accumulation (pre-retirement)</div>
+                <div className="rt-model-pills">
+                  {MODEL_PROFILES.map(m => (
+                    <button key={m.key}
+                      className={`rt-model-pill ${(f.accumModel || 'modAggressive') === m.key ? 'active-berry' : ''}`}
+                      onClick={() => {
+                        const stats = modelPresets[m.key];
+                        setForm(p => ({ ...p, accumModel: m.key, preret: stats.ret, prevol: stats.vol }));
+                      }}
+                    >{m.label}</button>
+                  ))}
+                </div>
+                <div className="rt-model-stats">
+                  {(() => { const s = modelPresets[f.accumModel || 'modAggressive']; return `${s.label} · Return ${s.ret}% · Vol ${s.vol}% · Equity ${s.eq}% · Debt ${s.debt}% (BL-posterior)`; })()}
+                </div>
+              </div>
+              <div className="rt-model-selector-box">
+                <div className="rt-model-selector-label" style={{ color: 'var(--brand-dark)' }}>Drawdown (post-retirement)</div>
+                <div className="rt-model-pills">
+                  {MODEL_PROFILES.map(m => (
+                    <button key={m.key}
+                      className={`rt-model-pill ${(f.drawdownModel || 'modConservative') === m.key ? 'active-plum' : ''}`}
+                      onClick={() => {
+                        const stats = modelPresets[m.key];
+                        const late = modelPresets['conservative'];
+                        setForm(p => ({ ...p, drawdownModel: m.key, postret: stats.ret, postvol: stats.vol, lateret: late.ret, latevol: late.vol }));
+                      }}
+                    >{m.label}</button>
+                  ))}
+                </div>
+                <div className="rt-model-stats">
+                  {(() => { const s = modelPresets[f.drawdownModel || 'modConservative']; return `${s.label} · Return ${s.ret}% · Vol ${s.vol}% · Equity ${s.eq}% · Debt ${s.debt}% (BL-posterior)`; })()}
+                </div>
+              </div>
             </div>
-          </div>
-          <div>
-            <div className="rt-subgroup-label">Macro & simulation</div>
-            <div className="rt-grid rt-grid-2">
+            <div className="rt-model-note">
+              Return and volatility are derived automatically from FundIQ Model Portfolios. Switch to <strong>Custom assumptions</strong> to edit them manually.
+            </div>
+            <div className="rt-grid rt-grid-6" style={{ gap: 10, marginTop: 18 }}>
               <Field f={f} set={set} k="inflation" label="General inflation (%)" min="2" max="12" step="0.5" />
+              <Field f={f} set={set} k="tax" label="Tax on withdrawal (%)" min="0" max="30" step="1" />
+              <Field f={f} set={set} k="influnc" label="Infl. uncertainty (±%)" min="0" max="5" step="0.5" />
               <div className="rt-f">
-                <label>No. of simulations</label>
+                <label>Simulations</label>
                 <select value={f.sims} onChange={set('sims')}>
-                  <option>500</option><option>1000</option><option>2000</option><option>5000</option><option>10000</option>
+                  <option>300</option><option>500</option><option>1000</option><option>2000</option><option>5000</option><option>10000</option>
+                </select>
+              </div>
+              <div className="rt-f">
+                <label>Target confidence</label>
+                <select value={f.targetconf} onChange={set('targetconf')}>
+                  <option value="80">80%</option>
+                  <option value="85">85%</option>
+                  <option value="90">90%</option>
+                  <option value="95">95%</option>
                 </select>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Panel B: Custom assumptions */}
+        {f.assumpMode === 'custom' && (
+          <div>
+            <div className="rt-fiq-defaults-row">
+              <input type="checkbox" id="rt-usefiq" checked={!!f._fiqLocked}
+                onChange={e => {
+                  const locked = e.target.checked;
+                  setForm(p => ({
+                    ...p, _fiqLocked: locked,
+                    ...(locked ? { preret: 12, prevol: 14, postret: 8, postvol: 7, lateret: 5.5, latevol: 5, inflation: 6, influnc: 1.5, tax: 10 } : {})
+                  }));
+                }}
+              />
+              <label htmlFor="rt-usefiq" style={{ fontWeight: 600, color: 'var(--brand-dark)', cursor: 'pointer', fontSize: 13 }}>Use FundIQ house assumptions</label>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>12% pre-ret · 8% post-ret · 5.5% late-ret · 6% infl</span>
+            </div>
+            <div className="rt-grid rt-grid-2" style={{ gap: 18, marginTop: 16 }}>
+              <div>
+                <div className="rt-subgroup-label">Pre-retirement (accumulation)</div>
+                <div className="rt-grid rt-grid-2">
+                  <Field f={f} set={set} k="preret" label="Expected return (%)" min="4" max="20" step="0.5" disabled={!!f._fiqLocked} />
+                  <Field f={f} set={set} k="prevol" label="Volatility / std dev (%)" min="2" max="30" disabled={!!f._fiqLocked} />
+                </div>
+              </div>
+              <div>
+                <div className="rt-subgroup-label">Post-retirement (drawdown)</div>
+                <div className="rt-grid rt-grid-2">
+                  <Field f={f} set={set} k="postret" label="Expected return (%)" min="3" max="15" step="0.5" disabled={!!f._fiqLocked} />
+                  <Field f={f} set={set} k="postvol" label="Volatility / std dev (%)" min="1" max="20" disabled={!!f._fiqLocked} />
+                </div>
+              </div>
+              <div>
+                <div className="rt-subgroup-label">Late retirement (glide target)</div>
+                <div className="rt-grid rt-grid-2">
+                  <Field f={f} set={set} k="lateret" label="Expected return (%)" min="2" max="15" step="0.5" disabled={!!f._fiqLocked} />
+                  <Field f={f} set={set} k="latevol" label="Volatility / std dev (%)" min="1" max="20" disabled={!!f._fiqLocked} />
+                </div>
+              </div>
+              <div>
+                <div className="rt-subgroup-label">Macro & simulation</div>
+                <div className="rt-grid rt-grid-2">
+                  <Field f={f} set={set} k="inflation" label="General inflation (%)" min="2" max="12" step="0.5" />
+                  <Field f={f} set={set} k="influnc" label="Infl. uncertainty (±%)" min="0" max="5" step="0.5" />
+                  <Field f={f} set={set} k="tax" label="Tax on withdrawals (%)" min="0" max="30" step="1" disabled={!!f._fiqLocked} />
+                </div>
+              </div>
+            </div>
+            <div className="rt-grid rt-grid-2" style={{ gap: 10, marginTop: 14 }}>
+              <div className="rt-f">
+                <label>No. of simulations</label>
+                <select value={f.sims} onChange={set('sims')}>
+                  <option>300</option><option>500</option><option>1000</option><option>2000</option><option>5000</option><option>10000</option>
+                </select>
+              </div>
+              <div className="rt-f">
+                <label>Target confidence (%)</label>
+                <select value={f.targetconf} onChange={set('targetconf')}>
+                  <option value="80">80% — flexible</option>
+                  <option value="85">85% — BugleRock standard</option>
+                  <option value="90">90% — conservative</option>
+                  <option value="95">95% — highly conservative</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Crash strip — always visible */}
+        <div className="rt-crash-strip">
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-primary)' }}>Equity crash stress test</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Used in the “Equity crash at retirement” scenario — a sudden market drop forced in the first year of retirement, to test resilience against bad timing.</div>
+          </div>
+          <div className="rt-f" style={{ width: 130, flexShrink: 0 }}>
+            <label>Crash severity (%)</label>
+            <input type="text" inputMode="decimal" value={f.crashSeverity ?? 30} onChange={e => setForm(p => ({ ...p, crashSeverity: e.target.value }))} />
           </div>
         </div>
       </Section>
@@ -496,6 +735,32 @@ function Results({ R, onEdit }) {
           </div>
         </div>
       </div>
+
+      {/* Plan score */}
+      {R.score && (
+        <div className="rt-score-badge">
+          <div>
+            <div className="rt-score-big" style={{ color: R.score.composite >= 80 ? POS : R.score.composite >= 60 ? WARN : NEG }}>{R.score.composite}</div>
+            <div style={{ textAlign: 'center', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>/ 100</div>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>Retirement readiness score — composite of 5 dimensions</div>
+            {R.score.components.map((c, i) => {
+              const sc = parseFloat(c.score);
+              const cc = sc >= 80 ? POS : sc >= 60 ? WARN : NEG;
+              return (
+                <div className="rt-score-row" key={i}>
+                  <div className="rt-score-lbl">{c.label}</div>
+                  <div className="rt-score-wt">{c.weight}</div>
+                  <div className="rt-score-bar"><div className="rt-score-fill" style={{ width: `${c.score}%`, background: cc }} /></div>
+                  <div className="rt-score-num" style={{ color: cc }}>{c.score}</div>
+                </div>
+              );
+            })}
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>Score = Funding probability (35%) + Corpus buffer (30%) + Downside resilience (22%) + Goal coverage (13%). BugleRock house methodology.</div>
+          </div>
+        </div>
+      )}
 
       {/* KPI grid */}
       <div className="rt-kpi-grid">
