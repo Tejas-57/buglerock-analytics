@@ -167,17 +167,33 @@ export function rtBuildFullSections(R) {
   }).join('');
 
   // ── Sensitivity bars ──
+  // Short display labels for sensitivity bars (keep full labels for risk section)
+  const sensShortLabels = {
+    sip10k:         '+₹10k/mo SIP',
+    sip25k:         '+₹25k/mo SIP',
+    retLater:       'Retire 2 years later',
+    retEarlier:     'Retire 2 years earlier',
+    lowReturns:     'Returns −2% (pre & post-ret)',
+    expenses20:     'Expenses +20%',
+    sequenceRisk:   'Poor first 5 yrs — sequence risk',
+    equityCrash:    `Equity crash at retirement (−${Math.round((IN.crashSeverity || 0.30) * 100)}% yr 1)`,
+    inflDecade:     'High inflation decade (+2%, 10 yrs)',
+    stagflation:    'Stagflation (−2% return, +2% infl)',
+    longevity:      'Extended horizon (+5 years)',
+    flexWithdrawal: 'Flexible withdrawal (guardrail)',
+  };
   const sensBars = R.sens.map((s) => {
     const c = s.sr >= 85 ? POS : s.sr >= 65 ? WARN : NEG;
     const bg = s.sr >= 85 ? '#E6F4ED' : s.sr >= 65 ? '#FEF9EC' : '#FEE2E2';
-    return `<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">`
-      + `<div style="width:220px;font-size:11.5px;text-align:right;color:${s.base ? PLUM : GR60};font-weight:${s.base ? '700' : '400'};flex-shrink:0">${s.label}</div>`
-      + `<div style="flex:1;height:22px;background:${GR10};border-radius:4px;overflow:hidden;position:relative">`
+    const lbl = s.base ? 'Current plan' : (sensShortLabels[s.key] || s.label);
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">`
+      + `<div style="width:200px;font-size:11px;text-align:right;color:${s.base ? PLUM : GR60};font-weight:${s.base ? '700' : '400'};flex-shrink:0;line-height:1.3">${lbl}</div>`
+      + `<div style="flex:1;height:20px;background:${GR10};border-radius:4px;overflow:hidden;position:relative">`
       + `<div style="width:${s.sr}%;height:100%;background:${c};opacity:${s.base ? '1' : '.75'}"></div>`
       + `<div style="position:absolute;left:85%;top:0;bottom:0;width:1.5px;background:${PLUM};opacity:.3"></div>`
       + `</div>`
-      + `<div style="width:52px;font-family:DM Mono,monospace;font-size:13px;font-weight:700;color:${c}">${s.sr}%</div>`
-      + `<div style="width:90px;font-size:10px;color:${c};background:${bg};padding:2px 8px;border-radius:20px;text-align:center">${s.base ? 'Base plan' : s.sr > R.successRate ? '↑ +' + (s.sr - R.successRate) + 'pts' : s.sr < R.successRate ? '↓ ' + (s.sr - R.successRate) + 'pts' : '→ Same'}</div>`
+      + `<div style="width:40px;font-family:DM Mono,monospace;font-size:12px;font-weight:700;color:${c};text-align:right">${s.sr}%</div>`
+      + `<div style="width:68px;font-size:10px;color:${c};background:${bg};padding:2px 6px;border-radius:20px;text-align:center;flex-shrink:0">${s.base ? 'Base plan' : s.sr > R.successRate ? '↑ +' + (s.sr - R.successRate) + 'pts' : s.sr < R.successRate ? '↓ ' + (s.sr - R.successRate) + 'pts' : '→ Same'}</div>`
       + `</div>`;
   }).join('');
 
@@ -507,7 +523,54 @@ export function rtBuildFullSections(R) {
     + `<div style="font-size:9px;color:${GR60};margin-top:10px;text-align:center">SIP contributions = total nominal cash invested over ${IN.retAge - IN.age} years (not compounded). Market growth = net compounding the portfolio earned on everything that stayed invested (P50 corpus minus direct contributions). Goals are shown as a separate outflow — the bridge nodes will not sum exactly to the P50 corpus because money withdrawn for goals also loses future compounding, which is captured in the simulation but not separately shown here.</div>`
     + `</div></div>`;
 
-  const sectionsHtml = planScoreHtml + heroHtml + riskSectionHtml + phaseSplitHtml + bridgeSectionHtml + ''
+  // ── What should you do? ──
+  const sipGap = reqSIP != null ? reqSIP - IN.sipM : 0;
+  const whatToDoHtml = `<div class="rt-out-card rt-fade-in" style="margin-bottom:16px">`
+    + `<div class="rt-out-hdr"><div class="rt-out-title" style="color:${BERRY}">What should you do? — path to ${target}% confidence</div></div>`
+    + `<div class="rt-out-body">`
+    + `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">`
+    // Card 1 — SIP
+    + `<div style="border-radius:10px;padding:16px;border-left:4px solid ${sipGap > 0 ? BERRY : POS};background:${sipGap > 0 ? '#fff0f5' : '#f0fdf4'}">`
+    + `<div style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${sipGap > 0 ? BERRY : GR60};margin-bottom:8px">SIP adjustment</div>`
+    + (sipGap > 0
+      ? `<div style="font-family:'DM Mono',monospace;font-size:22px;font-weight:700;color:${PLUM};line-height:1">₹${Math.round(reqSIP).toLocaleString('en-IN')}/mo</div>`
+        + `<div style="font-size:11px;color:${GR60};margin-top:6px">Additional investment required:</div>`
+        + `<div style="font-size:12px;font-weight:700;color:${BERRY};margin-top:4px">+₹${Math.round(sipGap).toLocaleString('en-IN')}/month</div>`
+        + `<div style="font-size:10px;color:${GR60};margin-top:3px">Current: ₹${Math.round(IN.sipM).toLocaleString('en-IN')}/mo</div>`
+      : `<div style="font-family:'DM Mono',monospace;font-size:22px;font-weight:700;color:${POS};line-height:1">Sufficient</div>`
+        + `<div style="font-size:11px;color:${GR60};margin-top:6px">₹${Math.round(IN.sipM).toLocaleString('en-IN')}/mo meets ${target}% target</div>`)
+    + `</div>`
+    // Card 2 — Retire later
+    + `<div style="border-radius:10px;padding:16px;border-left:4px solid ${LAV};background:#f5f3ff">`
+    + `<div style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${GR60};margin-bottom:8px">Alternatively — retire later</div>`
+    + (altRetAge && altRetAge !== IN.retAge
+      ? `<div style="font-family:'DM Mono',monospace;font-size:22px;font-weight:700;color:${PLUM};line-height:1">Age ${altRetAge}</div>`
+        + `<div style="font-size:11px;color:${GR60};margin-top:6px">Retire ${altRetAge - IN.retAge} year(s) later than planned</div>`
+        + `<div style="font-size:10px;color:${GR60};margin-top:3px">Current plan: retire at ${IN.retAge}</div>`
+      : `<div style="font-family:'DM Mono',monospace;font-size:22px;font-weight:700;color:${POS};line-height:1">On schedule</div>`
+        + `<div style="font-size:11px;color:${GR60};margin-top:6px">Retiring at ${IN.retAge} meets ${target}% target</div>`)
+    + `</div>`
+    // Card 3 — Reduce spending
+    + `<div style="border-radius:10px;padding:16px;border-left:4px solid ${WARN};background:#fffbeb">`
+    + `<div style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${GR60};margin-bottom:8px">Alternatively — reduce spending</div>`
+    + (altSpendPct && altSpendPct < 1
+      ? `<div style="font-family:'DM Mono',monospace;font-size:22px;font-weight:700;color:${PLUM};line-height:1">${Math.round(altSpendPct * 100)}% of today</div>`
+        + `<div style="font-size:11px;color:${GR60};margin-top:6px">Reduce planned expenses by ${Math.round((1 - altSpendPct) * 100)}%</div>`
+        + `<div style="font-size:10px;color:${WARN};margin-top:3px">Budget ₹${Math.round(IN.expM * altSpendPct).toLocaleString('en-IN')}/mo (today's ₹)</div>`
+      : `<div style="font-family:'DM Mono',monospace;font-size:22px;font-weight:700;color:${POS};line-height:1">Sustainable</div>`
+        + `<div style="font-size:11px;color:${GR60};margin-top:6px">Current spending level is supportable</div>`)
+    + `</div>`
+    + `</div>`
+    // Plain English paragraph
+    + `<div style="padding:13px 16px;background:${GR10};border-radius:8px;font-size:11.5px;color:${GR80};line-height:1.75">`
+    + `<strong style="color:${PLUM}">What this means for you:</strong> `
+    + (sipGap > 0
+      ? `Your current SIP of ₹${Math.round(IN.sipM).toLocaleString('en-IN')}/month is projected to give a <strong>${R.successRate}%</strong> chance of sustaining your plan to age ${IN.lifeExp}. To reach the ${target}% planning threshold, increase your monthly investment by ₹${Math.round(sipGap).toLocaleString('en-IN')}. Working a few more years or trimming your retirement budget achieves a similar result — the cards above show each option precisely.`
+      : `Your plan is on track. Your current SIP of ₹${Math.round(IN.sipM).toLocaleString('en-IN')}/month projects a <strong>${R.successRate}%</strong> probability of sustaining your income through age ${IN.lifeExp} — above the ${target}% planning threshold. Maintain your current contributions and review annually.`)
+    + `</div>`
+    + `</div></div>`;
+
+  const sectionsHtml = planScoreHtml + heroHtml + riskSectionHtml + phaseSplitHtml + bridgeSectionHtml + whatToDoHtml + ''
     + `<section style="margin-bottom:32px">` + secHd('1', 'Corpus Projection Fan Chart', `Monte Carlo simulation · ${R.NSIM} scenarios · age ${IN.age} to ${IN.lifeExp}`)
     + card(cardHd('Projected retirement corpus — all scenarios', '━ Median &nbsp; ▒ 25–75th pct &nbsp; ░ 10–90th pct &nbsp; ● Goals')
       + `<div style="padding:20px">${fanSvg}</div>`
@@ -560,9 +623,9 @@ export function rtBuildFullSections(R) {
     + `</div></section>`
 
     + `<section class="pg" style="margin-bottom:32px">` + secHd('5', 'Sensitivity Analysis', 'What moves the needle — plan success rate under alternative assumptions')
-    + card(cardHd('Success rate comparison', 'Dashed line = 85% threshold · 1,000 simulations per scenario')
+    + card(cardHd('Success rate comparison', `Dashed line = ${IN.targetConf || 85}% threshold · ${R.NSIM} simulations per scenario`)
       + `<div style="padding:20px 24px">${sensBars}</div>`
-      + `<div style="padding:10px 20px 14px;font-size:11px;color:${GR60};border-top:1px solid ${GR20};line-height:1.7">Each scenario changes one variable from the base plan and re-runs 1,000 Monte Carlo simulations. The 85% threshold is a widely used rule-of-thumb for plan adequacy. Scenarios above the dashed line are considered robust.</div>`)
+      + `<div style="padding:10px 20px 14px;font-size:11px;color:${GR60};border-top:1px solid ${GR20};line-height:1.7">Each scenario changes one variable from the base plan and re-runs ${R.NSIM} Monte Carlo simulations. The ${IN.targetConf || 85}% threshold is BugleRock's house planning standard. Scenarios above the dashed line are considered robust.</div>`)
     + `</section>`
 
     + (R.score != null ? (() => {
@@ -625,7 +688,7 @@ export function rtBuildFullSections(R) {
       + `<br><strong>EPF/PPF &amp; NPS:</strong> Accumulated deterministically at stated rates and merged into the investable corpus at retirement (EPF: 100%, NPS: 60% lump + 40% annuity at ${(IN.annRate * 100).toFixed(1)}%). `
       + `<br><strong>Goals:</strong> Amounts stated in today's value, compounded at general inflation (${(IN.infl * 100).toFixed(1)}%) to the goal year and deducted as a lump sum in that year. `
       + `<br><strong>Withdrawals:</strong> Annual post-tax income need (living expenses − other income − NPS annuity) grossed up by ${(IN.tax * 100).toFixed(0)}% for tax. `
-      + `<br><strong>Sensitivity analysis:</strong> Each scenario re-runs 250 Monte Carlo paths changing one variable from the base plan. `
+      + `<br><strong>Sensitivity analysis:</strong> Each scenario re-runs ${R.NSIM} Monte Carlo paths changing one variable from the base plan. `
       + `<br><br>This analysis is prepared by BugleRock Capital for informational purposes. It is based on the stated assumptions and is not a guarantee or promise of future outcomes. Actual results will differ. Mutual fund investments are subject to market risk. Please consult your adviser before making investment decisions. © BugleRock Capital ${CY}.`
       + `</div></div>`)
     + `</section>`;

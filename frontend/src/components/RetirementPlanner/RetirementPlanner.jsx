@@ -101,6 +101,7 @@ export default function RetirementPlanner() {
   const [step, setStep]   = useState(() => lsGet(LS_STEP,   'input'));
   const [result, setResult] = useState(() => lsGet(LS_RESULT, null));
   const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState({ pct: 0, label: '' });
   const [modelPresets, setModelPresets] = useState(() => {
     try {
       const cached = sessionStorage.getItem(SS_KEY);
@@ -198,13 +199,40 @@ export default function RetirementPlanner() {
     if (IN.retAge < IN.age) { alert('Retirement age must be greater than or equal to current age.'); return; }
     if (IN.lifeExp <= IN.retAge) { alert('Plan-till age must be greater than retirement age.'); return; }
     if (IN.postMu <= IN.infl) { alert(`Post-retirement return (${(IN.postMu*100).toFixed(1)}%) must exceed inflation (${(IN.infl*100).toFixed(1)}%).`); return; }
+
     setRunning(true);
-    setTimeout(() => {
-      const R = rtRunSimulation(IN, IN.nSims);
-      setResult(R);
+    setProgress({ pct: 0, label: 'Preparing simulation…' });
+
+    const worker = new Worker(new URL('./rtWorker.js', import.meta.url), { type: 'module' });
+
+    worker.onmessage = (e) => {
+      const { type, payload, pct, label, message } = e.data;
+      if (type === 'PROGRESS') {
+        setProgress({ pct, label });
+      } else if (type === 'RESULT') {
+        setResult(payload);
+        setRunning(false);
+        setProgress({ pct: 100, label: 'Done' });
+        setStep('output');
+        worker.terminate();
+      } else if (type === 'ERROR') {
+        console.error('Worker error:', message);
+        setRunning(false);
+        setProgress({ pct: 0, label: '' });
+        alert('Simulation failed: ' + message);
+        worker.terminate();
+      }
+    };
+
+    worker.onerror = (err) => {
+      console.error('Worker crashed:', err);
       setRunning(false);
-      setStep('output');
-    }, 30);
+      setProgress({ pct: 0, label: '' });
+      alert('Simulation crashed. Please try again.');
+      worker.terminate();
+    };
+
+    worker.postMessage({ type: 'RUN', payload: IN });
   };
 
   const reset = () => {
@@ -233,8 +261,21 @@ export default function RetirementPlanner() {
         </div>
       </div>
 
+      {running && (
+        <div style={{ padding: '10px 24px', background: '#f8f6fa', borderBottom: '1px solid #E4E1E7' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: '#6D5479', fontWeight: 600 }}>{progress.label || 'Running simulation…'}</span>
+            <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#912F63', fontWeight: 700 }}>{progress.pct}%</span>
+          </div>
+          <div style={{ height: 4, background: '#E8DDE5', borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${progress.pct}%`, background: 'linear-gradient(90deg, #912F63, #6D5479)', borderRadius: 2, transition: 'width 0.3s ease' }} />
+          </div>
+          <div style={{ fontSize: 10, color: '#A795AE', marginTop: 5 }}>Running in background — UI stays responsive</div>
+        </div>
+      )}
+
       {step === 'input' && (
-        <InputForm f={f} set={set} setForm={setF} goals={goals} setGoals={setGoals} lumps={lumps} setLumps={setLumps} onRun={run} running={running} modelPresets={modelPresets} />
+        <InputForm f={f} set={set} setForm={setF} goals={goals} setGoals={setGoals} lumps={lumps} setLumps={setLumps} onRun={run} running={running} progress={progress} modelPresets={modelPresets} />
       )}
       {step === 'output' && result && (
         <Results R={result} onEdit={() => setStep('input')} />
@@ -310,7 +351,7 @@ function Field({ k, label, type = 'number', f, set, ...rest }) {
 }
 
 // ══════════════ Input Form ══════════════
-function InputForm({ f, set, setForm, goals, setGoals, lumps, setLumps, onRun, running, modelPresets }) {
+function InputForm({ f, set, setForm, goals, setGoals, lumps, setLumps, onRun, running, progress, modelPresets }) {
 
   return (
     <>
@@ -618,7 +659,7 @@ function InputForm({ f, set, setForm, goals, setGoals, lumps, setLumps, onRun, r
           <div className="rt-cta-title">Ready to project the retirement plan?</div>
           <div className="rt-cta-sub">A Monte Carlo engine will run up to 5,000 scenarios and show the full 8-section report below.</div>
         </div>
-        <button className="rt-cta-btn" onClick={onRun} disabled={running}>{running ? 'Running…' : '▶ Run simulation'}</button>
+        <button className="rt-cta-btn" onClick={onRun} disabled={running}>{running ? (progress?.label || 'Running…') : '▶ Run simulation'}</button>
       </div>
     </>
   );
@@ -778,9 +819,23 @@ function Results({ R, onEdit }) {
             <div className="rt-range-band" style={{ left: `${pct10}%`, width: `${pct90 - pct10}%` }} />
             <div className="rt-range-median" style={{ left: `${pct50}%` }} />
           </div>
+          {/* Dynamic median label — positioned directly below the black line */}
+          <div style={{ position: 'relative', height: 28, marginTop: 5 }}>
+            <div style={{
+              position: 'absolute',
+              left: `${pct50}%`,
+              transform: 'translateX(-50%)',
+              textAlign: 'center',
+              whiteSpace: 'nowrap',
+              fontSize: 10,
+              color: 'var(--text-muted)',
+            }}>
+              Most likely: <strong style={{ color: PLUM }}>{rtFmt(atRet.p50)}</strong>
+            </div>
+          </div>
           <div className="rt-range-legend">
             <span>Worst realistic (1-in-10 worse): <strong style={{ color: NEG }}>{rtFmt(atRet.p10)}</strong></span>
-            <span style={{ fontWeight: 700, color: PLUM }}>Most likely: {rtFmt(atRet.p50)}</span>
+            <span />
             <span>Best realistic (1-in-10 better): <strong style={{ color: POS }}>{rtFmt(atRet.p90)}</strong></span>
           </div>
         </div>
