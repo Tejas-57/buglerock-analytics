@@ -53,6 +53,7 @@ function NAVChart({ fund, selectedDate }) {
     const params = new URLSearchParams({
       amfi_code: fund.amfi_code,
       period: navPeriod,
+      ...(fund.isin && { isin: fund.isin }),
       ...(fund.assetClass && { asset_class: fund.assetClass }),
       ...(fund.category && { category: fund.category }),
       ...(dateStr && { date: dateStr }),
@@ -492,7 +493,11 @@ export default function FundDetail({ selectedDate, selectedFund, setSelectedFund
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
               {f?.category && <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 20, background: 'rgba(145,47,99,0.08)', color: 'var(--brand-primary)' }}>{f.category}</span>}
               {f?.isin && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'var(--bg-secondary)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{f.isin}</span>}
-              {selectedFund.ranking && selectedFund.ranking !== '-' && ['R1','R2','R3','R4','R5'].includes(selectedFund.ranking) && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'rgba(16,185,129,0.1)', color: '#059669' }}>{selectedFund.ranking}</span>}
+              {selectedFund.ranking && selectedFund.ranking !== '-' && ['R1','R2','R3','R4','R5'].includes(selectedFund.ranking) && (() => {
+                const RANK_C = { R1:'#059669', R2:'#059669', R3:'#2D1F2B', R4:'#EF4444', R5:'#EF4444' };
+                const RANK_BG = { R1:'rgba(16,185,129,0.1)', R2:'rgba(16,185,129,0.1)', R3:'rgba(45,31,43,0.08)', R4:'rgba(239,68,68,0.1)', R5:'rgba(239,68,68,0.1)' };
+                return <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: RANK_BG[selectedFund.ranking], color: RANK_C[selectedFund.ranking] }}>{selectedFund.ranking}</span>;
+              })()}
               {f?.morningstar_rating && f.morningstar_rating !== '-' && <span style={{ fontSize: 13, color: '#B46B10', letterSpacing: -1 }}>{stars(f.morningstar_rating)}</span>}
             </div>
           </div>

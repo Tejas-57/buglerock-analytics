@@ -1,7 +1,7 @@
 # routers/simulator.py
 from fastapi import APIRouter, Query, HTTPException
 from datetime import date as date_type, timedelta
-from services.mfapi import filter_by_date_range, calculate_cagr, calculate_xirr
+from services.nav_service import filter_by_date_range, calculate_cagr, calculate_xirr
 from services.db_service import get_fund_inception_date_by_amfi, get_isin_for_amfi
 
 router = APIRouter()

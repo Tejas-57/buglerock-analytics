@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Query, HTTPException
 from datetime import date as date_type
 from services.db_service import get_fund_snapshot, get_benchmark_for_category, get_peer_avg
-from services.mfapi import fetch_nav_history, build_chart_data
+from services.nav_service import fetch_nav_history, build_chart_data
 from services.gmail_watcher import fetch_and_store
 
 router = APIRouter()
@@ -46,6 +46,7 @@ def performance_metrics(
 async def nav_chart(
     amfi_code: str,
     period: str = "1y",
+    isin: str = Query(None),
     asset_class: str = Query(None),
     category: str = Query(None),
     date: str = Query(None),
@@ -56,10 +57,10 @@ async def nav_chart(
         BENCHMARK_ENABLED_ASSET_CLASSES,
     )
     from services.nse_fetch import fetch_nse_index_history
-    from services.mfapi import fetch_yahoo_history
+    from services.nav_service import fetch_yahoo_history
 
     try:
-        nav_data = await fetch_nav_history(amfi_code)
+        nav_data = await fetch_nav_history(amfi_code, isin=isin, period=period)
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch NAV: {e}")
 

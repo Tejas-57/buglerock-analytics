@@ -1,6 +1,13 @@
 """
-mfapi.py
-Fetches historical NAV data from MFAPI.in (free, no auth required).
+nav_service.py
+NAV history service — DB-first with mfapi.in as gap-filler / fallback.
+
+Priority:
+  1. nav_history table in DB (fast, <50ms, from inception)
+  2. If DB data is stale (latest date < yesterday), fetch missing dates from mfapi.in
+  3. If DB has no data at all, fetch full history from mfapi.in
+  4. mfapi.in is also the fallback if anything fails
+
 API docs: https://www.mfapi.in/
 """
 
@@ -15,13 +22,128 @@ MFAPI_BASE = "https://api.mfapi.in/mf"
 TRADING_DAYS_PER_YEAR = 252
 
 
-async def fetch_nav_history(amfi_code: str) -> list:
+def _last_business_day() -> date:
+    """Return yesterday, or Friday if today is Monday, skipping weekends."""
+    today = date.today()
+    delta = 1
+    while True:
+        candidate = today - timedelta(days=delta)
+        if candidate.weekday() < 5:  # Mon-Fri
+            return candidate
+        delta += 1
+
+
+def _get_isin_for_amfi(amfi_code: str) -> str | None:
+    """Look up ISIN from amfi_code via DailyFundData table."""
+    try:
+        from models.database import SessionLocal, DailyFundData
+        db = SessionLocal()
+        try:
+            row = db.query(DailyFundData.isin).filter(
+                DailyFundData.amfi_code == amfi_code
+            ).first()
+            return row.isin if row else None
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"ISIN lookup failed for amfi_code={amfi_code}: {e}")
+        return None
+
+
+def _get_latest_nav_date(isin: str) -> date | None:
+    """Lightweight query — just the latest date in nav_history for this ISIN."""
+    try:
+        from models.database import SessionLocal, NavHistory
+        from sqlalchemy import func as sqlfunc
+        db = SessionLocal()
+        try:
+            result = db.query(sqlfunc.max(NavHistory.date))\
+                       .filter(NavHistory.isin == isin)\
+                       .scalar()
+            return result  # already a date object or None
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Latest date check failed for isin={isin}: {e}")
+        return None
+
+
+PERIOD_DAYS = {
+    "1m":  30,
+    "3m":  90,
+    "6m":  180,
+    "1y":  365,
+    "3y":  3 * 365,
+    "5y":  5 * 365,
+    "10y": 10 * 365,
+}
+
+
+def _fetch_nav_from_db(isin: str, from_date: date = None) -> list:
     """
-    Fetch complete NAV history for a fund.
+    Fetch NAV history from nav_history table.
+    If from_date is given, only fetch rows >= from_date (efficient range query).
+    Returns list of {"date": "YYYY-MM-DD", "nav": float} sorted ascending.
+    """
+    try:
+        from models.database import SessionLocal, NavHistory
+        db = SessionLocal()
+        try:
+            q = db.query(NavHistory.date, NavHistory.nav)\
+                  .filter(NavHistory.isin == isin)
+            if from_date:
+                q = q.filter(NavHistory.date >= from_date)
+            rows = q.order_by(NavHistory.date.asc()).all()
+            return [{"date": r.date.isoformat(), "nav": float(r.nav)} for r in rows if r.nav is not None]
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"DB NAV fetch failed for isin={isin}: {e}")
+        return []
+
+
+def _store_nav_to_db(isin: str, new_rows: list) -> int:
+    """
+    Insert new NAV rows into nav_history, skipping duplicates.
+    Returns number of rows inserted.
+    """
+    if not new_rows or not isin:
+        return 0
+    try:
+        from models.database import SessionLocal, NavHistory
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from datetime import date as date_type
+        db = SessionLocal()
+        try:
+            inserted = 0
+            for row in new_rows:
+                try:
+                    d = date_type.fromisoformat(row["date"])
+                    exists = db.query(NavHistory.id).filter(
+                        NavHistory.isin == isin,
+                        NavHistory.date == d
+                    ).first()
+                    if not exists:
+                        db.add(NavHistory(isin=isin, date=d, nav=row["nav"]))
+                        inserted += 1
+                except Exception:
+                    continue
+            db.commit()
+            return inserted
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"DB NAV store failed for isin={isin}: {e}")
+        return 0
+
+
+async def _fetch_nav_from_mfapi(amfi_code: str) -> list:
+    """
+    Fetch full NAV history from mfapi.in.
     Returns list of {"date": "YYYY-MM-DD", "nav": float} sorted ascending.
     """
     url = f"{MFAPI_BASE}/{amfi_code}"
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, verify=False) as client:
         resp = await client.get(url)
         resp.raise_for_status()
         data = resp.json()
@@ -30,7 +152,6 @@ async def fetch_nav_history(amfi_code: str) -> list:
     result = []
     for entry in nav_data:
         try:
-            # MFAPI returns date as "DD-MM-YYYY"
             day, month, year = entry["date"].split("-")
             iso_date = f"{year}-{month}-{day}"
             nav = float(entry["nav"])
@@ -38,9 +159,70 @@ async def fetch_nav_history(amfi_code: str) -> list:
         except Exception:
             continue
 
-    # Sort ascending by date
     result.sort(key=lambda x: x["date"])
     return result
+
+
+async def fetch_nav_history(amfi_code: str, isin: str = None, period: str = None) -> list:
+    """
+    DB-first NAV history fetch with date-range query.
+
+    1. Use isin if provided, else look up from amfi_code via DailyFundData
+    2. Compute cutoff date from period (e.g. 1y → today - 365 days)
+    3. Query DB with WHERE date >= cutoff (only fetch what's needed)
+    4. Check staleness by querying latest date in DB
+    5. If stale → fetch gap from mfapi.in and store back to DB
+    6. If DB empty → full fetch from mfapi.in and store to DB
+    7. Return sorted result
+    """
+    last_bday = _last_business_day()
+    today = date.today()
+
+    # ── Step 1: resolve ISIN ──────────────────────────────────────────
+    if not isin:
+        isin = _get_isin_for_amfi(amfi_code)
+
+    # ── Step 2: compute cutoff from period ────────────────────────────
+    days = PERIOD_DAYS.get(period, 0) if period else 0
+    # Add 10 extra days buffer so inception warning logic works correctly
+    cutoff = (today - timedelta(days=days + 10)) if days else None
+
+    # ── Step 3: check latest date in DB (lightweight query) ───────────
+    latest_db_date = _get_latest_nav_date(isin) if isin else None
+
+    # ── Step 4: decide fetch strategy ────────────────────────────────
+    if latest_db_date:
+        if latest_db_date < last_bday:
+            # DB is stale — fetch gap from mfapi.in first
+            logger.info(f"NAV stale for amfi={amfi_code}: DB={latest_db_date}, expected={last_bday}. Fetching gap.")
+            try:
+                all_mfapi = await _fetch_nav_from_mfapi(amfi_code)
+                gap_start = (latest_db_date + timedelta(days=1)).isoformat()
+                gap_rows  = [r for r in all_mfapi if r["date"] >= gap_start]
+                if gap_rows and isin:
+                    stored = _store_nav_to_db(isin, gap_rows)
+                    logger.info(f"Stored {stored} gap rows for isin={isin}")
+            except Exception as e:
+                logger.warning(f"Gap fill failed for amfi={amfi_code}: {e}")
+
+        # ── Step 5: fetch from DB with date range ─────────────────────
+        db_data = _fetch_nav_from_db(isin, from_date=cutoff)
+        if db_data:
+            logger.info(f"NAV served from DB for amfi={amfi_code}: {len(db_data)} rows from {db_data[0]['date']}")
+            return db_data
+
+    # ── Step 6: DB empty — full fetch from mfapi.in ──────────────────
+    logger.info(f"No DB data for amfi={amfi_code}. Full fetch from mfapi.in.")
+    mfapi_data = await _fetch_nav_from_mfapi(amfi_code)
+    if mfapi_data and isin:
+        stored = _store_nav_to_db(isin, mfapi_data)
+        logger.info(f"Stored {stored} rows from mfapi.in for isin={isin}")
+    # Filter to period before returning
+    if cutoff and mfapi_data:
+        cutoff_str = cutoff.isoformat()
+        return [r for r in mfapi_data if r["date"] >= cutoff_str]
+    return mfapi_data
+
 
 
 def filter_by_period(nav_data: list, period: str) -> tuple:
@@ -254,7 +436,7 @@ async def fetch_yahoo_history(ticker: str) -> list:
     )
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        async with httpx.AsyncClient(timeout=30, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=30, headers=headers, verify=False) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
