@@ -437,7 +437,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
                       <div style={{ fontSize:11, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{f.name}</div>
                       <div style={{ fontSize:9.5, color:'var(--text-muted)', marginTop:1 }}>
                         {f.category?.replace(/^(India Fund |India OE |Cat: )/,'')}
-                        {f.ranking && f.ranking !== '0' && <span style={{ marginLeft:5, fontWeight:700, color:'#059669' }}>{f.ranking}</span>}
+                        {f.ranking && f.ranking !== '0' && <span style={{ marginLeft:5, fontWeight:700, color: (PIP_COLORS[f.ranking] || PIP_COLORS.default) }}>{f.ranking}</span>}
                       </div>
                     </div>
                     <div style={{ fontSize:10.5, fontWeight:700, color:tile.color, flexShrink:0, textAlign:'right' }}>
@@ -523,7 +523,7 @@ export default function FundExplorer({ selectedDate, setSelectedFund }) {
                     </div>
                   </div>
                   {fund.ranking && fund.ranking !== '-' && fund.ranking !== '0' && (
-                    <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:3, background:'rgba(16,185,129,0.1)', color:'#059669' }}>{fund.ranking}</span>
+                    <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:3, background:(RANK_COLORS[fund.ranking]?.bg || 'rgba(45,31,43,0.06)'), color:(RANK_COLORS[fund.ranking]?.color || '#2D1F2B') }}>{fund.ranking}</span>
                   )}
                 </div>
               ))}
