@@ -125,12 +125,48 @@ def save_parsed_data(parsed: dict):
             # Also save to BenchmarkData for backward compatibility
             db.add(BenchmarkData(**{k: v for k, v in clean.items() if hasattr(BenchmarkData, k)}))
 
+        # ── Store period_dates extracted from Excel header rows ──────────────
+        period_dates = parsed.get("period_dates", {})
+        if period_dates:
+            from models.database import PeriodDates
+            # Always keep only latest — wipe all previous period_dates
+            db.query(PeriodDates).delete()
+            for db_field, dates in period_dates.items():
+                start = dates.get("start")
+                end   = dates.get("end")
+                if not start or not end:
+                    continue
+                try:
+                    db.add(PeriodDates(
+                        data_date  = data_date,
+                        db_field   = db_field,
+                        start_date = date_type.fromisoformat(start) if isinstance(start, str) else start,
+                        end_date   = date_type.fromisoformat(end)   if isinstance(end,   str) else end,
+                    ))
+                except Exception as e:
+                    logger.warning(f"Failed to save period_date {db_field}: {e}")
+            logger.info(f"Saved {len(period_dates)} period dates for {data_date}")
+
         db.commit()
         logger.info(f"Saved {len(parsed['funds'])} funds for {data_date}")
     except Exception as e:
         db.rollback()
         logger.error(f"Error saving data: {e}", exc_info=True)
         raise
+    finally:
+        db.close()
+
+
+def get_period_dates() -> dict:
+    """
+    Return the current period start/end dates (always latest Excel's dates).
+    Returns dict: {db_field: {"start": date, "end": date}}
+    """
+    from models.database import PeriodDates
+    db = get_session()
+    try:
+        rows = db.query(PeriodDates).all()
+        return {r.db_field: {"start": r.start_date, "end": r.end_date} for r in rows}
     finally:
         db.close()
 

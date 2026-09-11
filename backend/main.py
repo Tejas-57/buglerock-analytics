@@ -175,7 +175,6 @@ async def migrate_branding_name_column():
         db.close()
 
 
-
 @app.on_event("startup")
 async def startup():
     init_db()
@@ -189,7 +188,7 @@ async def startup():
     except Exception as e:
         logger.warning(f"Benchmark NAV migration failed: {e}")
 
-    # Benchmark Returns table migration (new)
+    # Benchmark Returns table migration
     try:
         from services.benchmark_db_service import migrate_benchmark_returns_table
         migrate_benchmark_returns_table()
@@ -200,16 +199,23 @@ async def startup():
     from services.morningstar_service import seed_accesscode_from_env
     seed_accesscode_from_env()
 
-    # Force-fetch today's email on startup so localhost is always up to date
     async def startup_fetch():
         try:
             from services.gmail_watcher import fetch_latest
+            from services.db_service import get_period_dates
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, lambda: fetch_latest(check_days=3, force=False))
             if result:
                 logger.info("Startup fetch: new data loaded")
             else:
-                logger.info("Startup fetch: already up to date")
+                # If period_dates is empty, force reparse to populate it
+                period_dates = get_period_dates()
+                if not period_dates:
+                    logger.info("Startup: period_dates empty — forcing reparse")
+                    await loop.run_in_executor(None, lambda: fetch_latest(check_days=7, force=True))
+                    logger.info("Startup reparse complete")
+                else:
+                    logger.info("Startup fetch: already up to date")
         except Exception as e:
             logger.warning(f"Startup fetch failed: {e}")
 
@@ -256,7 +262,6 @@ async def nav_daily_cron():
             await asyncio.sleep(3600)
 
 
-
 async def holdings_monthly_cron():
     """
     Monthly cron — fetches full holdings for all funds on the 1st of each month.
@@ -283,7 +288,7 @@ async def holdings_monthly_cron():
                             DailyFundData.data_date == latest_date[0]
                         ).distinct().all()
                     ]
-                    accesscode = get_valid_accesscode()  # auto-rotates if expiring soon
+                    accesscode = get_valid_accesscode()
                     if accesscode and isins:
                         summary = fetch_universe_holdings(isins, accesscode)
                         logger.info(f"Monthly holdings fetch complete: {summary}")
@@ -291,9 +296,9 @@ async def holdings_monthly_cron():
                 logger.error(f"Monthly holdings cron error: {e}", exc_info=True)
             finally:
                 db.close()
-            await asyncio.sleep(25 * 3600)  # sleep 25h to avoid double-run
+            await asyncio.sleep(25 * 3600)
         else:
-            await asyncio.sleep(3600)  # check again in 1 hour
+            await asyncio.sleep(3600)
 
 
 if __name__ == "__main__":

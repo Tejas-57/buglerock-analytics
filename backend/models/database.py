@@ -299,6 +299,27 @@ class NavFetchLog(Base):
     message    = Column(Text)
     fetched_at = Column(DateTime, server_default=func.now())
 
+
+class PeriodDates(Base):
+    """
+    Stores the exact start/end dates Morningstar uses for each return period,
+    extracted from the daily Excel file header rows.
+    Used by the NAV chart to query nav_history on the exact same date range.
+    """
+    __tablename__ = "period_dates"
+
+    id         = Column(Integer, primary_key=True)
+    data_date  = Column(Date, nullable=False, index=True)
+    db_field   = Column(String(30), nullable=False)   # e.g. "return_1m", "return_3y"
+    start_date = Column(Date, nullable=False)
+    end_date   = Column(Date, nullable=False)
+
+    __table_args__ = (
+        __import__('sqlalchemy').UniqueConstraint(
+            'data_date', 'db_field', name='uq_period_dates_date_field'
+        ),
+    )
+
 # ── Morningstar Holdings Integration ─────────────────────────────────────────
 
 class FundHolding(Base):

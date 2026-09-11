@@ -136,3 +136,22 @@ def peer_avg_only(category: str, asset_class: str, date: str = Query(None)):
         "peer_avg": peer_avg,
         "date": str(d),
     }
+
+@router.get("/period-dates")
+def get_period_dates_endpoint():
+    """
+    Debug endpoint — shows the exact period start/end dates
+    currently stored from the latest daily Excel import.
+    """
+    from services.db_service import get_period_dates
+    dates = get_period_dates()
+    return {
+        "period_dates": {
+            field: {
+                "start": str(v["start"]),
+                "end":   str(v["end"]),
+            }
+            for field, v in dates.items()
+        },
+        "count": len(dates),
+    }
