@@ -112,16 +112,18 @@ async def fetch_nav_history(amfi_code: str, isin: str = None, period: str = None
         start_date = date(1970, 1, 1)
         end_date   = today
 
-    # ── Check staleness and backfill if needed ────────────────────────
+    # ── Check staleness and backfill if needed (non-blocking) ─────────
     if isin:
         latest = get_latest_nav_date(isin)
         yesterday = today - timedelta(days=1)
         if not latest:
-            logger.info(f"No NAV data for {isin} — triggering full backfill")
-            _backfill(isin)
+            logger.info(f"No NAV data for {isin} — scheduling backfill")
+            import threading
+            threading.Thread(target=_backfill, args=(isin,), daemon=True).start()
         elif latest < yesterday:
-            logger.info(f"NAV stale for {isin}: latest={latest} — triggering gap fill")
-            _backfill(isin)
+            logger.info(f"NAV stale for {isin}: latest={latest} — scheduling gap fill")
+            import threading
+            threading.Thread(target=_backfill, args=(isin,), daemon=True).start()
 
         rows = get_nav_series(isin, start_date, end_date)
         if rows:
@@ -218,9 +220,27 @@ def calculate_xirr(cash_flows: list, dates: list) -> float:
 def build_chart_data(nav_data: list, period: str, benchmark_nav: list = None) -> tuple:
     """
     Build chart-ready data combining fund NAV and benchmark NAV (rebased to 100).
-    Returns (chart_data_list, warning).
+    nav_data is already filtered to the correct date range by fetch_nav_history
+    using exact period_dates from the DB — no further filtering needed here.
+    Returns (chart_data_list, warning, performance).
     """
-    filtered, warning = filter_by_period(nav_data, period)
+    filtered = nav_data  # already date-ranged correctly
+    warning  = None
+
+    # Only warn if data is shorter than expected (fund inception before period start)
+    if filtered and period:
+        from datetime import date as date_type, timedelta
+        period_days = {"1m":30,"3m":90,"6m":180,"1y":365,"2y":730,"3y":1095,"5y":1825,"7y":2555,"10y":3650}
+        days = period_days.get(period)
+        if days:
+            today = date_type.today()
+            expected_start = today - timedelta(days=days)
+            actual_start = date_type.fromisoformat(filtered[0]["date"])
+            if actual_start > expected_start:
+                warning = (
+                    f"No {period.upper()} data available — showing data from "
+                    f"{actual_start.strftime('%d %b %Y')} (fund inception)"
+                )
 
     if not filtered:
         return [], warning
