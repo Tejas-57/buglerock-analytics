@@ -9,13 +9,15 @@ from datetime import date
 load_dotenv()
 
 from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, benchmarks, optimise, holdings, proposal, models
-from auth.routers.auth import router as auth_router
+from routers.auth.routers.auth import router as auth_router
 from auth.middleware.auth_middleware import AuthMiddleware
 from models.database import init_db
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="BugleRock Analytics API", version="2.0.0")
+
+app.add_middleware(AuthMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,8 +26,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.add_middleware(AuthMiddleware)
 
 app.include_router(status.router,      prefix="/api")
 app.include_router(home.router,        prefix="/api/home")
