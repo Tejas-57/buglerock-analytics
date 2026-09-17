@@ -1,8 +1,12 @@
 {
-  "rewrites": [
+  "routes": [
     {
-      "source": "/api/:path*",
-      "destination": "https://buglerock-analytics-ew17.onrender.com/api/:path*"
+      "src": "/api/(.*)",
+      "dest": "https://buglerock-analytics-ew17.onrender.com/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
     }
   ]
 }
