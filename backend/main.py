@@ -9,6 +9,8 @@ from datetime import date
 load_dotenv()
 
 from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, benchmarks, optimise, holdings, proposal, models
+from auth.routers.auth import router as auth_router
+from auth.middleware.auth_middleware import AuthMiddleware
 from models.database import init_db
 
 logger = logging.getLogger(__name__)
@@ -22,6 +24,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(AuthMiddleware)
 
 app.include_router(status.router,      prefix="/api")
 app.include_router(home.router,        prefix="/api/home")
@@ -38,6 +42,7 @@ app.include_router(optimise.router,    prefix="/api")
 app.include_router(holdings.router,    prefix="/api/holdings")
 app.include_router(proposal.router,    prefix="/api/proposal")
 app.include_router(models.router,      prefix="/api/models")
+app.include_router(auth_router)
 
 
 async def gmail_poll_loop():
@@ -181,6 +186,15 @@ async def startup():
     await migrate_benchmark_risk_columns()
     await migrate_branding_name_column()
 
+    # Auth tables migration
+    try:
+        from auth.models.auth_models import Base as AuthBase
+        from models.database import engine
+        AuthBase.metadata.create_all(bind=engine)
+        logger.info("Auth tables created/verified")
+    except Exception as e:
+        logger.warning(f"Auth table migration failed: {e}")
+
     # Benchmark NAV table migration
     try:
         from services.benchmark_db_service import migrate_benchmark_nav_table
@@ -303,4 +317,4 @@ async def holdings_monthly_cron():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("APP_PORT", 8000)), reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("APP_PORT", 8000)), reload=True, reload_dirs=["."])

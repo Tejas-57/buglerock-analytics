@@ -1,0 +1,115 @@
+/* frontend/src/components/Admin/AdminPanel.css */
+
+.admin-panel {
+  padding: 32px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.admin-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #3E3452;
+  margin: 0;
+}
+
+.admin-count {
+  background: #f3f0f7;
+  color: #6D5479;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+
+.admin-message {
+  background: #fef9f0;
+  border: 1px solid #f5c97a;
+  color: #7a5c00;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.admin-loading {
+  color: #A2A0A0;
+  font-size: 14px;
+}
+
+/* Table */
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.admin-table th {
+  text-align: left;
+  padding: 10px 14px;
+  background: #f8f6fb;
+  color: #6D5479;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #e8e4f0;
+}
+
+.admin-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #f0edf6;
+  color: #3E3452;
+  vertical-align: middle;
+}
+
+.row-inactive td {
+  opacity: 0.5;
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge-admin    { background: #fce7f3; color: #912F63; }
+.badge-user     { background: #ede9f6; color: #6D5479; }
+.badge-active   { background: #f0fdf4; color: #16a34a; }
+.badge-inactive { background: #fef2f2; color: #dc2626; }
+.badge-set      { background: #f0fdf4; color: #16a34a; }
+.badge-pending  { background: #fffbeb; color: #d97706; }
+
+/* Action buttons */
+.admin-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-action {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.btn-action:hover { opacity: 0.8; }
+
+.btn-revoke     { background: #ede9f6; color: #6D5479; }
+.btn-resend     { background: #fce7f3; color: #912F63; }
+.btn-deactivate { background: #fef2f2; color: #dc2626; }

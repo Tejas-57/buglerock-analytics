@@ -20,3 +20,7 @@ python-dateutil
 pytz
 python-multipart
 yfinance>=0.2.40
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+pydantic[email]

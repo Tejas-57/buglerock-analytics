@@ -73,6 +73,7 @@ Whenever something new is built, discovered, or decided that future sessions nee
 | Benchmark load status | https://buglerock-analytics-ew17.onrender.com/api/benchmarks/load-status |
 | Portfolio look-through | https://buglerock-analytics-ew17.onrender.com/api/holdings/portfolio-lookthrough?isins=X&weights=Y |
 | FastAPI docs | https://buglerock-analytics-ew17.onrender.com/docs |
+| **Period dates debug** | https://buglerock-analytics-ew17.onrender.com/api/performance/period-dates |
 
 ---
 
@@ -236,6 +237,64 @@ Apps Script writes to the "Nifty Indices" sheet tab daily via Yahoo Finance. The
 
 ---
 
+## NAV Pipeline (DB-first architecture)
+
+### Priority order for NAV data
+```
+1. nav_history table in PostgreSQL  ← primary (fast, <50ms)
+2. Morningstar Price API             ← gap fill / backfill
+3. mfapi.in                          ← fallback if Morningstar fails
+```
+
+### Key files
+| File | Role |
+|---|---|
+| `backend/services/nav_service.py` | NAV orchestration — DB-first with period_dates. **Replaces old `mfapi.py`** |
+| `backend/services/nav_fetcher.py` | Raw NAV fetching — Morningstar primary, mfapi fallback, upsert |
+| `backend/routers/performance.py` | `/api/performance/nav-chart` endpoint |
+| `backend/routers/nav.py` | `/api/nav/fetch/{isin}`, `/api/nav/fetch-all` |
+
+### ⚠️ `mfapi.py` → `nav_service.py` rename
+`backend/services/mfapi.py` was renamed to `backend/services/nav_service.py`. All imports in `performance.py`, `simulator.py`, `rolling.py` updated. If any file still imports from `services.mfapi` it will crash on startup.
+
+### period_dates table
+New PostgreSQL table stores exact start/end dates extracted from daily Morningstar Excel header rows. Used by `nav_service.fetch_nav_history` to query `nav_history` with exact date ranges matching Morningstar's return calculation periods.
+
+| Column | Description |
+|---|---|
+| `data_date` | Date of the Excel file |
+| `db_field` | e.g. `return_1m`, `return_3m`, `return_1y` |
+| `start_date` | Exact period start from Excel |
+| `end_date` | Exact period end from Excel |
+
+- Table is wiped and re-inserted every daily Excel parse (always only latest 17 rows)
+- Debug endpoint: `GET /api/performance/period-dates`
+- To repopulate manually: `curl -X POST http://localhost:8000/api/gmail/reparse`
+- On startup: if table is empty, forces reparse of last 7 days automatically
+
+### nav_history table
+- 4,546,322 rows across 2,033 funds from inception (full refetch Sep 2026 via Morningstar)
+- Upsert: `ON CONFLICT DO UPDATE` when `force_full=True` — overwrites mfapi values with Morningstar adjusted NAV
+- `ON CONFLICT DO NOTHING` for incremental daily appends
+- No duplication possible — `UNIQUE(isin, date)` enforced at DB level
+
+### NAV chart backfill is non-blocking
+`fetch_nav_history` runs staleness check on every chart request. If stale, backfill runs in background thread — chart response returns immediately from DB.
+
+### Full refetch command (Morningstar, overwrites everything)
+```cmd
+curl -X POST "http://localhost:8000/api/nav/fetch-all?force=true"
+```
+Monitor: `curl "http://localhost:8000/api/nav/fetch-all/status"`
+
+### New ISIN auto-detection
+Every daily Gmail parse: new ISINs in `DailyFundData` not yet in `nav_history` → automatically fetches full history from inception in background thread.
+
+### SSL fix
+`verify=False` on all `httpx.AsyncClient` calls in `nav_service.py` — required for Morningstar calls in dev environment.
+
+---
+
 ## Project Structure
 
 ```
@@ -250,7 +309,8 @@ buglerock-analytics/
 │           ├── RetirementPlanner/     # Retirement Planner tab (Monte Carlo)
 │           │   ├── RetirementPlanner.jsx
 │           │   ├── rtEngine.js        # Monte Carlo engine
-│           │   ├── rtReport.js        # 8-section report builder
+│           │   ├── rtReport.js        # 15-section report builder
+│           │   ├── rtWorker.js        # Web Worker — runs simulation off main thread
 │           │   └── RetirementPlanner.css
 │           ├── Simulator/             # SIP Simulator (under CALCULATE nav section)
 │           ├── RollingAnalytics/      # Rolling CAGR analytics (under CALCULATE nav section)
@@ -286,6 +346,7 @@ buglerock-analytics/
         ├── db_service.py
         ├── morningstar_service.py
         ├── nav_fetcher.py
+        ├── nav_service.py             # ← renamed from mfapi.py
         ├── benchmark_db_service.py
         └── optimiser.py
 ```
@@ -306,6 +367,12 @@ Individual stock-level holdings per fund from Morningstar `NewPortfolioApi`. Use
 ### `FundPortfolioStats` (Render only)
 Fund-level portfolio stats — asset allocation, market cap breakdown, sector weights, PE/PB.
 
+### `NavHistory`
+Daily NAV per fund from inception. 4.5M+ rows. `UNIQUE(isin, date)`.
+
+### `PeriodDates`
+17 rows (wiped + refreshed daily). Exact start/end dates per return period from Morningstar Excel. Used for NAV chart date range queries.
+
 ---
 
 ## Key Features
@@ -320,6 +387,14 @@ Fund-level portfolio stats — asset allocation, market cap breakdown, sector we
 ### Fund Explorer
 - Category shown on watchlist card uses fund's own `category` field, NOT the sidebar filter category
 - Back button on Fund Detail uses `navigate(-1)` — returns to wherever user came from
+- **R1-R5 ranking colors**: R1/R2 = green `#059669`, R3 = black `#2D1F2B`, R4/R5 = red `#EF4444` — fixed in list rows and intelligence panel
+
+### Fund Detail
+- Period toggle (1Y/3Y/5Y) — `rk()` returns null for missing periods (no 3Y fallback)
+- Toggle stays visible even when selected period has no data — shows "No Xy data — select shorter period"
+- **NAV chart** uses exact `period_dates` from DB — not `today - N days`
+- **R1-R5 ranking badge** color corrected (was always green, now uses correct color per rank)
+- `isin` passed as param from frontend — backend skips ISIN lookup from amfi_code
 
 ### Watchlist
 - Category displayed from live snapshot (`f?.category`) with localStorage fallback
@@ -393,7 +468,7 @@ Tab groups: `Portfolio X-Ray | Overview · Returns & projections · Risk metrics
 - Footnote: "Returns calculated from actual NAV history. '—' means fund not active or NAV unavailable."
 
 ### Retirement Planner
-- **Canonical file:** 425 lines — `RetirementPlanner.jsx` stored in session Aug 2026
+- **Web Worker**: `rtWorker.js` runs simulation off main thread — UI stays responsive, progress bar shown
 - `Field` component at module level (fixes focus/cursor loss on keystroke)
 - `type="text"` with `inputMode="decimal"` (fixes leading zero bug)
 - Chip nav scrolls to sections via `id="rt-section-{code}"`
@@ -401,10 +476,43 @@ Tab groups: `Portfolio X-Ray | Overview · Returns & projections · Risk metrics
 - Goals/lumps stored as raw strings, parsed to numbers in `collectInputs`
 - P10 corpus clamped to `—` after depletion in cashflow table
 - Single column layout for goals/inflows rows
+- **Most likely label** on corpus range bar dynamically positioned under median line
 
-### Fund Detail
-- Period toggle (1Y/3Y/5Y) — `rk()` returns null for missing periods (no 3Y fallback)
-- Toggle stays visible even when selected period has no data — shows "No Xy data — select shorter period"
+#### Report sections (in order)
+1. Plan score badge — composite score with 4 component bars
+2. Hero card — gradient, status, KPI strip (5 cells), "What needs to change?" table, secondary stats, funding gap bar
+3. What could derail the plan? — risk section from `R.sensDetailed`, ranked by impact points
+4. Phase 1 / Phase 2 split card — build wealth vs fund retirement
+5. Retirement readiness bridge — 7 nodes showing corpus build-up
+6. What should you do? — 3 action cards (SIP / retire later / reduce spending) + plain English paragraph
+7. Corpus Projection Fan Chart
+8. Corpus Milestones
+9. Corpus Percentile Analysis
+10. Retirement Income Requirement (waterfall — gross-up corrected)
+11. Sensitivity Analysis
+12. Plan Score
+13. Financial Goals
+14. Year-by-Year Cashflow
+15. Investment Policy & Assumptions
+
+#### Key engine fields
+- `R.score` — `{composite, components: [{label, score, weight}]}`
+- `R.firstNeed` — gross portfolio withdrawal (pre-tax, lakhs/year)
+- `R.incomeAtRet` — lifestyle cost at retirement (₹ absolute monthly)
+- `R.npsAnnualAnnuity` — NPS annuity (lakhs/year). Old name `npsAnnuityIncome` was wrong.
+- `R.totalSIPContrib` — raw nominal SIP cash (no compounding)
+- `R.marketGrowthEst` — `P50 - corpus0 - totalSIPContrib - epfAtRet - npsLump`
+- Solvers (`rtSolveSIP`, `rtSolveRetAge`, `rtSolveSpend`) run at full `nSims` — no caps
+
+#### Key fixes (Sep 2026)
+- Waterfall corrected: tax grossed-up (added), not subtracted
+- `npsAnnuityIncome` → `npsAnnualAnnuity` field name
+- `R.planScore` → `R.score` with correct shape
+- `IN.lateRMu/lateRSig` → `IN.lateMu/lateSig`
+- All hardcoded "500/1000 simulations" → `R.NSIM`
+- PDF: all `rt-` CSS classes inlined in `rtOpenReport` `<style>` block
+- Sensitivity labels plain English "what if" framing
+- "Longevity" → "Extended retirement horizon (+5 years)"
 
 ### Build Portfolio
 - Weight warning: red background + bold message when weights exceed 100%
@@ -500,9 +608,11 @@ API limit: 20 funds maximum.
 
 ### Frontend (Vercel)
 Push to `main` → auto-builds and deploys (~90 sec).
+**Env var required:** `REACT_APP_API_URL = https://buglerock-analytics-ew17.onrender.com`
 
 ### Backend (Render)
 Push to `main` → auto-deploys (~3 min). On startup: DB migrations → Gmail poll loop + NAV cron + holdings cron.
+**Env var required:** `CORS_ORIGINS = https://buglerock-analytics.vercel.app,http://localhost:5173,http://localhost:3000`
 
 If the backend cannot resolve external hostnames (PostgreSQL, Gmail, Google APIs) — `Name or service not known` / `getaddrinfo failed` — this is a **Render infrastructure/DNS issue, not a code bug**. Check [status.render.com](https://status.render.com) and trigger a manual redeploy from the Render dashboard.
 
@@ -523,12 +633,13 @@ Full Holdings V2 used when available (up to 99,999 holdings). Falls back to Top 
 
 ## Pending Features
 
-1. **User auth** — Google OAuth login, per-user saved portfolios and watchlists
+1. **User auth** — DIY FastAPI + PostgreSQL (internal staff only, ~50 users). Next: need user list (name, email, role), token expiry preference, password reset policy. AWS Cognito deferred until AWS call completed.
 2. **Portfolio NAV series** — actual drawdown/ulcer/recovery from computed portfolio daily returns
 3. **Cost basis (WACB)** — Retirement Planner LTCG tax calculation
 4. **Model Portfolio presets** — Pre-fill Retirement Planner from real blended returns
 5. **Old Cloud project cleanup** — Shut down tejas.s@buglerock.asia project
 6. **CY 2026 column** — add to calendar year chart when year completes (do not add before year-end)
+7. **google.generativeai deprecation** — `chat.py` uses deprecated package, switch to `google.genai`
 
 ---
 
@@ -557,6 +668,7 @@ Full Holdings V2 used when available (up to 99,999 holdings). Falls back to Top 
 | `RetirementPlanner.css` | `frontend/src/components/RetirementPlanner/` |
 | `rtEngine.js` | `frontend/src/components/RetirementPlanner/` |
 | `rtReport.js` | `frontend/src/components/RetirementPlanner/` |
+| `rtWorker.js` | `frontend/src/components/RetirementPlanner/` |
 | `holdings.py` | `backend/routers/` |
 | `benchmarks.py` | `backend/routers/` |
 | `nav.py` | `backend/routers/` |
@@ -564,6 +676,13 @@ Full Holdings V2 used when available (up to 99,999 holdings). Falls back to Top 
 | `db_service.py` | `backend/services/` |
 | `benchmark_db_service.py` | `backend/services/` |
 | `parser.py` | `backend/services/` |
+| `nav_service.py` | `backend/services/` *(replaces mfapi.py — do not use mfapi.py)* |
+| `nav_fetcher.py` | `backend/services/` |
+| `performance.py` | `backend/routers/` |
+| `simulator.py` | `backend/routers/` |
+| `rolling.py` | `backend/routers/` |
+| `database.py` | `backend/models/` |
+| `main.py` | `backend/` |
 
 ---
 
