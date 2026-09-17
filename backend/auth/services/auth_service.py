@@ -4,17 +4,15 @@ import os
 import secrets
 import random
 import string
+import bcrypt
+import base64
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-
-from jose import JWTError, jwt
-from passlib.context import CryptContext
-from sqlalchemy.orm import Session
-from googleapiclient.discovery import build
-from google.oauth2.credentials import Credentials
-import base64
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+
+from jose import JWTError, jwt
+from sqlalchemy.orm import Session
 
 from auth.models.auth_models import User, RefreshToken, OTPCode, SetupToken
 
@@ -26,18 +24,16 @@ REFRESH_TOKEN_DAYS = 30
 OTP_EXPIRY_MINS    = 10
 SETUP_TOKEN_HOURS  = 24
 
-GMAIL_SENDER = os.environ.get("GMAIL_SENDER", "analytics@buglerock.asia")
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+AUTH_EMAIL_SENDER = os.environ.get("AUTH_EMAIL_SENDER", "analytics@buglerock.asia")
 
 
 # ── Password hashing ──────────────────────────────────────────────────────────
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
 # ── JWT access token ──────────────────────────────────────────────────────────
@@ -166,21 +162,30 @@ def verify_setup_token(db: Session, token_str: str) -> Optional[User]:
 
 # ── Email via Gmail API ───────────────────────────────────────────────────────
 
-def _get_gmail_service():
-    creds = Credentials(
-        token         = os.environ.get("GMAIL_ACCESS_TOKEN"),
-        refresh_token = os.environ.get("GMAIL_REFRESH_TOKEN"),
-        token_uri     = "https://oauth2.googleapis.com/token",
-        client_id     = os.environ.get("GMAIL_CLIENT_ID"),
-        client_secret = os.environ.get("GMAIL_CLIENT_SECRET"),
-        scopes        = ["https://www.googleapis.com/auth/gmail.send"],
-    )
-    return build("gmail", "v1", credentials=creds)
-
 def _send_email(to: str, subject: str, html_body: str):
-    service = _get_gmail_service()
+    import ssl
+    import httplib2
+    import json
+    from googleapiclient.discovery import build
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    import google_auth_httplib2
+    from services.gmail_watcher import _load_token_json, SCOPES
+
+    token_json = _load_token_json()
+    creds = Credentials.from_authorized_user_info(
+        json.loads(token_json),
+        SCOPES + ["https://www.googleapis.com/auth/gmail.send"]
+    )
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+
+    http        = httplib2.Http(disable_ssl_certificate_validation=True)
+    authed_http = google_auth_httplib2.AuthorizedHttp(creds, http=http)
+    service     = build("gmail", "v1", http=authed_http)
+
     msg = MIMEMultipart("alternative")
-    msg["From"]    = GMAIL_SENDER
+    msg["From"]    = AUTH_EMAIL_SENDER
     msg["To"]      = to
     msg["Subject"] = subject
     msg.attach(MIMEText(html_body, "html"))
