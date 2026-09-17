@@ -57,7 +57,7 @@ export default function App() {
     saveToStorage('br_selected_fund', fund);
   };
 
-  // ── Auth loading ──────────────────────────────────────────────────────────
+  // Auth loading
   if (authLoading) {
     return (
       <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', color:'#912F63', fontSize:14, fontWeight:600 }}>
@@ -66,81 +66,84 @@ export default function App() {
     );
   }
 
-  // ── Setup password page — public ──────────────────────────────────────────
-  if (window.location.pathname === '/setup-password') {
-    return user
-      ? <Navigate to="/fund-explorer" />
-      : <SetupPassword onLogin={login} />;
-  }
-
-  // ── Not logged in — show login page ──────────────────────────────────────
-  if (!user) {
-    return <Login onLogin={login} />;
-  }
-
-  // ── App data loading ──────────────────────────────────────────────────────
-  if (!selectedDate) {
-    return (
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', color:'var(--text-muted)', fontSize:13 }}>
-        Loading...
-      </div>
-    );
-  }
-
-  // ── Main app ──────────────────────────────────────────────────────────────
   return (
     <Router>
-      <div className="app-shell">
-        <Navbar user={user} onLogout={logout} />
-        <div className="app-body">
-          <Header selectedDate={selectedDate} user={user} onLogout={logout} />
-          <main className="app-main">
-            <Routes>
-              <Route path="/" element={<Navigate to="/fund-explorer" replace />} />
-              <Route path="/fund-explorer" element={
-                <FundExplorer selectedDate={selectedDate} setSelectedFund={handleFundSelect} />
-              } />
-              <Route path="/home" element={
-                <FundDetail selectedDate={selectedDate} selectedFund={selectedFund} setSelectedFund={handleFundSelect} />
-              } />
-              <Route path="/watchlist" element={
-                <Watchlist selectedDate={selectedDate} setSelectedFund={handleFundSelect} />
-              } />
-              <Route path="/stock-exposure" element={<StockExposure />} />
-              <Route path="/performance" element={
-                <Performance selectedDate={selectedDate} selectedFund={selectedFund} />
-              } />
-              <Route path="/peer-comparison" element={
-                <CompareFunds selectedDate={selectedDate} />
-              } />
-              <Route path="/simulator" element={
-                <Simulator selectedDate={selectedDate} />
-              } />
-              <Route path="/rolling-analytics" element={
-                <RollingAnalytics selectedDate={selectedDate} />
-              } />
-              <Route path="/models" element={
-                <ModelPortfolios selectedDate={selectedDate} />
-              } />
-              <Route path="/peer-group-analytics" element={
-                <PeerGroupAnalytics selectedDate={selectedDate} setSelectedFund={handleFundSelect} />
-              } />
-              <Route path="/portfolio" element={
-                <PortfolioBuilder selectedDate={selectedDate} />
-              } />
-              <Route path="/retirement-planner" element={<RetirementPlanner />} />
+      <Routes>
 
-              {/* Admin — only for admin role */}
-              <Route path="/admin" element={
-                user.role === 'admin'
-                  ? <AdminPanel />
-                  : <Navigate to="/fund-explorer" replace />
-              } />
-            </Routes>
-          </main>
-        </div>
-        <ChatButton selectedFund={selectedFund} selectedDate={selectedDate} />
-      </div>
+        {/* ── Public routes — always accessible ── */}
+        <Route
+          path="/setup-password"
+          element={<SetupPassword onLogin={(data) => { login(data); window.location.href = '/fund-explorer'; }} />}
+        />
+        <Route
+          path="/login"
+          element={user ? <Navigate to="/fund-explorer" replace /> : <Login onLogin={login} />}
+        />
+
+        {/* ── Protected routes — redirect to login if not authenticated ── */}
+        <Route
+          path="/*"
+          element={
+            !user ? (
+              <Navigate to="/login" replace />
+            ) : !selectedDate ? (
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', color:'var(--text-muted)', fontSize:13 }}>
+                Loading...
+              </div>
+            ) : (
+              <div className="app-shell">
+                <Navbar user={user} onLogout={logout} />
+                <div className="app-body">
+                  <Header selectedDate={selectedDate} user={user} onLogout={logout} />
+                  <main className="app-main">
+                    <Routes>
+                      <Route path="/" element={<Navigate to="/fund-explorer" replace />} />
+                      <Route path="/fund-explorer" element={
+                        <FundExplorer selectedDate={selectedDate} setSelectedFund={handleFundSelect} />
+                      } />
+                      <Route path="/home" element={
+                        <FundDetail selectedDate={selectedDate} selectedFund={selectedFund} setSelectedFund={handleFundSelect} />
+                      } />
+                      <Route path="/watchlist" element={
+                        <Watchlist selectedDate={selectedDate} setSelectedFund={handleFundSelect} />
+                      } />
+                      <Route path="/stock-exposure" element={<StockExposure />} />
+                      <Route path="/performance" element={
+                        <Performance selectedDate={selectedDate} selectedFund={selectedFund} />
+                      } />
+                      <Route path="/peer-comparison" element={
+                        <CompareFunds selectedDate={selectedDate} />
+                      } />
+                      <Route path="/simulator" element={
+                        <Simulator selectedDate={selectedDate} />
+                      } />
+                      <Route path="/rolling-analytics" element={
+                        <RollingAnalytics selectedDate={selectedDate} />
+                      } />
+                      <Route path="/models" element={
+                        <ModelPortfolios selectedDate={selectedDate} />
+                      } />
+                      <Route path="/peer-group-analytics" element={
+                        <PeerGroupAnalytics selectedDate={selectedDate} setSelectedFund={handleFundSelect} />
+                      } />
+                      <Route path="/portfolio" element={
+                        <PortfolioBuilder selectedDate={selectedDate} />
+                      } />
+                      <Route path="/retirement-planner" element={<RetirementPlanner />} />
+                      <Route path="/admin" element={
+                        user.role === 'admin'
+                          ? <AdminPanel />
+                          : <Navigate to="/fund-explorer" replace />
+                      } />
+                    </Routes>
+                  </main>
+                </div>
+                <ChatButton selectedFund={selectedFund} selectedDate={selectedDate} />
+              </div>
+            )
+          }
+        />
+      </Routes>
     </Router>
   );
 }
