@@ -1,6 +1,7 @@
 # Node
 frontend/node_modules/
 frontend/build/
+backend/node_modules/
 
 # Python
 backend/venv/
@@ -22,14 +23,17 @@ backend/test_gemini.py
 
 # OS
 .DS_Store
-Thumbs.db"backend/test_*.py" 
-"backend/reauth_*.py" 
-"backend/check_*.py" 
-"backend/test_*.py" 
-"backend/search_*.py" 
-"backend/preview_*.py" 
-"backend/find_*.py" 
-"backend/fund_info.py" 
-"backend/analyse_*.py" 
-backend/node_modules/"frontend/.env.development" 
-"backend/node_modules/" 
+Thumbs.db
+
+# Local dev
+frontend/.env.development
+
+# Backend scripts (local only)
+backend/test_*.py
+backend/reauth_*.py
+backend/check_*.py
+backend/search_*.py
+backend/preview_*.py
+backend/find_*.py
+backend/fund_info.py
+backend/analyse_*.py
