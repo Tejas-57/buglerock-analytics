@@ -19,7 +19,7 @@ from auth.models.auth_models import Base, User, UserRole, SetupToken
 from auth.services.auth_service import create_setup_token, send_setup_email
 
 DATABASE_URL = os.environ["DATABASE_URL"]
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://buglerock-analytics-plum.vercel.app")
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://fundiq.buglerock.asia")
 
 engine       = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)

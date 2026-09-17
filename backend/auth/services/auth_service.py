@@ -197,7 +197,7 @@ def _send_email(to: str, subject: str, html_body: str):
     service     = build("gmail", "v1", http=authed_http)
 
     msg = MIMEMultipart("alternative")
-    msg["From"]    = AUTH_EMAIL_SENDER
+    msg["From"]    = f"Analytics Buglerock <{AUTH_EMAIL_SENDER}>"
     msg["To"]      = to
     msg["Subject"] = subject
     msg.attach(MIMEText(html_body, "html"))
