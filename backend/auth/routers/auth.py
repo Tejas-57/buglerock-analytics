@@ -50,6 +50,7 @@ class VerifySetupTokenRequest(BaseModel):
 # ── Helper: set cookies ───────────────────────────────────────────────────────
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
+    cookie_domain = None if os.environ.get("ENV") == "development" else ".buglerock.asia"
     response.set_cookie(
         key      = "access_token",
         value    = access_token,
@@ -57,6 +58,7 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
         secure   = COOKIE_SECURE,
         samesite = "lax",
         max_age  = 8 * 60 * 60,
+        domain   = cookie_domain,
     )
     response.set_cookie(
         key      = "refresh_token",
@@ -66,6 +68,7 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
         samesite = "lax",
         max_age  = REFRESH_TOKEN_DAYS * 24 * 60 * 60,
         path     = "/api/auth/refresh",
+        domain   = cookie_domain,
     )
 
 

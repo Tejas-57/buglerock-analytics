@@ -2,7 +2,7 @@
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "https://buglerock-analytics-ew17.onrender.com/api/$1"
+      "dest": "https://backend.buglerock.asia/api/$1"
     },
     {
       "src": "/(.*)",
