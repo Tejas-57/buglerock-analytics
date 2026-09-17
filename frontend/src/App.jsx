@@ -15,6 +15,10 @@ import ChatButton from './components/Chat/ChatButton';
 import PortfolioBuilder from './components/PortfolioBuilder/PortfolioBuilder';
 import StockExposure from './components/StockExposure/StockExposure';
 import RetirementPlanner from './components/RetirementPlanner/RetirementPlanner';
+import Login from './components/Login/Login';
+import SetupPassword from './components/Login/SetupPassword';
+import AdminPanel from './components/Admin/AdminPanel';
+import { useAuth } from './hooks/useAuth';
 import './styles/global.css';
 import './App.css';
 
@@ -30,11 +34,13 @@ function loadFromStorage(key, fallback) {
 }
 
 export default function App() {
+  const { user, loading: authLoading, login, logout } = useAuth();
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedFund, setSelectedFund] = useState(() => loadFromStorage('br_selected_fund', null));
 
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_API_URL || ''}/api/status`)
+    if (!user) return;
+    fetch(`${process.env.REACT_APP_API_URL || ''}/api/status`, { credentials: 'include' })
       .then(r => r.json())
       .then(s => {
         if (s.data_as_of) {
@@ -44,13 +50,35 @@ export default function App() {
         }
       })
       .catch(() => setSelectedDate(new Date()));
-  }, []);
+  }, [user]);
 
   const handleFundSelect = (fund) => {
     setSelectedFund(fund);
     saveToStorage('br_selected_fund', fund);
   };
 
+  // ── Auth loading ──────────────────────────────────────────────────────────
+  if (authLoading) {
+    return (
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', color:'#912F63', fontSize:14, fontWeight:600 }}>
+        Loading FundIQ…
+      </div>
+    );
+  }
+
+  // ── Setup password page — public ──────────────────────────────────────────
+  if (window.location.pathname === '/setup-password') {
+    return user
+      ? <Navigate to="/fund-explorer" />
+      : <SetupPassword onLogin={login} />;
+  }
+
+  // ── Not logged in — show login page ──────────────────────────────────────
+  if (!user) {
+    return <Login onLogin={login} />;
+  }
+
+  // ── App data loading ──────────────────────────────────────────────────────
   if (!selectedDate) {
     return (
       <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', color:'var(--text-muted)', fontSize:13 }}>
@@ -59,12 +87,13 @@ export default function App() {
     );
   }
 
+  // ── Main app ──────────────────────────────────────────────────────────────
   return (
     <Router>
       <div className="app-shell">
-        <Navbar />
+        <Navbar user={user} onLogout={logout} />
         <div className="app-body">
-          <Header selectedDate={selectedDate} />
+          <Header selectedDate={selectedDate} user={user} onLogout={logout} />
           <main className="app-main">
             <Routes>
               <Route path="/" element={<Navigate to="/fund-explorer" replace />} />
@@ -77,8 +106,7 @@ export default function App() {
               <Route path="/watchlist" element={
                 <Watchlist selectedDate={selectedDate} setSelectedFund={handleFundSelect} />
               } />
-              <Route path="/stock-exposure" element={<StockExposure />
-              } />
+              <Route path="/stock-exposure" element={<StockExposure />} />
               <Route path="/performance" element={
                 <Performance selectedDate={selectedDate} selectedFund={selectedFund} />
               } />
@@ -101,6 +129,13 @@ export default function App() {
                 <PortfolioBuilder selectedDate={selectedDate} />
               } />
               <Route path="/retirement-planner" element={<RetirementPlanner />} />
+
+              {/* Admin — only for admin role */}
+              <Route path="/admin" element={
+                user.role === 'admin'
+                  ? <AdminPanel />
+                  : <Navigate to="/fund-explorer" replace />
+              } />
             </Routes>
           </main>
         </div>
