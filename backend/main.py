@@ -9,7 +9,7 @@ from datetime import date
 load_dotenv()
 
 from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, benchmarks, optimise, holdings, proposal, models
-from routers.auth.routers.auth import router as auth_router
+from auth.routers.auth import router as auth_router  # CORRECT
 from auth.middleware.auth_middleware import AuthMiddleware
 from models.database import init_db
 
