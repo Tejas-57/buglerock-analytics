@@ -4,20 +4,34 @@ import "./Login.css";
 
 const API = process.env.REACT_APP_API_URL;
 
+function FundIQLogo() {
+  return (
+    <div className="login-logo">
+      <div className="login-logo-mark" />
+      <div className="login-logo-text">
+        <div className="login-logo-brand">
+          <span className="login-logo-fund">Fund</span>
+          <span className="login-logo-iq">IQ</span>
+        </div>
+        <span className="login-logo-secondary">A BugleRock Analytics Platform</span>
+      </div>
+    </div>
+  );
+}
+
 export default function Login({ onLogin }) {
-  const [step, setStep]       = useState("login");   // login | forgot | otp
-  const [email, setEmail]     = useState("");
-  const [password, setPassword] = useState("");
-  const [otp, setOtp]         = useState("");
+  const [step, setStep]               = useState("login");
+  const [email, setEmail]             = useState("");
+  const [password, setPassword]       = useState("");
+  const [otp, setOtp]                 = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [error, setError]     = useState("");
-  const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [error, setError]             = useState("");
+  const [message, setMessage]         = useState("");
+  const [loading, setLoading]         = useState(false);
 
   const clearMessages = () => { setError(""); setMessage(""); };
 
-  // ── Login ──────────────────────────────────────────────────────────────────
   async function handleLogin(e) {
     e.preventDefault();
     clearMessages();
@@ -26,12 +40,12 @@ export default function Login({ onLogin }) {
       const res = await fetch(`${API}/api/auth/login`, {
         method:      "POST",
         headers:     { "Content-Type": "application/json" },
-        credentials: "include",   // send/receive HttpOnly cookies
+        credentials: "include",
         body:        JSON.stringify({ email, password }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Login failed");
-      onLogin(data);   // pass user info to parent (App.jsx)
+      onLogin(data);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -39,7 +53,6 @@ export default function Login({ onLogin }) {
     }
   }
 
-  // ── Forgot password — send OTP ─────────────────────────────────────────────
   async function handleForgot(e) {
     e.preventDefault();
     clearMessages();
@@ -59,18 +72,11 @@ export default function Login({ onLogin }) {
     }
   }
 
-  // ── Verify OTP + set new password ─────────────────────────────────────────
   async function handleOTPReset(e) {
     e.preventDefault();
     clearMessages();
-    if (newPassword !== confirmPassword) {
-      setError("Passwords do not match");
-      return;
-    }
-    if (newPassword.length < 8) {
-      setError("Password must be at least 8 characters");
-      return;
-    }
+    if (newPassword !== confirmPassword) { setError("Passwords do not match"); return; }
+    if (newPassword.length < 8) { setError("Password must be at least 8 characters"); return; }
     setLoading(true);
     try {
       const res = await fetch(`${API}/api/auth/verify-otp`, {
@@ -93,14 +99,11 @@ export default function Login({ onLogin }) {
   return (
     <div className="login-page">
       <div className="login-card">
-        {/* Logo + title */}
         <div className="login-header">
-          <div className="login-logo">BR</div>
-          <h1 className="login-title">FundIQ</h1>
-          <p className="login-subtitle">BugleRock Analytics Platform</p>
+          <FundIQLogo />
         </div>
 
-        {/* ── Login form ── */}
+        {/* ── Login ── */}
         {step === "login" && (
           <form onSubmit={handleLogin} className="login-form">
             <div className="form-group">
@@ -110,8 +113,7 @@ export default function Login({ onLogin }) {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="you@buglerock.asia"
-                required
-                autoFocus
+                required autoFocus
               />
             </div>
             <div className="form-group">
@@ -129,17 +131,14 @@ export default function Login({ onLogin }) {
             <button type="submit" className="btn-primary" disabled={loading}>
               {loading ? "Signing in…" : "Sign in"}
             </button>
-            <button
-              type="button"
-              className="btn-link"
-              onClick={() => { clearMessages(); setStep("forgot"); }}
-            >
+            <button type="button" className="btn-link"
+              onClick={() => { clearMessages(); setStep("forgot"); }}>
               Forgot password?
             </button>
           </form>
         )}
 
-        {/* ── Forgot password form ── */}
+        {/* ── Forgot password ── */}
         {step === "forgot" && (
           <form onSubmit={handleForgot} className="login-form">
             <p className="form-hint">
@@ -152,8 +151,7 @@ export default function Login({ onLogin }) {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="you@buglerock.asia"
-                required
-                autoFocus
+                required autoFocus
               />
             </div>
             {error   && <div className="form-error">{error}</div>}
@@ -161,17 +159,14 @@ export default function Login({ onLogin }) {
             <button type="submit" className="btn-primary" disabled={loading}>
               {loading ? "Sending OTP…" : "Send OTP"}
             </button>
-            <button
-              type="button"
-              className="btn-link"
-              onClick={() => { clearMessages(); setStep("login"); }}
-            >
+            <button type="button" className="btn-link"
+              onClick={() => { clearMessages(); setStep("login"); }}>
               ← Back to login
             </button>
           </form>
         )}
 
-        {/* ── OTP + new password form ── */}
+        {/* ── OTP + new password ── */}
         {step === "otp" && (
           <form onSubmit={handleOTPReset} className="login-form">
             <p className="form-hint">
@@ -186,8 +181,7 @@ export default function Login({ onLogin }) {
                 placeholder="6-digit code"
                 maxLength={6}
                 inputMode="numeric"
-                required
-                autoFocus
+                required autoFocus
               />
             </div>
             <div className="form-group">
@@ -215,11 +209,8 @@ export default function Login({ onLogin }) {
             <button type="submit" className="btn-primary" disabled={loading}>
               {loading ? "Resetting…" : "Reset Password"}
             </button>
-            <button
-              type="button"
-              className="btn-link"
-              onClick={() => { clearMessages(); setStep("forgot"); }}
-            >
+            <button type="button" className="btn-link"
+              onClick={() => { clearMessages(); setStep("forgot"); }}>
               ← Resend OTP
             </button>
           </form>

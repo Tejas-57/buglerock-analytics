@@ -1,5 +1,7 @@
 /* frontend/src/components/Login/Login.css */
 
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@700&display=swap');
+
 .login-page {
   min-height: 100vh;
   display: flex;
@@ -18,38 +20,64 @@
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.2);
 }
 
-/* Header */
+/* ── Logo ── */
 .login-header {
   text-align: center;
   margin-bottom: 36px;
 }
 
 .login-logo {
-  width: 56px;
-  height: 56px;
-  background: #912F63;
-  color: white;
-  border-radius: 12px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  font-weight: 700;
-  margin-bottom: 16px;
-  letter-spacing: 1px;
+  gap: 10px;
+  margin-bottom: 6px;
 }
 
-.login-title {
-  font-size: 28px;
+.login-logo-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #912F63, #3E3452);
+  flex-shrink: 0;
+}
+
+.login-logo-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.login-logo-brand {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.login-logo-fund {
+  font-family: "Cormorant Garamond", "Garamond", serif;
+  font-size: 26px;
+  font-weight: 700;
+  color: #912F63;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+.login-logo-iq {
+  font-family: "Cormorant Garamond", "Garamond", serif;
+  font-size: 26px;
   font-weight: 700;
   color: #3E3452;
-  margin: 0 0 4px;
+  letter-spacing: 0.01em;
+  line-height: 1;
 }
 
-.login-subtitle {
-  font-size: 14px;
-  color: #A2A0A0;
-  margin: 0;
+.login-logo-secondary {
+  font-size: 9px;
+  color: #A795AE;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 400;
+  margin-top: 2px;
 }
 
 /* Form */
