@@ -1,13 +1,26 @@
 // frontend/src/components/Login/SetupPassword.jsx
-// Shown when user clicks setup link from email: /setup-password?token=xxx
-
 import { useState, useEffect } from "react";
 import "./Login.css";
 
 const API = process.env.REACT_APP_API_URL;
 
+function FundIQLogo() {
+  return (
+    <div className="login-logo">
+      <div className="login-logo-mark" />
+      <div className="login-logo-text">
+        <div className="login-logo-brand">
+          <span className="login-logo-fund">Fund</span>
+          <span className="login-logo-iq">IQ</span>
+        </div>
+        <span className="login-logo-secondary">A BugleRock Analytics Platform</span>
+      </div>
+    </div>
+  );
+}
+
 export default function SetupPassword({ onLogin }) {
-  const [step, setStep]         = useState("loading");  // loading | form | error | done
+  const [step, setStep]         = useState("loading");
   const [token, setToken]       = useState("");
   const [userName, setUserName] = useState("");
   const [password, setPassword] = useState("");
@@ -15,7 +28,6 @@ export default function SetupPassword({ onLogin }) {
   const [error, setError]       = useState("");
   const [loading, setLoading]   = useState(false);
 
-  // On mount — extract token from URL and verify it
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("token");
@@ -25,7 +37,6 @@ export default function SetupPassword({ onLogin }) {
       return;
     }
 
-    // Verify token is valid before showing form
     fetch(`${API}/api/auth/verify-setup-token`, {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
@@ -34,7 +45,7 @@ export default function SetupPassword({ onLogin }) {
       .then(res => res.json())
       .then(data => {
         if (!data.ok) throw new Error(data.detail || "Invalid link");
-        setToken(data.token);        // server may return a refreshed token
+        setToken(data.token);
         setUserName(data.name);
         setStep("form");
       })
@@ -47,15 +58,8 @@ export default function SetupPassword({ onLogin }) {
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
-
-    if (password !== confirm) {
-      setError("Passwords do not match");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
-      return;
-    }
+    if (password !== confirm) { setError("Passwords do not match"); return; }
+    if (password.length < 8)  { setError("Password must be at least 8 characters"); return; }
 
     setLoading(true);
     try {
@@ -67,10 +71,11 @@ export default function SetupPassword({ onLogin }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Setup failed");
-
       setStep("done");
-      // Auto-login — cookies already set by server
-      setTimeout(() => onLogin(data), 1500);
+      setTimeout(() => {
+        onLogin(data);
+        window.location.href = "/fund-explorer";
+      }, 1500);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -82,9 +87,7 @@ export default function SetupPassword({ onLogin }) {
     <div className="login-page">
       <div className="login-card">
         <div className="login-header">
-          <div className="login-logo">BR</div>
-          <h1 className="login-title">FundIQ</h1>
-          <p className="login-subtitle">BugleRock Analytics Platform</p>
+          <FundIQLogo />
         </div>
 
         {step === "loading" && (
@@ -113,8 +116,7 @@ export default function SetupPassword({ onLogin }) {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 placeholder="At least 8 characters"
-                required
-                autoFocus
+                required autoFocus
               />
             </div>
             <div className="form-group">
