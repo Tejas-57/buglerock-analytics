@@ -8,6 +8,7 @@ import bcrypt
 import base64
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -162,21 +163,32 @@ def verify_setup_token(db: Session, token_str: str) -> Optional[User]:
 
 # ── Email via Gmail API ───────────────────────────────────────────────────────
 
+def _get_token_path() -> str:
+    """Resolve gmail token path — works from any working directory."""
+    render_path = Path("/etc/secrets/gmail_token.json")
+    if render_path.exists():
+        return str(render_path)
+    # Relative to this file: auth/services/auth_service.py → go up 3 levels to backend, then credentials
+    local_path = Path(__file__).parent.parent.parent / "credentials" / "gmail_token.json"
+    return str(local_path)
+
+
 def _send_email(to: str, subject: str, html_body: str):
-    import ssl
     import httplib2
     import json
     from googleapiclient.discovery import build
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
     import google_auth_httplib2
-    from services.gmail_watcher import _load_token_json, SCOPES
 
-    token_json = _load_token_json()
-    creds = Credentials.from_authorized_user_info(
-        json.loads(token_json),
-        SCOPES + ["https://www.googleapis.com/auth/gmail.send"]
-    )
+    SEND_SCOPES = [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+    ]
+
+    token_path = _get_token_path()
+    token_json = Path(token_path).read_text()
+    creds = Credentials.from_authorized_user_info(json.loads(token_json), SEND_SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
 

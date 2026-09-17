@@ -1,69 +1,82 @@
 // frontend/src/hooks/useAuth.js
-// Drop this hook into your App.jsx to handle auth state + silent token refresh
 
 import { useState, useEffect, useCallback } from "react";
 
-const API = process.env.REACT_APP_API_URL;
+const API = process.env.REACT_APP_API_URL || "";
 
 export function useAuth() {
-  const [user, setUser]       = useState(null);    // null = not logged in
-  const [loading, setLoading] = useState(true);    // true while checking session on startup
+  const [user, setUser]       = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  // ── On startup: try to restore session via /api/auth/me ──────────────────
   useEffect(() => {
-    fetch(`${API}/api/auth/me`, { credentials: "include" })
-      .then(res => {
-        if (res.ok) return res.json();
-        // Access token expired — try silent refresh
-        return fetch(`${API}/api/auth/refresh`, {
+    async function checkSession() {
+      try {
+        // Try /api/auth/me first
+        const res = await fetch(`${API}/api/auth/me`, { credentials: "include" });
+        if (res.ok) {
+          const data = await res.json();
+          setUser(data);
+          setLoading(false);
+          return;
+        }
+
+        // /api/auth/me failed — try silent refresh
+        const refreshRes = await fetch(`${API}/api/auth/refresh`, {
           method: "POST", credentials: "include",
-        }).then(r => {
-          if (r.ok) {
-            // Refresh worked — now get user info
-            return fetch(`${API}/api/auth/me`, { credentials: "include" }).then(r2 => r2.json());
-          }
-          return null; // Refresh failed — user must log in
         });
-      })
-      .then(data => setUser(data || null))
-      .catch(() => setUser(null))
-      .finally(() => setLoading(false));
+
+        if (refreshRes.ok) {
+          // Refresh worked — get user info
+          const meRes = await fetch(`${API}/api/auth/me`, { credentials: "include" });
+          if (meRes.ok) {
+            const data = await meRes.json();
+            setUser(data);
+            setLoading(false);
+            return;
+          }
+        }
+
+        // Both failed — not logged in
+        setUser(null);
+      } catch {
+        // Network error — not logged in
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    checkSession();
   }, []);
 
-  // ── Silent refresh: runs every 7 hours to keep access token alive ─────────
+  // Silent refresh every 7 hours
   useEffect(() => {
     if (!user) return;
 
-    // Refresh access token every 7 hours (before 8 hour expiry)
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`${API}/api/auth/refresh`, {
           method: "POST", credentials: "include",
         });
-        if (!res.ok) {
-          // Refresh token also expired — force logout
-          setUser(null);
-        }
+        if (!res.ok) setUser(null);
       } catch {
-        // Network error — don't log out, will retry next interval
+        // Network error — don't log out
       }
-    }, 7 * 60 * 60 * 1000);  // 7 hours in ms
+    }, 7 * 60 * 60 * 1000);
 
     return () => clearInterval(interval);
   }, [user]);
 
-  // ── Login handler ─────────────────────────────────────────────────────────
   const login = useCallback((userData) => {
     setUser(userData);
   }, []);
 
-  // ── Logout ────────────────────────────────────────────────────────────────
   const logout = useCallback(async () => {
     try {
       await fetch(`${API}/api/auth/logout`, {
         method: "POST", credentials: "include",
       });
-    } catch { /* ignore errors */ }
+    } catch {}
     setUser(null);
   }, []);
 
