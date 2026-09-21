@@ -12,8 +12,8 @@ from models.database import SessionLocal
 from auth.models.auth_models import User
 from auth.services.auth_service import create_setup_token, send_setup_email
 
-FRONTEND_URL = "https://buglerock-analytics-plum.vercel.app"
-EMAIL        = "tejas.s@buglerock.asia"
+FRONTEND_URL = "https://fundiq.buglerock.asia"
+EMAIL        = "divyansh.a@buglerock.asia"
 
 db   = SessionLocal()
 user = db.query(User).filter(User.email == EMAIL).first()

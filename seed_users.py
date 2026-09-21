@@ -33,7 +33,7 @@ USERS = [
     # (name, email, role, is_service_account)
     ("BR Analytics",     "analytics@buglerock.asia",  "admin", True),   # service account — no email
     ("Tejas Singh",      "tejas.s@buglerock.asia",    "admin", False),
-    # ("Divyansh Agarwal", "divyansh.a@buglerock.asia", "user",  False),
+    ("Divyansh Agarwal", "divyansh.a@buglerock.asia", "user",  False),
     # ("Sujaya Lakshmi",   "sujaya.l@buglerock.asia",   "user",  False),
     # ("Arjun Prasanna",   "arjun.p@buglerock.asia",    "user",  False),
     # ("Pranav Shenoy",    "pranav.s@buglerock.asia",   "user",  False),
