@@ -10,7 +10,7 @@ function FundIQLogo() {
       <div className="login-logo-mark" />
       <div className="login-logo-text">
         <div className="login-logo-brand">
-          <span className="login-logo-fund">Fund</span>
+          <span className="login-logo-fund">Fünd</span>
           <span className="login-logo-iq">IQ</span>
         </div>
         <span className="login-logo-secondary">A BugleRock Analytics Platform</span>

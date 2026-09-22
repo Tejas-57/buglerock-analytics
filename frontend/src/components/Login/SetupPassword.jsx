@@ -10,7 +10,7 @@ function FundIQLogo() {
       <div className="login-logo-mark" />
       <div className="login-logo-text">
         <div className="login-logo-brand">
-          <span className="login-logo-fund">Fund</span>
+          <span className="login-logo-fund">Fünd</span>
           <span className="login-logo-iq">IQ</span>
         </div>
         <span className="login-logo-secondary">A BugleRock Analytics Platform</span>
@@ -72,7 +72,10 @@ export default function SetupPassword({ onLogin }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Setup failed");
       setStep("done");
-      setTimeout(() => onLogin(data), 1500);
+      setTimeout(() => {
+        onLogin(data);
+        window.location.href = "/fund-explorer";
+      }, 1500);
     } catch (err) {
       setError(err.message);
     } finally {

@@ -115,3 +115,37 @@
 .react-datepicker__navigation-icon::before {
   border-color: var(--text-muted) !important;
 }
+
+/* Add to Header.css */
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 16px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+
+.header-username {
+  font-size: 13px;
+  font-weight: 500;
+  color: #3E3452;
+}
+
+.header-logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #A2A0A0;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.header-logout:hover {
+  color: #912F63;
+  background: rgba(145, 47, 99, 0.08);
+}
