@@ -27,25 +27,11 @@
 }
 
 .login-logo {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
-}
-
-.login-logo-mark {
-  width: 38px;
-  height: 38px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, #912F63, #3E3452);
-  flex-shrink: 0;
-}
-
-.login-logo-text {
   display: flex;
   flex-direction: column;
-  line-height: 1.2;
-  text-align: left;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
 }
 
 .login-logo-brand {

@@ -19,7 +19,7 @@ from auth.models.auth_models import Base, User, UserRole, SetupToken
 from auth.services.auth_service import create_setup_token, send_setup_email
 
 DATABASE_URL = os.environ["DATABASE_URL"]
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://fundiq.buglerock.asia")
+FRONTEND_URL = "https://fundiq.buglerock.asia"
 
 engine       = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
@@ -35,9 +35,9 @@ USERS = [
     ("Tejas Singh",      "tejas.s@buglerock.asia",    "admin", False),
     ("Divyansh Agarwal", "divyansh.a@buglerock.asia", "user",  False),
     ("Sujaya Lakshmi",   "sujaya.l@buglerock.asia",   "user",  False),
-    # ("Arjun Prasanna",   "arjun.p@buglerock.asia",    "user",  False),
-    # ("Pranav Shenoy",    "pranav.s@buglerock.asia",   "user",  False),
-    # ("Ishwar Raj",       "ishwar.r@buglerock.asia",   "user",  False),
+    ("Arjun Prasanna",   "arjun.p@buglerock.asia",    "user",  False),
+    ("Pranav Shenoy",    "pranav.s@buglerock.asia",   "user",  False),
+    ("Ishwar Raj",       "ishwar.r@buglerock.asia",   "user",  False),
 ]
 
 db = SessionLocal()
