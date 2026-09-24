@@ -49,31 +49,37 @@ Whenever something new is built, discovered, or decided that future sessions nee
 | **Data Source** | Morningstar daily Excel | Delivered via Gmail API, auto-parsed on arrival |
 | **Auth / Secrets** | Gmail OAuth 2.0 | Token stored in PostgreSQL `settings` table |
 
-**Repo:** https://github.com/Tejas-57/buglerock-analytics  
-**Frontend (live):** https://buglerock-analytics-plum.vercel.app  
-**Backend (live):** https://buglerock-analytics-ew17.onrender.com
+**Repo:** https://github.com/Tejas-57/buglerock-analytics
+**Frontend (live):** https://fundiq.buglerock.asia
+**Backend (live):** https://backend.buglerock.asia
+
+### Custom domains (GoDaddy — buglerock.asia)
+| Subdomain | Points to |
+|---|---|
+| `fundiq.buglerock.asia` | Vercel (CNAME → Vercel DNS) |
+| `backend.buglerock.asia` | Render (CNAME → buglerock-analytics-ew17.onrender.com) |
 
 ### Useful backend URLs
 | Purpose | URL |
 |---|---|
-| API health check | https://buglerock-analytics-ew17.onrender.com/api/status |
-| Model portfolios | https://buglerock-analytics-ew17.onrender.com/api/models/portfolios |
-| Model portfolio debug | https://buglerock-analytics-ew17.onrender.com/api/models/debug |
-| Holdings fetch status | https://buglerock-analytics-ew17.onrender.com/api/holdings/admin/fetch-status |
-| Holdings fetch progress | https://buglerock-analytics-ew17.onrender.com/api/holdings/admin/fetch-progress |
-| Accesscode status | https://buglerock-analytics-ew17.onrender.com/api/holdings/admin/accesscode-status |
-| Fetch single fund holdings | https://buglerock-analytics-ew17.onrender.com/api/holdings/fetch/{isin} (POST) |
-| Fetch all holdings | https://buglerock-analytics-ew17.onrender.com/api/holdings/fetch-universe (POST) |
-| Trigger Gmail fetch | https://buglerock-analytics-ew17.onrender.com/api/funds/fetch?date=YYYY-MM-DD |
-| Debug Gmail search | https://buglerock-analytics-ew17.onrender.com/api/funds/debug-gmail?date=YYYY-MM-DD |
-| Peer group analytics | https://buglerock-analytics-ew17.onrender.com/api/peer/snapshot |
-| Benchmark indices list | https://buglerock-analytics-ew17.onrender.com/api/benchmarks/indices |
-| Benchmark NAV history | https://buglerock-analytics-ew17.onrender.com/api/benchmarks/nav-history?index=X |
-| Benchmark sync (manual) | https://buglerock-analytics-ew17.onrender.com/api/benchmarks/sync (POST) |
-| Benchmark load status | https://buglerock-analytics-ew17.onrender.com/api/benchmarks/load-status |
-| Portfolio look-through | https://buglerock-analytics-ew17.onrender.com/api/holdings/portfolio-lookthrough?isins=X&weights=Y |
-| FastAPI docs | https://buglerock-analytics-ew17.onrender.com/docs |
-| **Period dates debug** | https://buglerock-analytics-ew17.onrender.com/api/performance/period-dates |
+| API health check | https://backend.buglerock.asia/api/status |
+| Model portfolios | https://backend.buglerock.asia/api/models/portfolios |
+| Model portfolio debug | https://backend.buglerock.asia/api/models/debug |
+| Holdings fetch status | https://backend.buglerock.asia/api/holdings/admin/fetch-status |
+| Holdings fetch progress | https://backend.buglerock.asia/api/holdings/admin/fetch-progress |
+| Accesscode status | https://backend.buglerock.asia/api/holdings/admin/accesscode-status |
+| Fetch single fund holdings | https://backend.buglerock.asia/api/holdings/fetch/{isin} (POST) |
+| Fetch all holdings | https://backend.buglerock.asia/api/holdings/fetch-universe (POST) |
+| Trigger Gmail fetch | https://backend.buglerock.asia/api/funds/fetch?date=YYYY-MM-DD |
+| Debug Gmail search | https://backend.buglerock.asia/api/funds/debug-gmail?date=YYYY-MM-DD |
+| Peer group analytics | https://backend.buglerock.asia/api/peer/snapshot |
+| Benchmark indices list | https://backend.buglerock.asia/api/benchmarks/indices |
+| Benchmark NAV history | https://backend.buglerock.asia/api/benchmarks/nav-history?index=X |
+| Benchmark sync (manual) | https://backend.buglerock.asia/api/benchmarks/sync (POST) |
+| Benchmark load status | https://backend.buglerock.asia/api/benchmarks/load-status |
+| Portfolio look-through | https://backend.buglerock.asia/api/holdings/portfolio-lookthrough?isins=X&weights=Y |
+| FastAPI docs | https://backend.buglerock.asia/docs |
+| **Period dates debug** | https://backend.buglerock.asia/api/performance/period-dates |
 
 ---
 
@@ -94,6 +100,13 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
+### Node.js dependency (required for PowerPoint generation)
+```bash
+cd backend
+npm install
+```
+This installs `pptxgenjs`. The `node_modules/` folder is gitignored — run `npm install` after every fresh clone.
+
 ### Frontend
 ```bash
 cd frontend
@@ -106,6 +119,10 @@ npm start                      # Runs on http://localhost:3000
 **Backend** — create `backend/.env` or set in Render dashboard:
 ```env
 DATABASE_URL=postgresql://user:password@host:5432/dbname
+JWT_SECRET_KEY=<hex32>
+ENV=development
+AUTH_EMAIL_SENDER=analytics@buglerock.asia
+FRONTEND_URL=http://localhost:3000
 GMAIL_CLIENT_ID=...
 GMAIL_CLIENT_SECRET=...
 GMAIL_REDIRECT_URI=...
@@ -114,10 +131,91 @@ BENCHMARK_SHEET_ID=1g_-yQIVu4Ror0BgBhW2Pex3Fj3uP_0meZHrpwJQ5qWA
 GOOGLE_SERVICE_ACCOUNT_JSON=...  # Full JSON of sheets_credentials.json (single line)
 ```
 
-**Frontend** — create `frontend/.env.local`:
+**Frontend** — create `frontend/.env.development` (gitignored, local only):
 ```env
 REACT_APP_API_URL=http://localhost:8000
 ```
+
+**Frontend production** — `frontend/.env.production` (committed):
+```env
+REACT_APP_API_URL=https://backend.buglerock.asia
+```
+
+React automatically uses `.env.development` for `npm start` and `.env.production` for `npm run build` (Vercel).
+
+---
+
+## Authentication System
+
+JWT-based auth with HttpOnly cookies. Implemented Sep 2026.
+
+### Architecture
+- Access token: 8 hours, HttpOnly cookie, `domain=.buglerock.asia`
+- Refresh token: 30-day sliding, HttpOnly cookie, stored in DB for revocation
+- Cookie domain works because both `fundiq.buglerock.asia` and `backend.buglerock.asia` share the `.buglerock.asia` parent
+- Password hashing: direct `bcrypt` (passlib had version bug on Render Python 3.11)
+- OTP email: Gmail API with `gmail.send` scope via `analytics@buglerock.asia`
+- Local dev cookies work because `ENV=development` sets `cookie_domain=None`
+
+### Key files
+| File | Role |
+|---|---|
+| `backend/auth/models/auth_models.py` | Users, RefreshToken, OTPCode, SetupToken tables |
+| `backend/auth/services/auth_service.py` | JWT, bcrypt, OTP, setup token, Gmail email sending |
+| `backend/auth/middleware/auth_middleware.py` | Route protection, public routes whitelist |
+| `backend/auth/routers/auth.py` | All `/api/auth/*` endpoints |
+| `frontend/src/hooks/useAuth.js` | Session restore on startup, silent refresh every 7h |
+| `frontend/src/components/Login/Login.jsx` | Login + forgot password + OTP reset |
+| `frontend/src/components/Login/SetupPassword.jsx` | First-login setup page |
+| `frontend/src/components/Admin/AdminPanel.jsx` | User management UI (at `/admin`, no navbar link) |
+
+### Render environment variables (production)
+| Variable | Value |
+|---|---|
+| `JWT_SECRET_KEY` | hex32 secret |
+| `FRONTEND_URL` | `https://fundiq.buglerock.asia` |
+| `ENV` | `production` |
+| `AUTH_EMAIL_SENDER` | `analytics@buglerock.asia` |
+| `CORS_ORIGINS` | `http://localhost:3000,https://fundiq.buglerock.asia` |
+| `WEB_CONCURRENCY` | `2` |
+
+### User management scripts (run from project root)
+| Script | Purpose |
+|---|---|
+| `seed_users.py` | Create users + send setup emails. `FRONTEND_URL` hardcoded to `https://fundiq.buglerock.asia` |
+| `resend_setup.py` | Resend setup email to one user. `FRONTEND_URL` hardcoded to `https://fundiq.buglerock.asia` |
+| `check_users.py` | List all users with status |
+| `reauth_gmail.py` | OAuth reauthorisation with send scope |
+| `update_gmail_token.py` | Push local token file to DB |
+
+⚠️ Both `seed_users.py` and `resend_setup.py` have `FRONTEND_URL` hardcoded (not read from `.env`) — this ensures setup email links always point to production regardless of local env.
+
+⚠️ Corporate network SSL issue: Gmail token refresh fails locally with `SSLCertVerificationError`. Fix — add at top of any script that sends email:
+```python
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+```
+
+### Gmail token scope
+Token must have both scopes: `gmail.readonly` AND `gmail.send`. Check with:
+```bash
+type backend\credentials\gmail_token.json | findstr scope
+```
+If only `readonly` — run `python reauth_gmail.py` then `python update_gmail_token.py`.
+After reauth, also update token on Render: Render → backend service → Environment → Secret Files → `/etc/secrets/gmail_token.json`.
+
+Google OAuth app must be set to **Internal** (buglerock.asia Workspace) to avoid "Something went wrong" error during reauth.
+
+### Users
+| Name | Email | Role | Status |
+|---|---|---|---|
+| BR Analytics | analytics@buglerock.asia | admin | Service account |
+| Tejas Singh | tejas.s@buglerock.asia | admin | Active |
+| Divyansh Agarwal | divyansh.a@buglerock.asia | user | Active |
+| Sujaya Lakshmi | sujaya.l@buglerock.asia | user | Active |
+| Arjun Prasanna | arjun.p@buglerock.asia | user | Commented out in seed |
+| Pranav Shenoy | pranav.s@buglerock.asia | user | Commented out in seed |
+| Ishwar Raj | ishwar.r@buglerock.asia | user | Commented out in seed |
 
 ---
 
@@ -167,7 +265,7 @@ GET /api/funds/debug-gmail?date=YYYY-MM-DD
 | Project name | BugleRock Analytics |
 | Project ID | buglerock-analytics |
 | APIs enabled | Gmail API, Google Sheets API |
-| OAuth client | Desktop app type |
+| OAuth client | Desktop app type — **Internal** (buglerock.asia Workspace) |
 | Service account | benchmark-bot@buglerock-analytics-505208.iam.gserviceaccount.com |
 
 **Credential files on Render (Secret Files):**
@@ -178,7 +276,7 @@ GET /api/funds/debug-gmail?date=YYYY-MM-DD
 **Token management:**
 - Token stored in DB (`settings` table, key `gmail_token`)
 - To push new token to DB after regenerating: `POST /api/gmail/store-token`
-- To regenerate token locally: run `backend/generate_gmail_token.py`
+- To regenerate token locally: run `backend/reauth_gmail.py`
 
 ---
 
@@ -216,24 +314,23 @@ benchmark_nav (
 
 ### Design principles
 - **Stateless watcher** — no settings flags. Every 5-min poll searches Gmail, DB upsert handles dedup
-- **DB-first** — checks DB before writing to sheet. Sheet write only when genuinely new data (avoids Google Sheets 429 rate limit)
-- **Self-healing** — delete any DB row → restored within 5 minutes. Delete sheet row → manual sync needed
-- **Historical load is one-time** — `POST /api/benchmarks/load-history` runs in background, not on startup
+- **DB-first** — checks DB before writing to sheet
+- **Self-healing** — delete any DB row → restored within 5 minutes
 
 ### Manual operations
 ```bash
 # Trigger email fetch (NSE + CRISIL) — runs in background
-curl -X POST https://buglerock-analytics-ew17.onrender.com/api/benchmarks/sync
+curl -X POST https://backend.buglerock.asia/api/benchmarks/sync
 
 # Check historical load status
-curl https://buglerock-analytics-ew17.onrender.com/api/benchmarks/load-status
+curl https://backend.buglerock.asia/api/benchmarks/load-status
 
 # Query nav history
-curl "https://buglerock-analytics-ew17.onrender.com/api/benchmarks/nav-history?index=Nifty%2050&from_date=2024-01-01"
+curl "https://backend.buglerock.asia/api/benchmarks/nav-history?index=Nifty%2050&from_date=2024-01-01"
 ```
 
 ### ✅ Nifty Indices daily DB sync (live)
-Apps Script writes to the "Nifty Indices" sheet tab daily via Yahoo Finance. The 5-minute Gmail poll loop calls `sync_nifty_indices_from_sheet()` inside `fetch_all_benchmarks()` every poll cycle, reading the last 20 rows and upserting to `benchmark_nav`. Verified live Aug 2026 — all 12 indices current.
+Apps Script writes to the "Nifty Indices" sheet tab daily via Yahoo Finance. The 5-minute Gmail poll loop calls `sync_nifty_indices_from_sheet()` inside `fetch_all_benchmarks()` every poll cycle. Verified live Aug 2026 — all 12 indices current.
 
 ---
 
@@ -258,7 +355,7 @@ Apps Script writes to the "Nifty Indices" sheet tab daily via Yahoo Finance. The
 `backend/services/mfapi.py` was renamed to `backend/services/nav_service.py`. All imports in `performance.py`, `simulator.py`, `rolling.py` updated. If any file still imports from `services.mfapi` it will crash on startup.
 
 ### period_dates table
-New PostgreSQL table stores exact start/end dates extracted from daily Morningstar Excel header rows. Used by `nav_service.fetch_nav_history` to query `nav_history` with exact date ranges matching Morningstar's return calculation periods.
+New PostgreSQL table stores exact start/end dates extracted from daily Morningstar Excel header rows.
 
 | Column | Description |
 |---|---|
@@ -274,12 +371,7 @@ New PostgreSQL table stores exact start/end dates extracted from daily Morningst
 
 ### nav_history table
 - 4,546,322 rows across 2,033 funds from inception (full refetch Sep 2026 via Morningstar)
-- Upsert: `ON CONFLICT DO UPDATE` when `force_full=True` — overwrites mfapi values with Morningstar adjusted NAV
-- `ON CONFLICT DO NOTHING` for incremental daily appends
-- No duplication possible — `UNIQUE(isin, date)` enforced at DB level
-
-### NAV chart backfill is non-blocking
-`fetch_nav_history` runs staleness check on every chart request. If stale, backfill runs in background thread — chart response returns immediately from DB.
+- `UNIQUE(isin, date)` enforced at DB level
 
 ### Full refetch command (Morningstar, overwrites everything)
 ```cmd
@@ -302,35 +394,52 @@ buglerock-analytics/
 ├── frontend/
 │   └── src/
 │       └── components/
-│           ├── FundExplorer/          # Fund browsing, filtering, search
-│           ├── FundDetail/            # Individual fund deep dive
-│           ├── PeerComparison/        # CompareFunds.jsx — up to 4 funds
-│           ├── StockExposure/         # Stock Exposure Finder tab
-│           ├── RetirementPlanner/     # Retirement Planner tab (Monte Carlo)
+│           ├── FundExplorer/
+│           ├── FundDetail/
+│           ├── PeerComparison/
+│           │   ├── CompareFunds.jsx
+│           │   └── generateComparisonPDF.js   ← NEW Sep 2026
+│           ├── StockExposure/
+│           ├── RetirementPlanner/
 │           │   ├── RetirementPlanner.jsx
-│           │   ├── rtEngine.js        # Monte Carlo engine
-│           │   ├── rtReport.js        # 15-section report builder
-│           │   ├── rtWorker.js        # Web Worker — runs simulation off main thread
+│           │   ├── rtEngine.js
+│           │   ├── rtReport.js
+│           │   ├── rtWorker.js
 │           │   └── RetirementPlanner.css
-│           ├── Simulator/             # SIP Simulator (under CALCULATE nav section)
-│           ├── RollingAnalytics/      # Rolling CAGR analytics (under CALCULATE nav section)
-│           ├── ModelPortfolios/       # BugleRock multi-asset model portfolios
-│           ├── Watchlist/             # Fund watchlist with card/table/compare views
-│           └── PortfolioBuilder/      # 6-step portfolio workflow
+│           ├── Simulator/
+│           ├── RollingAnalytics/
+│           ├── ModelPortfolios/
+│           ├── Watchlist/
+│           ├── Login/                         ← NEW Sep 2026
+│           │   ├── Login.jsx
+│           │   ├── Login.css
+│           │   └── SetupPassword.jsx
+│           ├── Admin/                         ← NEW Sep 2026
+│           │   ├── AdminPanel.jsx
+│           │   └── AdminPanel.css
+│           ├── Layout/
+│           │   ├── Header.jsx                 ← Updated Sep 2026 (logout button)
+│           │   └── Header.css
+│           └── PortfolioBuilder/
 │               ├── PortfolioBuilder.jsx
 │               └── steps/
 │                   ├── ClientIPS.jsx
 │                   ├── FundSearch.jsx
 │                   ├── BuildPortfolio.jsx
-│                   ├── Analyse.jsx            # Analytics suite
+│                   ├── Analyse.jsx
 │                   ├── analyseTabs/
-│                   │   └── PortfolioXRay.jsx  # Comprehensive tear sheet
+│                   │   └── PortfolioXRay.jsx
 │                   ├── Optimise.jsx
 │                   ├── Compare.jsx
 │                   └── PDFProposal.jsx
 │
 └── backend/
     ├── main.py
+    ├── auth/                                  ← NEW Sep 2026
+    │   ├── models/auth_models.py
+    │   ├── services/auth_service.py
+    │   ├── middleware/auth_middleware.py
+    │   └── routers/auth.py
     ├── routers/
     │   ├── funds.py
     │   ├── home.py
@@ -371,7 +480,15 @@ Fund-level portfolio stats — asset allocation, market cap breakdown, sector we
 Daily NAV per fund from inception. 4.5M+ rows. `UNIQUE(isin, date)`.
 
 ### `PeriodDates`
-17 rows (wiped + refreshed daily). Exact start/end dates per return period from Morningstar Excel. Used for NAV chart date range queries.
+17 rows (wiped + refreshed daily). Exact start/end dates per return period from Morningstar Excel.
+
+### Auth tables (Sep 2026)
+| Table | Purpose |
+|---|---|
+| `users` | Email, name, role, password hash, is_active, is_service_account, password_set |
+| `refresh_tokens` | Token hash, user_id, expiry, revoked flag |
+| `otp_codes` | 6-digit OTP for password reset, expires 10 min |
+| `setup_tokens` | First-login password setup link, expires 7 days |
 
 ---
 
@@ -384,16 +501,25 @@ Daily NAV per fund from inception. 4.5M+ rows. `UNIQUE(isin, date)`.
 - **CALCULATE** — SIP Simulator, Rolling Analytics
 - Sidebar scrollable when items overflow (small/zoomed screens)
 
+### Login Page
+- Logo: **FündIQ** (with umlaut ü) centered, no square mark
+- Subtitle: "A BugleRock Analytics Platform"
+- Forgot password → 6-digit OTP via Gmail API
+- `SetupPassword.jsx` — first-login route, publicly accessible (whitelisted in auth middleware)
+
+### Header
+- Username (first name only) + logout icon button top right
+- Props: `user` (object with `.name`) and `onLogout` (function)
+- CSS classes: `.header-user`, `.header-username`, `.header-logout`
+
 ### Fund Explorer
 - Category shown on watchlist card uses fund's own `category` field, NOT the sidebar filter category
 - Back button on Fund Detail uses `navigate(-1)` — returns to wherever user came from
-- **R1-R5 ranking colors**: R1/R2 = green `#059669`, R3 = black `#2D1F2B`, R4/R5 = red `#EF4444` — fixed in list rows and intelligence panel
+- **R1-R5 ranking colors**: R1/R2 = green `#059669`, R3 = black `#2D1F2B`, R4/R5 = red `#EF4444`
 
 ### Fund Detail
 - Period toggle (1Y/3Y/5Y) — `rk()` returns null for missing periods (no 3Y fallback)
-- Toggle stays visible even when selected period has no data — shows "No Xy data — select shorter period"
 - **NAV chart** uses exact `period_dates` from DB — not `today - N days`
-- **R1-R5 ranking badge** color corrected (was always green, now uses correct color per rank)
 - `isin` passed as param from frontend — backend skips ISIN lookup from amfi_code
 
 ### Watchlist
@@ -401,13 +527,24 @@ Daily NAV per fund from inception. 4.5M+ rows. `UNIQUE(isin, date)`.
 - Add-to-watchlist saves fund's own category, not selected sidebar filter
 
 ### Compare Funds (`/PeerComparison/CompareFunds.jsx`)
-- 5 sub-tabs: Returns, Risk metrics, Composition, Sectoral exposure, Fund info, Overlap
-- **Sectoral exposure** — fetches `stats.sector_breakdown` from `/api/holdings/{isin}` for each fund
-- **Overlap tab** — Export Overlap Report PDF button (same format as Portfolio Builder)
-- PDF uses `shortFundName()` for display names
+- 6 sub-tabs: Returns, Risk metrics, Composition, Sectoral exposure, Fund info, Overlap
+- **Export Comparison PDF** button — sits in the tabs row, right-aligned, hidden on Overlap tab
+- PDF generated by `generateComparisonPDF.js` — cover page + 4 pages (Returns, Risk, Composition, Sectoral Exposure). Fund Info tab excluded from PDF.
+- Cover page: dark header banner (title + BugleRock branding) + separate white card listing funds with color squares, NAV, 1Y return, AUM
+- **Overlap tab** — separate "Export Overlap Report" PDF button
+
+### generateComparisonPDF.js
+| Page | Content |
+|---|---|
+| Cover | Dark banner (title, date, BugleRock), fund list card (color dot, name, category, AUM, NAV, 1Y), disclaimer |
+| 1 — Returns | All return periods + calendar years + periods won tally |
+| 2 — Risk Metrics | 1Y and 3Y risk metrics with highlighting |
+| 3 — Composition | Market cap split, asset allocation, valuation |
+| 4 — Sectoral Exposure | Morningstar sector classification |
+
+⚠️ Sector data only appears if user visited the Sectoral Exposure tab first (data loaded on tab visit). PDF shows "visit Sectoral Exposure tab first" message if data is missing.
 
 ### Model Portfolios (`/ModelPortfolios/`)
-
 Five solver-constructed portfolios (Conservative → Aggressive) built from R1/R2 ranked funds only using HiGHS LP solver. Portfolio detail panel has two action buttons:
 
 #### 🔬 View Portfolio X-Ray (modal overlay)
@@ -416,26 +553,23 @@ Full-screen modal reusing `PortfolioXRay` directly. On open fires three API call
 - `GET /api/holdings/historical-var?isins=...&weights=...&categories=...&asset_classes=...&std_devs=...`
 - `GET /api/holdings/overlap?isins=...` (auto-triggers `/api/holdings/fetch/{isin}` POST for missing funds, polls 30×2s)
 
-Results keyed by `portfolio.key` — switching portfolios resets and re-fetches, reopening same portfolio reuses cached state. Modal subtitle shows live status ("Fetching holdings data…" / "Computing VaR…"). Modal positioned below 60px app header (`padding-top: 76px`, `align-items: flex-start`).
+Results keyed by `portfolio.key` — switching portfolios resets and re-fetches, reopening same portfolio reuses cached state.
 
 #### 📄 Generate PDF (modal overlay)
-Reuses `PDFProposal` directly via `buildPDFProps()` adapter. Produces identical section-picker and multi-page HTML PDF as Portfolio Builder. If X-Ray was opened first, `stressData` and `overlapData` are passed through automatically.
+Reuses `PDFProposal` directly via `buildPDFProps()` adapter. If X-Ray was opened first, `stressData` and `overlapData` are passed through automatically.
 
 #### Backend (`models.py`) — blended fields
 `_get_funds` SQL and `blended{}` now include:
 `return_1m · return_3m · return_6m · return_ytd · return_cy2021–cy2025 · sortino_3y · beta_3y · up_capture_3y · down_capture_3y`
-(previously only `return_1y/3y/5y`, `sharpe_3y`, `alpha_3y`, `std_dev_3y/5y`, `expense_ratio`)
 
 ### Simulator (`/Simulator/`)
 - SIP / Lumpsum backtest using actual NAV history
 - **localStorage cache** (`sim_cache_v1`): persists `fund`, `mode`, `amount`, `startDate`, `endDate`, `sipDate`
 - On mount: if valid saved inputs exist, auto re-runs the API and restores result
-- Navigating away and back fully restores state
 
 ### Rolling Analytics (`/RollingAnalytics/`)
 - Daily rolling CAGR distribution with stats (avg, median, best, worst, % positive, % > 12%, std dev)
 - **localStorage cache** (`rolling_cache_v1`): persists `fund`, `rollingYears`, `startDate`, `endDate`
-- On mount: if valid saved inputs exist, auto re-runs and restores result
 
 ### Portfolio Builder — Analyse Tab
 Tab groups: `Portfolio X-Ray | Overview · Returns & projections · Risk metrics | Correlation · Overlap · Style & drift | Stress test · Sensitivity · What-If | Fund details`
@@ -459,32 +593,25 @@ Tab groups: `Portfolio X-Ray | Overview · Returns & projections · Risk metrics
 **What-If tab**:
 - Fund substitution: up to 3 swaps, R1/R2 candidates + per-swap search, 8 delta metrics, persisted to localStorage
 - Allocation shift: Option D (only pure equity/debt scaled, hybrids unchanged), trade-off chart, Apply+Revert buttons persisted to localStorage
-- Growth projection moved to Returns tab
 
 **Portfolio X-Ray — Stress section**:
-- Fetched when X-Ray tab opens (same trigger as Stress Test tab)
+- Fetched when X-Ray tab opens
 - Shows real NAV-based returns: Portfolio, Nifty 500, Blended BM
-- Falls back to "Computing..." message while loading
 - Footnote: "Returns calculated from actual NAV history. '—' means fund not active or NAV unavailable."
 
 ### Retirement Planner
-- **Web Worker**: `rtWorker.js` runs simulation off main thread — UI stays responsive, progress bar shown
+- **Web Worker**: `rtWorker.js` runs simulation off main thread — UI stays responsive
 - `Field` component at module level (fixes focus/cursor loss on keystroke)
 - `type="text"` with `inputMode="decimal"` (fixes leading zero bug)
-- Chip nav scrolls to sections via `id="rt-section-{code}"`
 - `retAge < age` validation — allows already-retired clients (retAge = currentAge)
-- Goals/lumps stored as raw strings, parsed to numbers in `collectInputs`
-- P10 corpus clamped to `—` after depletion in cashflow table
-- Single column layout for goals/inflows rows
-- **Most likely label** on corpus range bar dynamically positioned under median line
 
 #### Report sections (in order)
-1. Plan score badge — composite score with 4 component bars
-2. Hero card — gradient, status, KPI strip (5 cells), "What needs to change?" table, secondary stats, funding gap bar
-3. What could derail the plan? — risk section from `R.sensDetailed`, ranked by impact points
-4. Phase 1 / Phase 2 split card — build wealth vs fund retirement
-5. Retirement readiness bridge — 7 nodes showing corpus build-up
-6. What should you do? — 3 action cards (SIP / retire later / reduce spending) + plain English paragraph
+1. Plan score badge
+2. Hero card — gradient, status, KPI strip, "What needs to change?" table, funding gap bar
+3. What could derail the plan? — risk section ranked by impact points
+4. Phase 1 / Phase 2 split card
+5. Retirement readiness bridge — 7 nodes
+6. What should you do? — 3 action cards + plain English paragraph
 7. Corpus Projection Fan Chart
 8. Corpus Milestones
 9. Corpus Percentile Analysis
@@ -502,7 +629,7 @@ Tab groups: `Portfolio X-Ray | Overview · Returns & projections · Risk metrics
 - `R.npsAnnualAnnuity` — NPS annuity (lakhs/year). Old name `npsAnnuityIncome` was wrong.
 - `R.totalSIPContrib` — raw nominal SIP cash (no compounding)
 - `R.marketGrowthEst` — `P50 - corpus0 - totalSIPContrib - epfAtRet - npsLump`
-- Solvers (`rtSolveSIP`, `rtSolveRetAge`, `rtSolveSpend`) run at full `nSims` — no caps
+- Solvers (`rtSolveSIP`, `rtSolveRetAge`, `rtSolveSpend`) run at full `nSims`
 
 #### Key fixes (Sep 2026)
 - Waterfall corrected: tax grossed-up (added), not subtracted
@@ -511,15 +638,13 @@ Tab groups: `Portfolio X-Ray | Overview · Returns & projections · Risk metrics
 - `IN.lateRMu/lateRSig` → `IN.lateMu/lateSig`
 - All hardcoded "500/1000 simulations" → `R.NSIM`
 - PDF: all `rt-` CSS classes inlined in `rtOpenReport` `<style>` block
-- Sensitivity labels plain English "what if" framing
-- "Longevity" → "Extended retirement horizon (+5 years)"
 
 ### Build Portfolio
 - Weight warning: red background + bold message when weights exceed 100%
 
 ### Optimise Tab
 - Runs **all three portfolios simultaneously** (Max Sharpe · Min Volatility · Max Return) on a single "Run optimisation" click
-- Optimisation Objective dropdown **removed** — it was redundant since all three are always computed
+- Optimisation Objective dropdown **removed** — redundant since all three are always computed
 
 ---
 
@@ -535,8 +660,6 @@ All verdict thresholds are consistent between `PortfolioXRay.jsx`, `Analyse.jsx`
 | 15–25% | Moderate | Amber `#F39C12` |
 | 25–35% | High | Orange `#E67E22` |
 | ≥ 35% | Very High | Red `#C0392B` |
-
-Applies to: average overlap between any two holdings, and highest overlapping pair.
 
 ### Sharpe ratio
 `> 0.7` Strong · `> 0.4` Adequate · else Weak
@@ -571,13 +694,13 @@ Defined in `STRESS_SCENARIOS` list in `backend/routers/nav.py`.
 
 **Columns:** Scenario · Period · Portfolio · Nifty 500 · [Blended BM — only if `bmStress` available] · Cushion vs [Blended BM or Nifty 500]
 
-Column count is dynamic: 4 columns when no IPS benchmark, 5 when blended BM is present. `bmStress` is destructured from `analyseData` prop.
+Column count is dynamic: 4 columns when no IPS benchmark, 5 when blended BM is present.
 
 ---
 
 ## VaR / ES (`holdings.py`)
 
-All four output values (`var_95`, `es_95`, `var_99`, `es_99`) clamped to `max(0.0, value)` before serialisation. Negative VaR (positive tail return) is mathematically valid but meaningless as a risk display and caused a `--0.6%` double-negative bug at 1Y horizon.
+All four output values (`var_95`, `es_95`, `var_99`, `es_99`) clamped to `max(0.0, value)` before serialisation. Negative VaR (positive tail return) caused a `--0.6%` double-negative bug at 1Y horizon.
 
 ---
 
@@ -608,13 +731,13 @@ API limit: 20 funds maximum.
 
 ### Frontend (Vercel)
 Push to `main` → auto-builds and deploys (~90 sec).
-**Env var required:** `REACT_APP_API_URL = https://buglerock-analytics-ew17.onrender.com`
+**Env var required:** `REACT_APP_API_URL = https://backend.buglerock.asia`
 
 ### Backend (Render)
 Push to `main` → auto-deploys (~3 min). On startup: DB migrations → Gmail poll loop + NAV cron + holdings cron.
-**Env var required:** `CORS_ORIGINS = https://buglerock-analytics.vercel.app,http://localhost:5173,http://localhost:3000`
+**Env var required:** `CORS_ORIGINS = http://localhost:3000,https://fundiq.buglerock.asia`
 
-If the backend cannot resolve external hostnames (PostgreSQL, Gmail, Google APIs) — `Name or service not known` / `getaddrinfo failed` — this is a **Render infrastructure/DNS issue, not a code bug**. Check [status.render.com](https://status.render.com) and trigger a manual redeploy from the Render dashboard.
+If the backend cannot resolve external hostnames — `Name or service not known` / `getaddrinfo failed` — this is a **Render infrastructure/DNS issue, not a code bug**. Check [status.render.com](https://status.render.com) and trigger a manual redeploy.
 
 ---
 
@@ -631,15 +754,34 @@ Full Holdings V2 used when available (up to 99,999 holdings). Falls back to Top 
 
 ---
 
+## .gitignore — Important Notes
+
+```
+backend/node_modules/      ← gitignored — run npm install after clone
+frontend/.env.development  ← gitignored — create locally
+backend/.env               ← gitignored — set on Render
+backend/credentials/       ← gitignored — set on Render as secret files
+```
+
+⚠️ `echo` on Windows CMD adds literal quotes to `.gitignore` entries. Always edit `.gitignore` directly in VS Code to avoid broken patterns.
+
+---
+
 ## Pending Features
 
-1. **User auth** — DIY FastAPI + PostgreSQL (internal staff only, ~50 users). Next: need user list (name, email, role), token expiry preference, password reset policy. AWS Cognito deferred until AWS call completed.
-2. **Portfolio NAV series** — actual drawdown/ulcer/recovery from computed portfolio daily returns
-3. **Cost basis (WACB)** — Retirement Planner LTCG tax calculation
-4. **Model Portfolio presets** — Pre-fill Retirement Planner from real blended returns
-5. **Old Cloud project cleanup** — Shut down tejas.s@buglerock.asia project
-6. **CY 2026 column** — add to calendar year chart when year completes (do not add before year-end)
-7. **google.generativeai deprecation** — `chat.py` uses deprecated package, switch to `google.genai`
+1. **Seed remaining 3 users** — uncomment Arjun, Pranav, Ishwar in `seed_users.py` and run
+2. **Audit log** — track who accessed what and when (SEBI compliance)
+3. **AWS Cognito migration** — deferred until AWS call
+4. **Data residency** — PostgreSQL in Oregon (US); consider AWS RDS Mumbai for SEBI compliance
+5. **Enable Storage Autoscaling** on Render PostgreSQL (currently at 28% of 5GB — ~6-8 months runway)
+6. **Wire Header logout** — ensure `user` and `onLogout` props flow correctly from `App.jsx` to `Header`
+7. **Forgot password OTP** — working locally; verify on production after Gmail token fix
+8. **Portfolio NAV series** — actual drawdown/ulcer/recovery from computed portfolio daily returns
+9. **Cost basis (WACB)** — Retirement Planner LTCG tax calculation
+10. **Model Portfolio presets** — Pre-fill Retirement Planner from real blended returns
+11. **Old Cloud project cleanup** — Shut down tejas.s@buglerock.asia project
+12. **CY 2026 column** — add to calendar year chart when year completes (do not add before year-end)
+13. **google.generativeai deprecation** — `chat.py` uses deprecated package, switch to `google.genai`
 
 ---
 
@@ -647,6 +789,15 @@ Full Holdings V2 used when available (up to 99,999 holdings). Falls back to Top 
 
 | File | Deploy to |
 |---|---|
+| `CompareFunds.jsx` | `frontend/src/components/PeerComparison/` |
+| `generateComparisonPDF.js` | `frontend/src/components/PeerComparison/` |
+| `Login.jsx` | `frontend/src/components/Login/` |
+| `Login.css` | `frontend/src/components/Login/` |
+| `SetupPassword.jsx` | `frontend/src/components/Login/` |
+| `AdminPanel.jsx` | `frontend/src/components/Admin/` |
+| `AdminPanel.css` | `frontend/src/components/Admin/` |
+| `Header.jsx` | `frontend/src/components/Layout/` |
+| `Header.css` | `frontend/src/components/Layout/` |
 | `Analyse.jsx` | `frontend/src/components/PortfolioBuilder/steps/` |
 | `PortfolioXRay.jsx` | `frontend/src/components/PortfolioBuilder/steps/analyseTabs/` |
 | `BuildPortfolio.jsx` | `frontend/src/components/PortfolioBuilder/steps/` |
@@ -656,7 +807,6 @@ Full Holdings V2 used when available (up to 99,999 holdings). Falls back to Top 
 | `Optimise.jsx` | `frontend/src/components/PortfolioBuilder/steps/` |
 | `FundExplorer.jsx` | `frontend/src/components/FundExplorer/` |
 | `FundDetail.jsx` | `frontend/src/components/FundDetail/` |
-| `CompareFunds.jsx` | `frontend/src/components/PeerComparison/` |
 | `Watchlist.jsx` | `frontend/src/components/Watchlist/` |
 | `Navbar.jsx` | `frontend/src/components/Layout/` |
 | `Navbar.css` | `frontend/src/components/Layout/` |
