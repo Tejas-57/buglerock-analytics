@@ -558,6 +558,32 @@ Results keyed by `portfolio.key` — switching portfolios resets and re-fetches,
 #### 📄 Generate PDF (modal overlay)
 Reuses `PDFProposal` directly via `buildPDFProps()` adapter. If X-Ray was opened first, `stressData` and `overlapData` are passed through automatically.
 
+#### Model Portfolio Construction — Methodology (Oct 2026)
+Pipeline: **Sample Covariance → Black-Litterman → CVaR-LP**
+
+| Step | Detail |
+|---|---|
+| Sample covariance | Equal-weighted, 260 weekly NAV returns, annualised ×52. No EWMA, no Ledoit-Wolf. |
+| BL prior | Equal-weight (1/N per fund) — not AUM-weighted. Avoids large AMC distribution bias. |
+| BL views | 5 House Views: Equity=Overweight, Debt=Neutral, Gold=Moderate Overweight, Midcap=Moderate Overweight, Smallcap=Selective |
+| CVaR-LP objective | min CVaR − 0.5 × E[r_BL]. BL posterior used as soft return preference. |
+| Constraints | Equity/debt bands, gold fixed (5/5/6/7/8%), cap mix (L/M/S ±tol), AMC 30%, per-fund 16.67%, down-capture, duration, credit quality, mid+small look-through |
+| Relaxation order | Layer 1: drop corr pairs → Layer 2: drop AMC cap + soft constraints → Layer 3: drop cap mix → LP fallback |
+| Gold | Always protected — never dropped in any relaxation layer |
+| Weight rounding | Largest-remainder to whole percentages |
+
+**Per-model parameters (Oct 2026):**
+
+| Model | Equity | Debt | Gold | Cap mix | dncap | Min holding |
+|---|---|---|---|---|---|---|
+| Conservative | 22–28% | 62–73% | 5% | L=75 M=15 S=10 ±5 | 92 | 4% |
+| Mod Conservative | 33–42% | 52–62% | 5% | L=70 M=20 S=10 ±5 | 90 | 4% |
+| Balanced | 50–60% | 40–50% | 6% | L=60 M=25 S=15 ±15 | 88 | 3% |
+| Mod Aggressive | 68–76% | 22–33% | 7% | L=50 M=27 S=23 ±5 | 86 | 3% |
+| Aggressive | 80–87% | 8–23% | 8% | L=35 M=33 S=32 ±5 | 84 | 4% |
+
+**Rulebook:** `backend/RULEBOOK.md` — full per-model fund category limits and solver logic.
+
 #### Backend (`models.py`) — blended fields
 `_get_funds` SQL and `blended{}` now include:
 `return_1m · return_3m · return_6m · return_ytd · return_cy2021–cy2025 · sortino_3y · beta_3y · up_capture_3y · down_capture_3y`
@@ -775,7 +801,7 @@ backend/credentials/       ← gitignored — set on Render as secret files
 4. **Data residency** — PostgreSQL in Oregon (US); consider AWS RDS Mumbai for SEBI compliance
 5. **Enable Storage Autoscaling** on Render PostgreSQL (currently at 28% of 5GB — ~6-8 months runway)
 6. **Wire Header logout** — ensure `user` and `onLogout` props flow correctly from `App.jsx` to `Header`
-7. **Forgot password OTP** — working locally; verify on production after Gmail token fix
+7. **Forgot password OTP** — ✅ fixed Oct 2026 (Gmail token regenerated, Render secret updated)
 8. **Portfolio NAV series** — actual drawdown/ulcer/recovery from computed portfolio daily returns
 9. **Cost basis (WACB)** — Retirement Planner LTCG tax calculation
 10. **Model Portfolio presets** — Pre-fill Retirement Planner from real blended returns
@@ -837,3 +863,46 @@ backend/credentials/       ← gitignored — set on Render as secret files
 ---
 
 - PPT export is built but hidden (`display:none`) — to be enabled when ready
+
+---
+
+## Gmail Token Renewal (OTP Email)
+
+FundIQ uses the Gmail API to send OTP emails for forgot-password. The OAuth2 refresh token can expire or get invalidated (e.g. if a new client secret is created in Google Cloud Console).
+
+**Symptoms:** Users get "something went wrong" on forgot password. Render logs show:
+```
+google.auth.exceptions.RefreshError: invalid_grant: Token has been expired or revoked.
+```
+
+**Fix (5 minutes):**
+
+1. On your local machine, from `buglerock-analytics/backend/`:
+   ```bash
+   python regenerate_gmail_token.py
+   ```
+   A browser window opens → log in with `analytics@buglerock.asia` → allow Gmail permissions.
+
+2. Open the new `credentials/gmail_token.json` → copy all contents.
+
+3. Render dashboard → backend service → Environment → Secret Files → `/etc/secrets/gmail_token.json` → Edit → paste new contents → Save.
+
+4. Render → Manual Deploy → Deploy latest commit.
+
+**Why it expires:** Google OAuth2 refresh tokens are invalidated when a new client secret is created in Google Cloud Console (console.cloud.google.com → APIs & Services → Credentials → BugleRock Analytics client). Do not create new client secrets without immediately regenerating the token. The refresh token also expires after 6 months of inactivity.
+
+**Root cause (Oct 2026):** A new client secret was created on 17 Sep 2026, which invalidated the existing refresh token. Token was regenerated on 1 Oct 2026.
+
+**Script location:** `buglerock-analytics/backend/regenerate_gmail_token.py`
+- Uses `credentials/gmail_credentials.json` as input
+- Outputs new token to `credentials/gmail_token.json`
+- Automatically deletes old token before starting fresh auth
+- Confirms both `gmail.send` and `gmail.readonly` scopes are present after saving
+
+**Scope check:** Token must have BOTH scopes. Verify with:
+```bash
+type backend\credentials\gmail_token.json | findstr scopes
+```
+Expected: `"gmail.send"` and `"gmail.readonly"` both present.
+
+**Long-term fix:** Switch to Resend (resend.com) — a proper transactional email service with a permanent API key that never expires. See `backend/auth/services/auth_service.py` → `_send_email()`.
