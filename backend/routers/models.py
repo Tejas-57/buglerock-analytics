@@ -1,21 +1,28 @@
 # routers/models.py
 """
-BugleRock Multi-Asset Model Portfolios — linprog (HiGHS) constraint solver.
+BugleRock Multi-Asset Model Portfolios — BL + CVaR-LP constraint solver.
 
 Universe: R1/R2 ranked funds only (Active Equity, Debt, Hybrid).
 Commodities/Alternates bucket is wired in for when Gold/Silver funds get ranked.
 
-Solver: scipy.optimize.linprog, method="highs" (pure feasibility LP, objective=0).
+Solver: Black-Litterman posterior → CVaR-LP (Rockafellar-Uryasev) via HiGHS.
+Fallback: scipy.optimize.linprog, method="highs" (pure feasibility LP, objective=0).
 
-Constraints per model:
-  - Σ wᵢ = 100
-  - MIN_W ≤ wᵢ ≤ MAX_W (with MAX_W capped at 100/MIN_FUNDS to force ≥ MIN_FUNDS)
-  - Effective equity  = Σ wᵢ·equity_pctᵢ/100  ∈ [eq_lo, eq_hi]
-  - Effective debt    = Σ wᵢ·bond_pctᵢ/100    ∈ [debt_lo, debt_hi]
-  - Rebased cap mix (Large/Mid/Small) across equity-bearing funds, weighted by
-    wᵢ·equity_pctᵢ, each ∈ target ±CAP_TOL  (linearised)
-
-Weights come straight from the solver — NOT equal weight.
+Methodology: BugleRock Model Portfolio Construction Architecture v1 (Sep 2026)
+  Changes from Aug 2026 rulebook:
+    - Gold fixed allocation per profile (not a range)
+    - AMC cap reduced 35% → 30%
+    - Per-fund cap unified to min(100/6, 20%) = 16.67%
+    - Min holding profile-scaled: 4/4/3/3/4%
+    - Down-capture ceilings corrected: 92/90/88/86/84
+    - Return floor: hard constraint (profile-scaled), relaxes with governance flag
+    - Mid+small look-through: absolute portfolio-level ceiling 15/20/30/40/50%
+    - Debt credit quality floor: min AAA+AA% 89/85/80/75/70%
+    - Duration ceiling: max mod duration 2.5/3/4/5/6 yrs
+    - Liquid/Overnight exclusivity enforced post-solve
+    - Fund eligibility: must have return_3y + at least one of CY2021-CY2025
+    - Weight rounding: largest-remainder to whole percentages
+    - Silver ≤ 30% of precious metals sleeve
 """
 from fastapi import APIRouter, Query, HTTPException
 from datetime import date as date_type
@@ -48,14 +55,15 @@ DEBT_RISK_TIER = {
     "India OE 10 yr Government Bond":   4,
     "India OE Credit Risk":             4,
 }
+
 HYBRID_RISK_TIER = {
     "India Fund Arbitrage Fund":                1,
     "India Fund Conservative Allocation":       1,
     "India Fund Equity Savings - Conservative": 2,
     "India Fund Equity Savings":                2,  # plain variant in DB
     "India Fund Dynamic Asset Allocation":      3,
-    "India Fund Balanced Allocation":           3,  # ~65% equity, similar to DAA
-    "India Fund Multi Asset Allocation":        3,  # multi-asset, moderate equity
+    "India Fund Balanced Allocation":           3,
+    "India Fund Multi Asset Allocation":        3,
     "India Fund Equity Savings - Aggressive":   3,
     "India Fund Aggressive Allocation":         4,
 }
@@ -86,30 +94,44 @@ AGG_DEBT_CATS = {
     "India OE Government Bond",
 }
 
-# Hybrid category priority — BAF/DAA first, then equity savings, then allocation funds
+# Hybrid category priority
 HYBRID_PRIORITY = [
-    "India Fund Dynamic Asset Allocation",       # BAF / DAA
-    "India Fund Balanced Allocation",            # balanced hybrid
-    "India Fund Multi Asset Allocation",         # multi-asset
+    "India Fund Dynamic Asset Allocation",
+    "India Fund Balanced Allocation",
+    "India Fund Multi Asset Allocation",
     "India Fund Equity Savings - Aggressive",
-    "India Fund Equity Savings",                 # plain variant
+    "India Fund Equity Savings",
     "India Fund Equity Savings - Conservative",
     "India Fund Aggressive Allocation",
     "India Fund Conservative Allocation",
     "India Fund Arbitrage Fund",
 ]
 
+# ── Categories that allow up to 2 funds (doc Section 9 — category count rule) ──
+DUAL_ALLOWED_CATS = {
+    "India Fund Large-Cap",
+    "Cat: Flexi Cap Funds",
+    "India Fund Dynamic Asset Allocation",
+    "India Fund Equity Savings - Aggressive",
+    "India Fund Equity Savings - Conservative",
+}
+
 # ── Model definitions ──────────────────────────────────────────────────────────
 MODELS = {
     "conservative": {
-        # CVaR-LP constraint params
-        "dncap_ceiling": 92, "stress_ceiling": -10, "max_funds": 10, "min_holding_pct": 5,
+        # BL+CVaR constraint params
+        "dncap_ceiling": 92, "stress_ceiling": -10,
+        "max_funds": 10, "min_holding_pct": 4,          # doc: 4% for conservative
+        "return_floor": 6.5,                             # % annualised, hard constraint
+        "mid_small_ceiling": 15,                         # % absolute portfolio look-through
+        "min_aaa_aa_pct": 89,                            # % of debt sleeve min AAA+AA
+        "max_duration": 2.5,                             # years, weighted mod duration
+        "gold_fixed": 5,                                 # % fixed gold allocation (doc)
         "label": "Conservative", "risk": "Low", "risk_score": 1,
         "horizon": "3+ years", "volatility": "5–6%", "max_drawdown": "5–10%",
         "suitability": "A low-volatility portfolio designed for capital preservation and stable returns, emphasizing fixed income with limited equity exposure. Ideal for investors with lower risk tolerance.",
         "eq_lo": 22, "eq_hi": 28, "debt_lo": 62, "debt_hi": 73,
         "cap_large": 75, "cap_mid": 15, "cap_small": 10,
-        "gold_lo": 5, "gold_hi": 10,
         "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [1, 2],
         "allowed_debt_cats": [
             "India OE Corporate Bond",
@@ -135,14 +157,18 @@ MODELS = {
         },
     },
     "mod_conservative": {
-        # CVaR-LP constraint params
-        "dncap_ceiling": 92, "stress_ceiling": -14, "max_funds": 10, "min_holding_pct": 5,
+        "dncap_ceiling": 90, "stress_ceiling": -14,     # doc: 90 (was 92)
+        "max_funds": 10, "min_holding_pct": 4,
+        "return_floor": 7.0,
+        "mid_small_ceiling": 20,
+        "min_aaa_aa_pct": 85,
+        "max_duration": 3.0,
+        "gold_fixed": 5,
         "label": "Moderately Conservative", "risk": "Low–Moderate", "risk_score": 2,
         "horizon": "3–5 years", "volatility": "6–7%", "max_drawdown": "8–12%",
         "suitability": "Modest growth with limited equity exposure. Short-to-medium duration debt balanced with hybrid allocation for cautious investors wanting more than pure debt.",
         "eq_lo": 33, "eq_hi": 42, "debt_lo": 52, "debt_hi": 62,
         "cap_large": 70, "cap_mid": 20, "cap_small": 10,
-        "gold_lo": 5, "gold_hi": 10,
         "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [1, 2, 3],
         "allowed_equity_cats": [
             "India Fund Large & Mid-Cap",
@@ -156,20 +182,24 @@ MODELS = {
             "India Fund Equity Savings - Aggressive": 2,
             "India Fund Equity Savings": 1,
             "India Fund Equity Savings - Conservative": 1,
-            "India Fund Conservative Allocation": 1,  # debt anchor
+            "India Fund Conservative Allocation": 1,
             "India Fund Arbitrage Fund": 0,
             "India Fund Aggressive Allocation": 0,
         },
     },
     "balanced": {
-        # CVaR-LP constraint params
-        "dncap_ceiling": 92, "stress_ceiling": -28, "max_funds": 11, "min_holding_pct": 5,
+        "dncap_ceiling": 88, "stress_ceiling": -28,     # doc: 88 (was 92)
+        "max_funds": 11, "min_holding_pct": 3,          # doc: 3% for balanced
+        "return_floor": 7.5,
+        "mid_small_ceiling": 30,
+        "min_aaa_aa_pct": 80,
+        "max_duration": 4.0,
+        "gold_fixed": 6,                                 # doc: 6% for balanced
         "label": "Balanced", "risk": "Moderate", "risk_score": 3,
         "horizon": "3–5 years", "volatility": "6–9%", "max_drawdown": "10–15%",
         "suitability": "Moderate growth portfolio with reduced volatility, balancing capital appreciation and income generation. Ideal for investors with moderate risk appetite and medium-term goals.",
         "eq_lo": 50, "eq_hi": 60, "debt_lo": 40, "debt_hi": 50,
         "cap_large": 60, "cap_mid": 25, "cap_small": 15, "cap_tol": 15,
-        "gold_lo": 5, "gold_hi": 10,
         "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [1, 2, 3, 4],
         "allowed_equity_cats": [
             "India Fund Large-Cap",
@@ -189,49 +219,62 @@ MODELS = {
             "India Fund Equity Savings - Aggressive": 2,
             "India Fund Equity Savings": 1,
             "India Fund Equity Savings - Conservative": 1,
-            "India Fund Conservative Allocation": 1,  # debt-heavy, anchors debt target
-            "India Fund Arbitrage Fund": 0,            # excluded — pure arbitrage
+            "India Fund Conservative Allocation": 1,
+            "India Fund Arbitrage Fund": 0,
         },
     },
     "mod_aggressive": {
-        # CVaR-LP constraint params
-        "dncap_ceiling": 88, "stress_ceiling": -30, "max_funds": 14, "min_holding_pct": 5,
+        "dncap_ceiling": 86, "stress_ceiling": -30,     # doc: 86 (was 88)
+        "max_funds": 14, "min_holding_pct": 3,          # doc: 3% for mod_aggressive
+        "return_floor": 8.0,
+        "mid_small_ceiling": 40,
+        "min_aaa_aa_pct": 75,
+        "max_duration": 5.0,
+        "gold_fixed": 7,                                 # doc: 7%
         "label": "Moderately Aggressive", "risk": "Moderate–High", "risk_score": 4,
         "horizon": "5–7 years", "volatility": "8–12%", "max_drawdown": "12–18%",
         "suitability": "Growth-tilted portfolio with a debt ballast. Primarily equity across the cap spectrum, complemented by aggressive hybrid funds and minimal fixed income.",
-        "eq_lo": 68, "eq_hi": 76, "debt_lo": 22, "debt_hi": 33, "gold_lo": 5, "gold_hi": 10,
+        "eq_lo": 68, "eq_hi": 76, "debt_lo": 22, "debt_hi": 33,
         "cap_large": 50, "cap_mid": 27, "cap_small": 23,
         "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [2, 3, 4],
         "allowed_equity_cats": None,
         "max_debt_funds": 2,
-        "eq_per_cat": 2, "hyb_per_cat": 2,
+        "eq_per_cat": 2, "hyb_per_cat": 1,
         "eq_cat_limits": {
+            # Core equity categories: Large-Cap, Large&Mid, Flexi, Mid, Small → 2 each (eq_per_cat default)
+            # All others capped at 1
             "Cat: Multi Cap Funds": 1,
             "India Fund Focused Fund": 1,
             "Cat: Contra / Value Funds": 1,
         },
         "hyb_cat_limits": {
-            "India Fund Dynamic Asset Allocation": 2,
-            "India Fund Aggressive Allocation": 2,
+            # Max 1 per category — 3 hybrid slots total
+            "India Fund Dynamic Asset Allocation":    1,
+            "India Fund Aggressive Allocation":       1,
             "India Fund Equity Savings - Aggressive": 1,
-            "India Fund Equity Savings": 0,
+            "India Fund Equity Savings":              0,
             "India Fund Equity Savings - Conservative": 0,
-            "India Fund Conservative Allocation": 0,
-            "India Fund Arbitrage Fund": 0,
+            "India Fund Conservative Allocation":     0,
+            "India Fund Arbitrage Fund":              0,
         },
     },
     "aggressive": {
-        # CVaR-LP constraint params
-        "dncap_ceiling": 86, "stress_ceiling": -40, "max_funds": 13, "min_holding_pct": 5,
+        "dncap_ceiling": 84, "stress_ceiling": -40,     # doc: 84 (was 86)
+        "max_funds": 13, "min_holding_pct": 4,          # doc: 4% for aggressive
+        "return_floor": 8.5,
+        "mid_small_ceiling": 50,
+        "min_aaa_aa_pct": 70,
+        "max_duration": 6.0,
+        "gold_fixed": 8,                                 # doc: 8%
         "label": "Aggressive", "risk": "High", "risk_score": 5,
         "horizon": "5+ years", "volatility": "10–15%", "max_drawdown": "15–20%",
         "suitability": "Maximizes growth potential through higher equity allocation across all cap segments, suitable for investors with a long-term horizon and higher risk tolerance.",
-        "eq_lo": 80, "eq_hi": 87, "debt_lo": 12, "debt_hi": 23, "gold_lo": 5, "gold_hi": 10,
+        "eq_lo": 80, "eq_hi": 87, "debt_lo": 8, "debt_hi": 23,
         "cap_large": 35, "cap_mid": 33, "cap_small": 32,
         "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [2, 3, 4],
         "allowed_equity_cats": None,
         "max_debt_funds": 1,
-        "eq_per_cat": 2, "hyb_per_cat": 2,
+        "eq_per_cat": 2, "hyb_per_cat": 1,
         "eq_cat_limits": {
             "India Fund Large-Cap": 1,
             "India Fund Large & Mid-Cap": 1,
@@ -242,6 +285,18 @@ MODELS = {
             "India Fund Small-Cap": 1,
             "Cat: Contra / Value Funds": 1,
         },
+        # Max 3 hybrids total, 1 per category — only high-equity hybrids allowed
+        "hyb_cat_limits": {
+            "India Fund Dynamic Asset Allocation":   1,
+            "India Fund Aggressive Allocation":      1,
+            "India Fund Equity Savings - Aggressive":1,
+            "India Fund Balanced Allocation":        0,
+            "India Fund Multi Asset Allocation":     0,
+            "India Fund Equity Savings":             0,
+            "India Fund Equity Savings - Conservative": 0,
+            "India Fund Conservative Allocation":    0,
+            "India Fund Arbitrage Fund":             0,
+        },
     },
 }
 
@@ -251,7 +306,6 @@ MIN_W_TIGHT = 5.0
 MIN_W_LOOSE = 3.0
 FUND_COUNT_THRESHOLD = 11
 
-# ── Equity category classification ─────────────────────────────────────────────
 CORE_EQUITY_CATS = [
     "India Fund Large-Cap",
     "India Fund Large & Mid-Cap",
@@ -266,6 +320,14 @@ CORE_EQUITY_CATS = [
 CAP_TOL = 5.0
 MAX_W = 20.0
 
+# Per-fund cap: min(100/6, 20%) = 16.67% (doc Section 9)
+PER_FUND_CAP = round(100.0 / 6, 4)   # 16.6667%
+PER_FUND_CAP_FRAC = PER_FUND_CAP / 100.0
+
+# AMC cap: 30% (doc Section 9, down from 35%)
+FUND_HOUSE_CAP = 30.0
+AMC_CAP = 0.30
+
 
 def _s(v):
     try: return float(v) if v is not None else None
@@ -275,18 +337,102 @@ def _sf(v, d=0.0):
     r = _s(v); return r if r is not None else d
 
 
+# ── Fund eligibility filter ─────────────────────────────────────────────────────
+def _is_eligible(f):
+    """
+    Fund must have:
+      - return_3y present
+      - At least one CY2021–CY2025 return present
+    (doc: must have 3Y data; 5Y not required)
+    """
+    if _s(f.get("return_3y")) is None:
+        return False
+    cy_fields = ["return_cy2021", "return_cy2022", "return_cy2023",
+                 "return_cy2024", "return_cy2025"]
+    if not any(_s(f.get(c)) is not None for c in cy_fields):
+        return False
+    return True
+
+
+# ── Largest-remainder weight rounding ──────────────────────────────────────────
+def _round_weights_lr(weights_pct, per_fund_cap_pct=PER_FUND_CAP, amc_cap_pct=FUND_HOUSE_CAP, funds=None):
+    """
+    Largest-remainder rounding to whole-percentage weights.
+    Respects per-fund cap and (if funds provided) AMC cap.
+    Returns list of integer weights summing to 100.
+    If no valid integer solution exists, returns original rounded-to-1dp weights.
+    """
+    active = [(i, w) for i, w in enumerate(weights_pct) if w > 0]
+    if not active:
+        return [round(w, 1) for w in weights_pct]
+
+    n = len(weights_pct)
+    floors = [int(w) for w in weights_pct]
+    remainders = [(weights_pct[i] - floors[i], i) for i in range(n)]
+    total_floor = sum(floors)
+    remainder_needed = 100 - total_floor
+
+    # Distribute remainders by largest-remainder rule
+    remainders_sorted = sorted(remainders, key=lambda x: -x[0])
+    result = floors[:]
+    for k in range(min(remainder_needed, len(remainders_sorted))):
+        idx = remainders_sorted[k][1]
+        result[idx] += 1
+
+    # Validate caps — if violated, fall back to 1dp
+    for i, w in enumerate(result):
+        if w > per_fund_cap_pct + 0.5:  # +0.5 tolerance for rounding
+            return [round(w, 1) for w in weights_pct]
+
+    if funds and result:
+        from collections import defaultdict
+        amc_totals = defaultdict(int)
+        for i, f in enumerate(funds):
+            amc = (f.get("branding_name") or "").strip()
+            if amc:
+                amc_totals[amc] += result[i]
+        for amc, total in amc_totals.items():
+            if total > amc_cap_pct + 0.5:
+                return [round(w, 1) for w in weights_pct]
+
+    return result
+
+
+# ── Liquid/Overnight exclusivity ───────────────────────────────────────────────
+def _enforce_liquid_overnight_exclusivity(result_funds):
+    """
+    Doc: portfolio may hold Liquid OR Overnight, not both.
+    If both present, drop the smaller-weighted one.
+    """
+    LIQUID_CAT = "India OE Liquid"
+    OVERNIGHT_CAT = "India OE Overnight"
+
+    liquid = [(i, f) for i, f in enumerate(result_funds) if f.get("category") == LIQUID_CAT]
+    overnight = [(i, f) for i, f in enumerate(result_funds) if f.get("category") == OVERNIGHT_CAT]
+
+    if liquid and overnight:
+        liq_w = sum(f["weight"] for _, f in liquid)
+        ovn_w = sum(f["weight"] for _, f in overnight)
+        # Drop the smaller sleeve
+        drop_indices = set(i for i, _ in (overnight if liq_w >= ovn_w else liquid))
+        result_funds = [f for i, f in enumerate(result_funds) if i not in drop_indices]
+        # Renormalise
+        total = sum(f["weight"] for f in result_funds)
+        if total > 0:
+            for f in result_funds:
+                f["weight"] = round(f["weight"] * 100 / total, 1)
+        logger.info(f"Liquid/Overnight exclusivity: dropped {'overnight' if liq_w >= ovn_w else 'liquid'} fund(s)")
+
+    return result_funds
+
+
 def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
            cap_large, cap_mid, cap_small,
            cap_tol=CAP_TOL, max_w=MAX_W,
            gold_isins=None, gold_lo=0, gold_hi=0,
-           fund_house_cap=35.0):
+           fund_house_cap=FUND_HOUSE_CAP):
     """
     Pure feasibility LP via HiGHS. Returns weight array (sums to 100) or None.
-    Constraints:
-      - Equity/debt bands
-      - Cap mix (large/mid/small) ± cap_tol
-      - Gold/silver sleeve: gold_lo ≤ Σ w(gold funds) ≤ gold_hi
-      - Fund house cap: no single AMC > fund_house_cap% of portfolio
     """
     from scipy.optimize import linprog
 
@@ -314,12 +460,10 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
     eq_weight_coef = eq_pct / 100.0
 
     A_ub, b_ub = [], []
-    # Equity/debt bands
     A_ub.append(-eq_pct / 100.0);  b_ub.append(-eq_lo)
     A_ub.append( eq_pct / 100.0);  b_ub.append( eq_hi)
     A_ub.append(-debt_pct / 100.0); b_ub.append(-debt_lo)
     A_ub.append( debt_pct / 100.0); b_ub.append( debt_hi)
-    # Cap mix constraints
     A_ub.append(-eq_weight_coef * (large - (cap_large - cap_tol))); b_ub.append(0)
     A_ub.append( eq_weight_coef * (large - (cap_large + cap_tol))); b_ub.append(0)
     A_ub.append(-eq_weight_coef * (mid   - (cap_mid   - cap_tol))); b_ub.append(0)
@@ -327,14 +471,12 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
     A_ub.append(-eq_weight_coef * (small - (cap_small - cap_tol))); b_ub.append(0)
     A_ub.append( eq_weight_coef * (small - (cap_small + cap_tol))); b_ub.append(0)
 
-    # Gold/silver sleeve constraint
     if gold_isins and gold_lo > 0:
         gold_mask = np.array([1.0 if f.get("isin") in gold_isins else 0.0 for f in funds])
         if gold_mask.sum() > 0:
-            A_ub.append(-gold_mask); b_ub.append(-gold_lo)   # Σ gold ≥ gold_lo
-            A_ub.append( gold_mask); b_ub.append( gold_hi)   # Σ gold ≤ gold_hi
+            A_ub.append(-gold_mask); b_ub.append(-gold_lo)
+            A_ub.append( gold_mask); b_ub.append( gold_hi)
 
-    # Fund house concentration cap — no single AMC > fund_house_cap%
     from collections import defaultdict
     house_to_indices = defaultdict(list)
     for i, f in enumerate(funds):
@@ -342,7 +484,7 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
         if house:
             house_to_indices[house].append(i)
     for house, idxs in house_to_indices.items():
-        if len(idxs) > 1:  # only need constraint if house has multiple funds
+        if len(idxs) > 1:
             row = np.zeros(n)
             for i in idxs:
                 row[i] = 1.0
@@ -380,24 +522,17 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
     return None
 
 
-FUND_HOUSE_CAP = 35.0  # No single AMC > 35% of any model portfolio
-
-
 def _solve_with_retry(funds, m, gold_isins=None):
     """
-    Two-pass approach:
-    Pass 1: forced_max_w (100/MIN_FUNDS) with NO cap mix constraint.
-            Ensures MIN_FUNDS by spreading weight across all candidates.
-    Pass 2: MAX_W with cap mix constraint (with tolerance relaxation).
-            Used only if Pass 1 fails to find MIN_FUNDS.
-    Both passes enforce: gold sleeve + fund house cap.
+    Two-pass LP fallback. See rulebook Section 7.
     """
     cap_l, cap_m, cap_s = m["cap_large"], m["cap_mid"], m["cap_small"]
     base_tol = m.get("cap_tol", CAP_TOL)
     min_funds = m.get("min_funds", MIN_FUNDS)
     max_funds = m.get("max_funds", MAX_FUNDS)
-    gold_lo = m.get("gold_lo", 0)
-    gold_hi = m.get("gold_hi", 0)
+    gold_lo = m.get("gold_fixed", m.get("gold_lo", 0))
+    gold_hi = gold_lo  # fixed allocation in LP fallback too
+
     forced_max_w = min(MAX_W, 100.0 / min_funds)
 
     from scipy.optimize import linprog
@@ -418,7 +553,6 @@ def _solve_with_retry(funds, m, gold_isins=None):
     eq_pct   = np.array([get_eq_pct(f)   for f in funds])
     debt_pct = np.array([get_debt_pct(f) for f in funds])
 
-    # Pass 1: no cap mix, forced_max_w — but still enforce gold sleeve + fund house cap
     A_ub_p1 = [-eq_pct/100, eq_pct/100, -debt_pct/100, debt_pct/100]
     b_ub_p1 = [-m["eq_lo"], m["eq_hi"], -m["debt_lo"], m["debt_hi"]]
 
@@ -429,12 +563,12 @@ def _solve_with_retry(funds, m, gold_isins=None):
             A_ub_p1.append( gold_mask); b_ub_p1.append( gold_hi)
 
     from collections import defaultdict
-    house_to_indices_p1 = defaultdict(list)
+    house_map = defaultdict(list)
     for i, f in enumerate(funds):
         house = (f.get("branding_name") or "").strip()
         if house:
-            house_to_indices_p1[house].append(i)
-    for house, idxs in house_to_indices_p1.items():
+            house_map[house].append(i)
+    for house, idxs in house_map.items():
         if len(idxs) > 1:
             row = np.zeros(n); row[idxs] = 1.0
             A_ub_p1.append(row); b_ub_p1.append(FUND_HOUSE_CAP)
@@ -460,9 +594,8 @@ def _solve_with_retry(funds, m, gold_isins=None):
                 drop = nonzero[np.argsort(w[nonzero])][:len(nonzero)-max_funds]
                 w[drop] = 0.0; w = w / w.sum() * 100
             if np.sum(w > 0) >= min_funds:
-                return np.round(w, 2), 999  # 999 = pass 1 (no cap mix)
+                return np.round(w, 2), 999
 
-    # Pass 2: MAX_W with cap mix, relaxing tolerance
     for tol in [base_tol, base_tol+3, base_tol+6, base_tol+10, base_tol+15]:
         w = _solve(funds, m["eq_lo"], m["eq_hi"], m["debt_lo"], m["debt_hi"],
                    cap_l, cap_m, cap_s, tol, MAX_W,
@@ -471,7 +604,6 @@ def _solve_with_retry(funds, m, gold_isins=None):
         if w is not None:
             return w, tol
 
-    # Last resort: widen asset bands
     w = _solve(funds, m["eq_lo"]-5, m["eq_hi"]+5, m["debt_lo"]-5, m["debt_hi"]+5,
                cap_l, cap_m, cap_s, base_tol+20, MAX_W,
                gold_isins=gold_isins, gold_lo=gold_lo, gold_hi=gold_hi,
@@ -479,41 +611,25 @@ def _solve_with_retry(funds, m, gold_isins=None):
     return (w, base_tol+20) if w is not None else (None, None)
 
 
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # PHASE 3 — BLACK-LITTERMAN + CVaR-LP OPTIMIZATION
 # ══════════════════════════════════════════════════════════════════════════════
-#
-# Pipeline:
-#   1. _fetch_nav_data        — daily NAV → daily returns + monthly returns
-#   2. _ewma_covariance       — exponentially weighted covariance from daily returns
-#   3. _shrink_to_const_corr  — Ledoit-Wolf shrinkage toward constant-correlation
-#   4. _black_litterman       — AUM-weighted equilibrium + House View → posterior
-#   5. _cvar_lp               — CVaR-LP (Rockafellar-Uryasev) using monthly scenarios
-#   6. _optimize_bl_cvar      — full pipeline; falls back to _solve_with_retry
-#
-# Fallback: if NAV data insufficient or CVaR-LP fails, falls back to feasibility LP.
-# ══════════════════════════════════════════════════════════════════════════════
 
-RISK_FREE_RATE = 6.5    # % — approximate Indian T-bill / repo rate
-MIN_YEARS      = 3      # minimum calendar years of data required for inclusion
+RISK_FREE_RATE = 6.5
+MIN_YEARS      = 3
 TARGET_FUNDS_LO = 8
 TARGET_FUNDS_HI = 11
 
-# BL parameters
-DELTA = 2.5       # risk aversion coefficient
-TAU   = 0.05      # uncertainty scalar for equilibrium prior
-EWMA_LAMBDA = 0.94  # RiskMetrics standard decay factor
-CVAR_ALPHA  = 0.95   # CVaR confidence level
+DELTA = 2.5
+TAU   = 0.05
+CVAR_ALPHA  = 0.95
+RETURN_LAMBDA = 0.5   # soft return preference weight in CVaR-LP objective
 
-# Constraint constants
-AMC_CAP = 0.35
-CORR_CAP_THRESHOLD = 0.95   # only cap very highly correlated pairs
-CORR_CAP_LIMIT     = 0.40   # combined weight cap for highly correlated pairs
-CRISIS_BASE_SHOCK   = 55  # % — house assumption for GFC-style equity shock
+CORR_CAP_THRESHOLD = 0.95
+CORR_CAP_LIMIT     = 0.40
+CRISIS_BASE_SHOCK  = 55
+SAMPLE_COV_WEEKS   = 260   # weeks of NAV history used for sample covariance
 
-# House View stances — assertion magnitude (absolute shift) and confidence (Idzorek)
 STANCE_PARAMS = {
     'Strong Underweight':   {'assertion': -0.04, 'confidence': 0.85},
     'Underweight':          {'assertion': -0.03, 'confidence': 0.675},
@@ -525,7 +641,6 @@ STANCE_PARAMS = {
     'Strong Overweight':    {'assertion':  0.04, 'confidence': 0.85},
 }
 
-# Default House View — updated periodically by BugleRock investment team
 DEFAULT_HOUSE_VIEW = {
     'equity':    'Overweight',
     'debt':      'Neutral',
@@ -535,25 +650,14 @@ DEFAULT_HOUSE_VIEW = {
 }
 
 
-# ── Data fetching ───────────────────────────────────────────────────────────────
-
 def _fetch_nav_data(isins: list, db) -> dict:
-    """
-    Fetch daily NAV history from nav_history table (last 5 years).
-    Returns per-ISIN:
-      - daily_returns: numpy array of daily log returns
-      - monthly_returns: numpy array of monthly returns (for CVaR scenarios)
-      - calendar_returns: {year: pct_return} for validation
-    """
     from sqlalchemy import text
     from datetime import date as date_type, timedelta
     from collections import defaultdict
-    import numpy as np
 
     if not isins:
         return {}
 
-    from datetime import date as date_type, timedelta
     five_years_ago = (date_type.today() - timedelta(days=5*365)).isoformat()
 
     rows = db.execute(text("""
@@ -571,95 +675,37 @@ def _fetch_nav_data(isins: list, db) -> dict:
 
     result = {}
     for isin, series in nav_by_isin.items():
-        if len(series) < 756:  # need at least 3 years of daily data (252*3)
+        if len(series) < 756:
             continue
 
-        dates = [d for d, _ in series]
-        navs  = np.array([v for _, v in series])
-
-        # Daily returns (simple returns, not log — more intuitive for MF NAVs)
-        daily_ret = np.diff(navs) / navs[:-1]
-
-        # Weekly returns — Friday-to-Friday (or last trading day of each week)
+        # Weekly returns — last NAV of each ISO week
         from collections import OrderedDict
         weeks = OrderedDict()
         for d, v in series:
-            # ISO week number gives consistent weekly bucketing
-            wk_key = d.isocalendar()[:2]  # (year, week)
+            wk_key = d.isocalendar()[:2]
             if wk_key not in weeks:
-                weeks[wk_key] = {'first': v, 'last': v}
-            weeks[wk_key]['last'] = v
+                weeks[wk_key] = v
+            weeks[wk_key] = v   # keep last NAV of the week
 
-        weekly_ret = []
-        wk_list = list(weeks.values())
-        for i in range(1, len(wk_list)):
-            prev_last = wk_list[i-1]['last']
-            curr_last = wk_list[i]['last']
-            if prev_last > 0:
-                weekly_ret.append(curr_last / prev_last - 1)
-        weekly_ret = np.array(weekly_ret)
+        wk_navs = list(weeks.values())
+        weekly_ret = np.array([
+            wk_navs[i] / wk_navs[i-1] - 1
+            for i in range(1, len(wk_navs))
+            if wk_navs[i-1] > 0
+        ])
 
-        # Monthly returns — last NAV of each month vs last NAV of previous month
-        from collections import OrderedDict as OD
-        months = OD()
-        for d, v in series:
-            key = (d.year, d.month)
-            if key not in months:
-                months[key] = {'first': v, 'last': v}
-            months[key]['last'] = v
-
-        monthly_ret = []
-        mo_list = list(months.values())
-        for i in range(1, len(mo_list)):
-            prev_last = mo_list[i-1]['last']
-            curr_last = mo_list[i]['last']
-            if prev_last > 0:
-                monthly_ret.append(curr_last / prev_last - 1)
-        monthly_ret = np.array(monthly_ret)
-
-        # Calendar year returns (for validation / display)
-        cal_returns = {}
-        YEARS = [2021, 2022, 2023, 2024, 2025]
-        year_navs = defaultdict(list)
-        for d, v in series:
-            if d.year in YEARS:
-                year_navs[d.year].append(v)
-        for yr, vv in year_navs.items():
-            if len(vv) >= 20:  # at least 20 trading days
-                cal_returns[yr] = (vv[-1] / vv[0] - 1) * 100
-
-        if len(weekly_ret) >= 156:  # 3 years of weekly data (52*3)
+        if len(weekly_ret) >= 156:
             result[isin] = {
-                'daily_returns': daily_ret,
                 'weekly_returns': weekly_ret,
-                'monthly_returns': monthly_ret,
-                'calendar_returns': cal_returns,
-                'n_days': len(daily_ret),
                 'n_weeks': len(weekly_ret),
-                'n_months': len(monthly_ret),
             }
 
     return result
 
 
 def _apply_category_proxy(nav_data, funds, target_weeks=260):
-    """
-    For funds with 3–5yr weekly history, extend missing early periods using
-    the average return of same-category peers that have full 5yr+ history.
-
-    This is Option 2 (category proxy) — more honest than mean-padding because
-    it uses ACTUAL market returns from that period via peer funds.
-
-    Only modifies weekly_returns (used for CVaR-LP). Daily returns and
-    covariance use pairwise overlapping windows so no proxy needed there.
-    """
-    import numpy as np
-
-    # Build isin → category map
     isin_to_cat = {f['isin']: f.get('category', '') for f in funds}
-
-    # Build category → list of full-history weekly return arrays
-    cat_full_weekly = {}  # category → np.array of shape (n_full_funds, target_weeks)
+    cat_full_weekly = {}
     for isin, data in nav_data.items():
         if data['n_weeks'] >= target_weeks:
             cat = isin_to_cat.get(isin, '')
@@ -667,183 +713,61 @@ def _apply_category_proxy(nav_data, funds, target_weeks=260):
                 cat_full_weekly[cat] = []
             cat_full_weekly[cat].append(data['weekly_returns'][-target_weeks:])
 
-    # Compute category average weekly return series
     cat_avg_weekly = {}
     for cat, arrays in cat_full_weekly.items():
-        if len(arrays) >= 2:  # need at least 2 peers to form a meaningful average
+        if len(arrays) >= 2:
             cat_avg_weekly[cat] = np.mean(np.array(arrays), axis=0)
 
-    # Apply proxy to short-history funds
     proxied = 0
     for isin, data in nav_data.items():
         n = data['n_weeks']
         if n >= target_weeks:
-            continue  # already full history — no proxy needed
-
+            continue
         cat = isin_to_cat.get(isin, '')
         proxy = cat_avg_weekly.get(cat)
-
         if proxy is None:
-            # No peers with full history in same category
-            # Fall back to broader asset class proxy
-            # Try parent category (strip sub-category suffix)
             for known_cat, avg in cat_avg_weekly.items():
-                # Match on asset class prefix e.g. "India Fund" or "Cat:"
                 if known_cat[:12] == cat[:12]:
                     proxy = avg
                     break
-
         if proxy is None:
-            # No proxy available — keep as-is (shorter history)
             continue
-
-        # Extend: prepend proxy for missing periods, keep own actual returns
         missing = target_weeks - n
         extended = np.concatenate([proxy[:missing], data['weekly_returns'][-n:]])
         nav_data[isin]['weekly_returns'] = extended
         nav_data[isin]['n_weeks'] = target_weeks
-        nav_data[isin]['proxy_weeks'] = missing  # track for logging
         proxied += 1
 
     if proxied > 0:
         logger.info(f"Category proxy applied to {proxied} funds with short history")
-
     return nav_data
 
-def _ewma_covariance(returns_dict, isins, lam=EWMA_LAMBDA):
-    """
-    EWMA covariance from daily returns.
-    Handles variable history lengths by computing each (i,j) pair on their
-    own overlapping window — so a new fund with 300 days doesn't truncate
-    an older fund with 1250 days.
-    Returns NxN annualised covariance matrix, and median history length.
-    """
-    import numpy as np
 
+def _sample_covariance(nav_data, isins, n_weeks=SAMPLE_COV_WEEKS):
+    """
+    Simple equal-weighted sample covariance from weekly NAV returns.
+    Each (i,j) pair uses the common overlapping window (most recent n_weeks).
+    Annualised by multiplying by 52.
+    No EWMA decay, no shrinkage — straightforward and transparent.
+    """
     N = len(isins)
     Sigma = np.zeros((N, N))
 
-    # Each diagonal: fund's own variance on its own full history
-    # Each off-diagonal: pairwise covariance on overlapping window
     for i in range(N):
-        r_i = returns_dict[isins[i]]['daily_returns']
-        T_i = len(r_i)
+        wr_i = nav_data[isins[i]]['weekly_returns']
+        for j in range(i, N):
+            wr_j = nav_data[isins[j]]['weekly_returns']
+            T_ij = min(len(wr_i), len(wr_j), n_weeks)
+            ri = wr_i[-T_ij:]
+            rj = wr_j[-T_ij:]
+            cov = float(np.cov(ri, rj, ddof=1)[0, 1] if i != j else np.var(ri, ddof=1))
+            Sigma[i, j] = cov * 52   # annualise
+            Sigma[j, i] = Sigma[i, j]
 
-        # Diagonal: own variance
-        w_i = np.array([lam ** (T_i - 1 - t) for t in range(T_i)])
-        w_i /= w_i.sum()
-        m_i = np.dot(w_i, r_i)
-        dm_i = r_i - m_i
-        Sigma[i, i] = np.dot(w_i, dm_i ** 2) * 252
+    return Sigma
 
-        for j in range(i + 1, N):
-            r_j = returns_dict[isins[j]]['daily_returns']
-            T_j = len(r_j)
-
-            # Use overlapping window (most recent common length)
-            T_ij = min(T_i, T_j)
-            ri = r_i[-T_ij:]
-            rj = r_j[-T_ij:]
-
-            w_ij = np.array([lam ** (T_ij - 1 - t) for t in range(T_ij)])
-            w_ij /= w_ij.sum()
-            m_ri = np.dot(w_ij, ri)
-            m_rj = np.dot(w_ij, rj)
-            cov_ij = np.dot(w_ij, (ri - m_ri) * (rj - m_rj)) * 252
-
-            Sigma[i, j] = cov_ij
-            Sigma[j, i] = cov_ij
-
-    T_median = int(np.median([len(returns_dict[isin]['daily_returns']) for isin in isins]))
-    return Sigma, T_median
-
-
-# ── Ledoit-Wolf Shrinkage ───────────────────────────────────────────────────────
-
-def _shrink_to_const_corr(Sigma, T, returns_matrix=None):
-    """
-    Ledoit-Wolf (2004) shrinkage toward constant-correlation target.
-    - Diagonal: each fund's own variance (unshrunk)
-    - Off-diagonal: shrunk toward avg_pairwise_correlation × σ_i × σ_j
-    - Intensity: estimated to minimise expected squared error
-    Returns (shrunk_Sigma, alpha, avg_corr).
-    """
-    import numpy as np
-
-    N = Sigma.shape[0]
-    stds = np.sqrt(np.maximum(np.diag(Sigma), 1e-20))
-
-    # Average pairwise correlation
-    corr_sum, corr_count = 0.0, 0
-    for i in range(N):
-        for j in range(i + 1, N):
-            if stds[i] > 1e-10 and stds[j] > 1e-10:
-                corr_sum += Sigma[i, j] / (stds[i] * stds[j])
-                corr_count += 1
-    avg_corr = corr_sum / corr_count if corr_count > 0 else 0
-
-    # Target: constant correlation structure
-    F = np.zeros_like(Sigma)
-    for i in range(N):
-        for j in range(N):
-            F[i, j] = Sigma[i, i] if i == j else avg_corr * stds[i] * stds[j]
-
-    # Compute Ledoit-Wolf optimal shrinkage intensity
-    alpha = 0.5  # fallback
-    if returns_matrix is not None and returns_matrix.shape[0] == N:
-        Tsamp = returns_matrix.shape[1]
-        means = returns_matrix.mean(axis=1, keepdims=True)
-        dm = returns_matrix - means
-        S = (dm @ dm.T) / Tsamp
-
-        # pi_hat
-        pi_hat = 0.0
-        for i in range(N):
-            for j in range(N):
-                pi_hat += np.mean((dm[i] * dm[j] - S[i, j]) ** 2)
-
-        # gamma_hat
-        gamma_hat = np.sum((F - S) ** 2)
-
-        # rho_hat
-        rho_hat = sum(np.mean((dm[i] ** 2 - S[i, i]) ** 2) for i in range(N))
-        for i in range(N):
-            for j in range(N):
-                if i == j:
-                    continue
-                theta_ii_ij = np.mean((dm[i] ** 2 - S[i, i]) * (dm[i] * dm[j] - S[i, j]))
-                theta_jj_ij = np.mean((dm[j] ** 2 - S[j, j]) * (dm[i] * dm[j] - S[i, j]))
-                if stds[i] > 1e-10 and stds[j] > 1e-10:
-                    rho_hat += (avg_corr / 2) * (
-                        np.sqrt(stds[j] / stds[i]) * theta_ii_ij
-                        + np.sqrt(stds[i] / stds[j]) * theta_jj_ij
-                    )
-
-        kappa = (pi_hat - rho_hat) / gamma_hat if gamma_hat > 1e-15 else 0
-        alpha = np.clip(kappa / Tsamp, 0.10, 0.95)
-
-    # Apply shrinkage: diagonal untouched, off-diagonal blended
-    result = np.copy(Sigma)
-    for i in range(N):
-        for j in range(N):
-            if i != j:
-                result[i, j] = alpha * F[i, j] + (1 - alpha) * Sigma[i, j]
-
-    return result, float(alpha), float(avg_corr)
-
-
-# ── Black-Litterman ─────────────────────────────────────────────────────────────
 
 def _black_litterman_posterior(pi, Sigma, tau, P, Q, Omega):
-    """
-    BL posterior expected returns.
-    pi: Nx1 equilibrium prior (annualised)
-    Sigma: NxN covariance (annualised)
-    P: KxN pick matrix, Q: Kx1 view returns, Omega: KxK view uncertainty
-    Returns (posterior_mean, posterior_cov).
-    """
-    import numpy as np
-
     tau_sigma = tau * Sigma
     tau_sigma_inv = np.linalg.inv(tau_sigma)
 
@@ -863,11 +787,6 @@ def _black_litterman_posterior(pi, Sigma, tau, P, Q, Omega):
 
 
 def _build_house_view_pq(pool, pi, Sigma, tau, house_view):
-    """
-    Construct P, Q, Omega from House View stances via Idzorek confidence method.
-    """
-    import numpy as np
-
     N = len(pool)
     P_rows, Q_vals, omega_diag = [], [], []
 
@@ -917,7 +836,6 @@ def _build_house_view_pq(pool, pi, Sigma, tau, house_view):
         P_rows.append(row)
         Q_vals.append(prior_for_cat + params['assertion'])
 
-        # Omega diagonal via Idzorek method
         p_tau_sigma = (tau * Sigma) @ row
         quad_form = float(row @ p_tau_sigma)
         omega_diag.append((1.0 / params['confidence'] - 1.0) * quad_form)
@@ -925,56 +843,41 @@ def _build_house_view_pq(pool, pi, Sigma, tau, house_view):
     if not P_rows:
         return None, None, None
 
-    K = len(P_rows)
     return np.array(P_rows), np.array(Q_vals), np.diag(omega_diag)
 
 
-# ── CVaR-LP (Rockafellar-Uryasev) ──────────────────────────────────────────────
-
-def _cvar_lp(scenario_returns, alpha, upper_bounds, add_A, add_b, add_sense, return_bonus=None):
+def _cvar_lp(scenario_returns, alpha, upper_bounds, add_A, add_b, add_sense,
+             return_bonus=None):
     """
-    Mean-CVaR portfolio optimization via scipy.optimize.linprog (HiGHS).
-    scenario_returns: NxT numpy array (weekly returns, fractional)
-    alpha: CVaR confidence level (e.g. 0.95)
-    upper_bounds: list of per-fund max weight (fractional)
-    add_A/b/sense: additional linear constraints
-    return_bonus: optional Nx1 array — small negative weight on expected return
-                  added to objective to softly prefer higher-return portfolios
-                  without a hard constraint floor.
-    Returns dict with status, weights (N array, fractional), cvar.
+    CVaR-LP (Rockafellar-Uryasev).
+    return_bonus: optional N-array of BL posterior weekly returns.
+                  Added as soft preference in objective: min CVaR - RETURN_LAMBDA * E[r_BL].
+                  This steers the solver toward higher-return portfolios without a hard floor.
+    Returns dict with status, weights (fractional), cvar.
     """
-    import numpy as np
     from scipy.optimize import linprog
 
     N, T = scenario_returns.shape
-    # Variables: w_1..w_N, zeta_plus, zeta_minus, z_1..z_T
     n_vars = N + 2 + T
     zp, zm = N, N + 1
 
     def z(t):
         return N + 2 + t
 
-    # Objective: min CVaR - lambda * expected_return (soft return preference)
     c = np.zeros(n_vars)
     c[zp] = 1.0
     c[zm] = -1.0
     for t in range(T):
         c[z(t)] = 1.0 / (T * (1 - alpha))
 
-    # ── FIX 1: Soft return penalty ──
-    # Instead of a hard return floor constraint (which causes infeasibility),
-    # subtract a small multiple of expected weekly return from the objective.
-    # λ=0.5 means: optimizer will accept 0.5 unit more CVaR to gain 1 unit return.
-    # This makes high-return portfolios preferred without making low-return ones infeasible.
-    RETURN_LAMBDA = 0.5
+    # Soft return preference: subtract RETURN_LAMBDA * BL_posterior from objective
+    # Optimizer accepts more CVaR to gain return — controlled by RETURN_LAMBDA
     if return_bonus is not None:
         for i in range(N):
             c[i] -= RETURN_LAMBDA * float(return_bonus[i])
 
-    # Inequality constraints (A_ub @ x <= b_ub)
     A_ub_list, b_ub_list = [], []
 
-    # Scenario constraints: -r_t'w - zeta - z_t <= 0
     for t in range(T):
         row = np.zeros(n_vars)
         for i in range(N):
@@ -985,19 +888,16 @@ def _cvar_lp(scenario_returns, alpha, upper_bounds, add_A, add_b, add_sense, ret
         A_ub_list.append(row)
         b_ub_list.append(0.0)
 
-    # Per-fund upper bounds
     for i in range(N):
         row = np.zeros(n_vars)
         row[i] = 1.0
         A_ub_list.append(row)
         b_ub_list.append(upper_bounds[i])
 
-    # Equality constraint: sum(w) = 1
     A_eq = np.zeros((1, n_vars))
     A_eq[0, :N] = 1.0
     b_eq = np.array([1.0])
 
-    # Additional constraints
     for idx in range(len(add_A)):
         full_row = np.zeros(n_vars)
         for i in range(min(N, len(add_A[idx]))):
@@ -1013,11 +913,10 @@ def _cvar_lp(scenario_returns, alpha, upper_bounds, add_A, add_b, add_sense, ret
             A_eq = np.vstack([A_eq, full_row.reshape(1, -1)])
             b_eq = np.append(b_eq, add_b[idx])
 
-    # Variable bounds
-    bounds = [(0, ub) for ub in upper_bounds]  # w_i
-    bounds.append((0, None))  # zeta_plus
-    bounds.append((0, None))  # zeta_minus
-    bounds.extend([(0, None)] * T)  # z_t
+    bounds = [(0, ub) for ub in upper_bounds]
+    bounds.append((0, None))
+    bounds.append((0, None))
+    bounds.extend([(0, None)] * T)
 
     A_ub = np.array(A_ub_list)
     b_ub = np.array(b_ub_list)
@@ -1039,131 +938,166 @@ def _cvar_lp(scenario_returns, alpha, upper_bounds, add_A, add_b, add_sense, ret
     }
 
 
-# ── Main optimizer entry point ──────────────────────────────────────────────────
-
 def _optimize_sharpe(funds, m, gold_isins=None, db=None):
     """
-    Phase 3 entry point — Black-Litterman + CVaR-LP.
-    Replaces the old Frank-Wolfe Sharpe optimizer.
-    Same signature: returns (weights_array, fund_list, method_string).
-    Falls back to _solve_with_retry if BL+CVaR fails.
+    BL+CVaR-LP entry point.
+    Pipeline:
+      1. Fetch weekly NAV returns
+      2. Sample covariance (equal-weighted, 260 weeks)
+      3. BL posterior: equal-weight prior + House View → posterior expected returns
+      4. CVaR-LP: minimise tail risk with BL posterior as soft return preference
+    Returns (weights_pct, fund_list, method_string, governance_flags).
     """
-    import numpy as np
+    governance_flags = []
 
-    logger.info(f"BL+CVaR starting for {len(funds)} candidates, db={'present' if db else 'None'}")
+    logger.info(f"BL+CVaR starting for {len(funds)} candidates")
 
     if db is None:
-        logger.warning("BL+CVaR: db is None — LP fallback")
-        return None, funds, "lp_fallback"
+        return None, funds, "lp_fallback", governance_flags
 
     isins = [f.get("isin") for f in funds if f.get("isin")]
     if len(isins) < 3:
-        return None, funds, "lp_fallback"
+        return None, funds, "lp_fallback", governance_flags
 
-    # ── Step 1: Fetch daily NAV data ──
+    # ── Step 1: Fetch weekly NAV returns ────────────────────────────────────
     nav_data = _fetch_nav_data(isins, db)
     valid_isins = [isin for isin in isins if isin in nav_data]
 
     if len(valid_isins) < max(3, len(funds) * 0.5):
         logger.warning(f"BL+CVaR: only {len(valid_isins)}/{len(funds)} have NAV data — LP fallback")
-        return None, funds, "lp_fallback"
+        return None, funds, "lp_fallback", governance_flags
 
-    # Filter funds to those with NAV data
     isin_set = set(valid_isins)
     valid_funds = [f for f in funds if f.get("isin") in isin_set]
     valid_isins = [f["isin"] for f in valid_funds]
     N = len(valid_funds)
 
-    # ── Step 1b: Apply category proxy to extend short-history funds ──
-    # Funds with 3–5yr history get missing early periods estimated from
-    # same-category peers that have full 5yr history.
+    # ── Step 2: Category proxy for short-history funds ───────────────────────
     nav_data = _apply_category_proxy(nav_data, valid_funds, target_weeks=260)
 
-    # ── Step 2: EWMA covariance from daily returns ──
-    # Each fund may have different history length.
-    # Use pairwise EWMA on the common overlapping window per pair,
-    # then assemble the full NxN matrix.
+    # ── Step 3: Sample covariance from weekly returns (equal-weighted) ───────
     try:
-        Sigma, T_daily = _ewma_covariance(nav_data, valid_isins, EWMA_LAMBDA)
+        Sigma = _sample_covariance(nav_data, valid_isins, n_weeks=SAMPLE_COV_WEEKS)
+        logger.info(f"Sample covariance: {N}x{N}, annualised weekly returns")
     except Exception as e:
-        logger.warning(f"EWMA covariance failed: {e} — LP fallback")
-        return None, funds, "lp_fallback"
+        logger.warning(f"Sample covariance failed: {e} — LP fallback")
+        return None, funds, "lp_fallback", governance_flags
 
-    # ── Step 3: Ledoit-Wolf shrinkage ──
+    # ── Step 4: Black-Litterman posterior (equal-weight prior) ───────────────
     try:
-        # After category proxy, use median daily history for shrinkage
-        all_n_days = [nav_data[isin]['n_days'] for isin in valid_isins]
-        common_len = int(np.median(all_n_days))
-        daily_matrix = np.zeros((N, common_len))
-        for i, isin in enumerate(valid_isins):
-            dr = nav_data[isin]['daily_returns']
-            if len(dr) >= common_len:
-                daily_matrix[i] = dr[-common_len:]
-            else:
-                # Shorter history — no proxy for daily (EWMA handles pairwise)
-                # Use fund's own mean for the gap
-                pad = common_len - len(dr)
-                daily_matrix[i] = np.concatenate([np.full(pad, np.mean(dr)), dr])
-        daily_ann = daily_matrix * np.sqrt(252)
-        Sigma, shrink_alpha, avg_corr = _shrink_to_const_corr(Sigma, common_len, daily_ann)
-        logger.info(f"Shrinkage: alpha={shrink_alpha:.3f}, avg_corr={avg_corr:.3f}, common_len={common_len}d")
-    except Exception as e:
-        logger.warning(f"Shrinkage failed: {e} — using raw EWMA covariance")
+        # Equal-weight prior — every fund in the pool is treated as equally
+        # likely before House View is applied. Avoids AUM bias toward large AMCs.
+        w_eq = np.ones(N) / N
+        pi = DELTA * Sigma @ w_eq   # equilibrium prior expected returns
 
-    # ── Step 4: Black-Litterman posterior ──
-    try:
-        # AUM-weighted market equilibrium prior
-        aum_arr = np.array([float(f.get("fund_size") or 1) for f in valid_funds])
-        w_mkt = aum_arr / aum_arr.sum()
-        pi = DELTA * Sigma @ w_mkt  # equilibrium expected returns (annualised)
-
-        # Build House View P, Q, Omega
         P, Q, Omega = _build_house_view_pq(valid_funds, pi, Sigma, TAU, DEFAULT_HOUSE_VIEW)
 
-        # Compute posterior
         if P is not None:
-            posterior_mean, posterior_cov = _black_litterman_posterior(pi, Sigma, TAU, P, Q, Omega)
-            logger.info(f"BL posterior computed: {N} funds, {len(P)} views")
+            posterior_mean, _ = _black_litterman_posterior(pi, Sigma, TAU, P, Q, Omega)
+            logger.info(f"BL posterior: {N} funds, {len(P)} views, "
+                        f"range=[{posterior_mean.min():.4f}, {posterior_mean.max():.4f}]")
         else:
             posterior_mean = pi.copy()
-            posterior_cov = TAU * Sigma
-            logger.info(f"No active views — using equilibrium prior")
+            logger.info(f"BL: no active views — using equal-weight equilibrium prior")
     except Exception as e:
-        logger.warning(f"BL posterior failed: {e} — using equilibrium prior")
-        aum_arr = np.array([float(f.get("fund_size") or 1) for f in valid_funds])
-        w_mkt = aum_arr / aum_arr.sum()
-        posterior_mean = DELTA * Sigma @ w_mkt
+        logger.warning(f"BL posterior failed: {e} — using equal-weight prior")
+        w_eq = np.ones(N) / N
+        posterior_mean = DELTA * Sigma @ w_eq
 
-    # ── Step 5: Build constraints for CVaR-LP ──
+    # Convert annualised BL posterior to weekly scale for CVaR-LP objective
+    posterior_weekly = (1 + posterior_mean) ** (1 / 52) - 1
+
+    # ── Build constraints ──────────────────────────────────────────────────────
     gold_isins_set = gold_isins or set()
-    min_funds = m.get("min_funds", MIN_FUNDS)
-    # Per-fund cap — high-equity profiles (eq_lo >= 68%) get 20% cap
-    # Conservative/mod_conservative/balanced get 15% to force diversification
-    per_fund_cap = 0.20 if m.get('eq_lo', 0) >= 68 else 0.15
-    upper_bounds = [per_fund_cap] * N
+    gold_fixed = m.get("gold_fixed", 0)  # fixed allocation %
 
-    add_A, add_b, add_sense = [], [], []
+    # Per-fund cap: 16.67% for all profiles (doc)
+    upper_bounds = [PER_FUND_CAP_FRAC] * N
+
+    add_A, add_b, add_sense, add_tag = [], [], [], []
+
+    def _add(row, b, sense, tag):
+        add_A.append(row); add_b.append(b); add_sense.append(sense); add_tag.append(tag)
+
+    def get_eq_pct_frac(f):
+        v = _s(f.get("equity_pct"))
+        if v is not None and v > 0: return v / 100
+        return 1.0 if f["asset_class"] == "Equity" else 0.0
+
+    def get_debt_pct_frac(f):
+        if f["asset_class"] == "Debt": return 1.0
+        if f.get("category") == "India Fund Arbitrage Fund": return 1.0
+        v = _s(f.get("bond_pct"))
+        return v / 100 if v is not None and v > 0 else 0.0
 
     # Equity band
-    eq_row = [(_s(f.get("equity_pct")) or (100.0 if f["asset_class"] == "Equity" else 0.0)) / 100
-              for f in valid_funds]
-    add_A.append(eq_row); add_b.append(m["eq_lo"] / 100); add_sense.append('>=')
-    add_A.append(eq_row); add_b.append(m["eq_hi"] / 100); add_sense.append('<=')
+    eq_row = [get_eq_pct_frac(f) for f in valid_funds]
+    _add(eq_row, m["eq_lo"] / 100, '>=', 'equity')
+    _add(eq_row, m["eq_hi"] / 100, '<=', 'equity')
 
     # Debt band
-    debt_row = [(100.0 if f["asset_class"] == "Debt" else (_s(f.get("bond_pct")) or 0.0)) / 100
-                for f in valid_funds]
-    add_A.append(debt_row); add_b.append(m["debt_lo"] / 100); add_sense.append('>=')
-    add_A.append(debt_row); add_b.append(m["debt_hi"] / 100); add_sense.append('<=')
+    debt_row = [get_debt_pct_frac(f) for f in valid_funds]
+    _add(debt_row, m["debt_lo"] / 100, '>=', 'debt')
+    _add(debt_row, m["debt_hi"] / 100, '<=', 'debt')
 
-    # Gold sleeve
-    if m.get("gold_lo", 0) > 0:
+    # Cap mix — Large/Mid/Small (linearised ratio constraint, same as LP fallback)
+    # Only funds where L+M+S > 1 participate — funds with missing cap data are excluded
+    cap_l  = m["cap_large"]
+    cap_m  = m["cap_mid"]
+    cap_s  = m["cap_small"]
+    cap_tol = m.get("cap_tol", CAP_TOL)
+    large  = np.array([_sf(f.get("large_cap")) for f in valid_funds])
+    mid    = np.array([_sf(f.get("mid_cap"))   for f in valid_funds])
+    small  = np.array([_sf(f.get("small_cap")) for f in valid_funds])
+    eq_wt  = np.array([get_eq_pct_frac(f)      for f in valid_funds])
+
+    # Mask: only include funds with genuine cap data
+    has_cap = (large + mid + small) > 1
+    if has_cap.sum() >= 2:
+        def _cap_row(target, tol, sign):
+            # sign=+1 → upper bound, sign=-1 → lower bound
+            row = np.zeros(N)
+            for i in range(N):
+                if has_cap[i]:
+                    row[i] = sign * eq_wt[i] * (large[i] - (target + sign * tol)) if False else \
+                             eq_wt[i] * (large[i] - (target + sign * tol))
+            return row
+
+        # Large cap lower: eq_wt*(L - (cap_l - tol)) >= 0  →  -(eq_wt*(L-(cap_l-tol))) <= 0
+        row_lo_l = np.array([-eq_wt[i] * (large[i] - (cap_l - cap_tol)) if has_cap[i] else 0.0 for i in range(N)])
+        row_hi_l = np.array([ eq_wt[i] * (large[i] - (cap_l + cap_tol)) if has_cap[i] else 0.0 for i in range(N)])
+        row_lo_m = np.array([-eq_wt[i] * (mid[i]   - (cap_m - cap_tol)) if has_cap[i] else 0.0 for i in range(N)])
+        row_hi_m = np.array([ eq_wt[i] * (mid[i]   - (cap_m + cap_tol)) if has_cap[i] else 0.0 for i in range(N)])
+        row_lo_s = np.array([-eq_wt[i] * (small[i] - (cap_s - cap_tol)) if has_cap[i] else 0.0 for i in range(N)])
+        row_hi_s = np.array([ eq_wt[i] * (small[i] - (cap_s + cap_tol)) if has_cap[i] else 0.0 for i in range(N)])
+
+        _add(row_lo_l.tolist(), 0, '<=', 'cap_mix')
+        _add(row_hi_l.tolist(), 0, '<=', 'cap_mix')
+        _add(row_lo_m.tolist(), 0, '<=', 'cap_mix')
+        _add(row_hi_m.tolist(), 0, '<=', 'cap_mix')
+        _add(row_lo_s.tolist(), 0, '<=', 'cap_mix')
+        _add(row_hi_s.tolist(), 0, '<=', 'cap_mix')
+        logger.info(f"Cap mix constraints added: L={cap_l}±{cap_tol} M={cap_m}±{cap_tol} S={cap_s}±{cap_tol}")
+
+    # Gold — fixed allocation (equality if funds available, else skip)
+    if gold_fixed > 0:
         gold_row = [1.0 if f.get("isin") in gold_isins_set else 0.0 for f in valid_funds]
         if any(g > 0 for g in gold_row):
-            add_A.append(gold_row); add_b.append(m["gold_lo"] / 100); add_sense.append('>=')
-            add_A.append(gold_row); add_b.append(m["gold_hi"] / 100); add_sense.append('<=')
+            _add(gold_row, gold_fixed / 100, '=', 'gold')
+        else:
+            logger.warning(f"Gold funds not in NAV data — skipping gold constraint for {m['label']}")
 
-    # AMC cap 35% — always applied regardless of pool size
+    # Silver ≤ 30% of precious metals sleeve (doc)
+    silver_row = [1.0 if (f.get("isin") in gold_isins_set and
+                          "silver" in (f.get("category") or "").lower())
+                  else 0.0 for f in valid_funds]
+    gold_total_row = [1.0 if f.get("isin") in gold_isins_set else 0.0 for f in valid_funds]
+    if any(s > 0 for s in silver_row) and any(g > 0 for g in gold_total_row):
+        combined = [silver_row[i] - 0.30 * gold_total_row[i] for i in range(N)]
+        _add(combined, 0.0, '<=', 'gold')
+
+    # AMC cap 30%
+    from collections import defaultdict
     amc_map = {}
     for f in valid_funds:
         amc = (f.get("branding_name") or f.get("name", "").split(" ")[0] or "").strip()
@@ -1172,14 +1106,10 @@ def _optimize_sharpe(funds, m, gold_isins=None, db=None):
     unique_amcs = set(amc_map.values())
     for amc in unique_amcs:
         row = [1.0 if amc_map.get(f["isin"]) == amc else 0.0 for f in valid_funds]
-        add_A.append(row); add_b.append(AMC_CAP); add_sense.append('<=')
-    logger.info(f"AMC cap applied: {len(unique_amcs)} AMCs in pool")
+        _add(row, AMC_CAP, '<=', 'amc')
 
-    # ── FIX 2: Pairwise correlation cap — only the single most-correlated pair ──
-    # Old: cap every pair > 0.95 → dozens of constraints → collectively infeasible
-    # New: per fund, cap only its most correlated partner (worst offender only)
-    # This prevents a single fund from being over-concentrated with its closest peer.
-    fund_corr_partner = {}  # isin → (partner_isin, corr, pair_indices)
+    # Correlation cap
+    fund_corr_partner = {}
     for ci in range(N):
         for cj in range(ci + 1, N):
             wr_i = nav_data[valid_isins[ci]]['weekly_returns']
@@ -1188,25 +1118,21 @@ def _optimize_sharpe(funds, m, gold_isins=None, db=None):
             if min_w >= 156:
                 corr = float(np.corrcoef(wr_i[-min_w:], wr_j[-min_w:])[0, 1])
                 if corr > CORR_CAP_THRESHOLD:
-                    # Track highest correlation per fund
                     for idx, isin in [(ci, valid_isins[ci]), (cj, valid_isins[cj])]:
                         other_idx = cj if idx == ci else ci
                         if isin not in fund_corr_partner or corr > fund_corr_partner[isin][1]:
                             fund_corr_partner[isin] = (other_idx, corr, ci, cj)
 
-    # Add constraint only for unique (ci, cj) pairs that are worst for either fund
     added_pairs = set()
     for isin, (other_idx, corr, ci, cj) in fund_corr_partner.items():
         pair_key = (min(ci, cj), max(ci, cj))
         if pair_key not in added_pairs:
             row = [0.0] * N
-            row[ci] = 1.0
-            row[cj] = 1.0
-            add_A.append(row); add_b.append(CORR_CAP_LIMIT); add_sense.append('<=')
+            row[ci] = 1.0; row[cj] = 1.0
+            _add(row, CORR_CAP_LIMIT, '<=', 'corr')
             added_pairs.add(pair_key)
-            logger.info(f"Corr cap: {valid_funds[ci]['name'][:20]} + {valid_funds[cj]['name'][:20]} corr={corr:.3f}")
 
-    # Down-capture ceiling — only equity and hybrid funds with meaningful equity exposure
+    # Down-capture ceiling
     dncap_ceil = m.get("dncap_ceiling")
     if dncap_ceil:
         dncap_row = []
@@ -1224,9 +1150,9 @@ def _optimize_sharpe(funds, m, gold_isins=None, db=None):
             else:
                 dncap_row.append(0)
         if has_dncap_data and any(v != 0 for v in dncap_row):
-            add_A.append(dncap_row); add_b.append(0); add_sense.append('<=')
+            _add(dncap_row, 0, '<=', 'soft')
 
-    # Crisis drawdown ceiling: eq% × dncap × 55%
+    # Crisis drawdown ceiling
     stress_ceil = m.get("stress_ceiling")
     if stress_ceil:
         crisis_row = []
@@ -1243,19 +1169,62 @@ def _optimize_sharpe(funds, m, gold_isins=None, db=None):
             else:
                 crisis_row.append(0)
         if has_dncap:
-            add_A.append(crisis_row); add_b.append(abs(stress_ceil)); add_sense.append('<=')
+            _add(crisis_row, abs(stress_ceil), '<=', 'soft')
 
-    # ── FIX 1: Return floor as soft penalty in objective rather than hard constraint ──
-    # Old: hard constraint posterior_mean @ w >= floor → conflicts with CVaR minimization
-    # New: add a tiny negative weight on posterior_mean to the CVaR objective
-    #      so optimizer naturally prefers higher-return portfolios without a hard floor.
-    # This is done by passing posterior_mean as a return_bonus to _cvar_lp.
+    # Mid+small portfolio look-through ceiling (doc Section 9)
+    mid_small_ceil = m.get("mid_small_ceiling")
+    if mid_small_ceil is not None:
+        ms_row = []
+        has_ms_data = False
+        for f in valid_funds:
+            eq_frac = get_eq_pct_frac(f)
+            mid_pct = _sf(f.get("mid_cap")) / 100
+            small_pct = _sf(f.get("small_cap")) / 100
+            if mid_pct + small_pct > 0:
+                has_ms_data = True
+            ms_row.append(eq_frac * (mid_pct + small_pct))
+        if has_ms_data:
+            _add(ms_row, mid_small_ceil / 100, '<=', 'soft')
 
-    # Convert BL posterior to weekly scale for soft return bonus
-    posterior_weekly = (1 + posterior_mean) ** (1 / 52) - 1
-    logger.info(f"BL posterior weekly range: [{posterior_weekly.min():.5f}, {posterior_weekly.max():.5f}]")
+    # Debt credit quality floor (doc Section 9)
+    # min_aaa_aa_pct: minimum % of debt sleeve that must be AAA or AA rated
+    # Proxy: funds in tier 1 and tier 2 (Corporate Bond, Govt, Banking PSU etc) are AAA+AA
+    # Credit Risk (tier 4) funds are NOT AAA/AA
+    min_aaa_aa = m.get("min_aaa_aa_pct")
+    if min_aaa_aa is not None:
+        # Identify non-investment-grade debt (Credit Risk category)
+        credit_risk_isins = {f.get("isin") for f in valid_funds
+                             if f.get("category") == "India OE Credit Risk"}
+        if credit_risk_isins:
+            # constraint: sum of credit risk weight within debt sleeve <= (1 - min_aaa_aa/100) * total debt
+            # equivalently: credit_row @ w <= (1 - min_aaa_aa/100) * debt_row @ w
+            # rearranged: [credit - (1 - min_aaa_aa/100) * debt] @ w <= 0
+            min_frac = min_aaa_aa / 100
+            cr_row = []
+            for f in valid_funds:
+                is_cr = f.get("isin") in credit_risk_isins
+                d_frac = get_debt_pct_frac(f)
+                cr_row.append((1.0 if is_cr else 0.0) * d_frac - (1 - min_frac) * d_frac)
+            _add(cr_row, 0.0, '<=', 'soft')
 
-    # ── Step 6: Build weekly scenario matrix for CVaR-LP ──
+    # Duration ceiling (doc Section 9)
+    # Uses modified_duration field from daily_fund_data — skips if data absent
+    max_dur = m.get("max_duration")
+    if max_dur is not None:
+        dur_row = []
+        has_dur = False
+        for f in valid_funds:
+            dur = _s(f.get("modified_duration"))
+            d_frac = get_debt_pct_frac(f)
+            if dur is not None and d_frac > 0:
+                has_dur = True
+                dur_row.append(d_frac * (dur - max_dur))
+            else:
+                dur_row.append(0.0)
+        if has_dur and any(v != 0 for v in dur_row):
+            _add(dur_row, 0.0, '<=', 'soft')
+
+    # ── Step 5: Build scenario matrix (260 weekly returns) ───────────────────
     target_weeks = 260
     scenario_matrix = np.zeros((N, target_weeks))
     for i, isin in enumerate(valid_isins):
@@ -1263,120 +1232,113 @@ def _optimize_sharpe(funds, m, gold_isins=None, db=None):
         scenario_matrix[i] = wr[-target_weeks:] if len(wr) >= target_weeks else \
             np.concatenate([np.zeros(target_weeks - len(wr)), wr])
 
-    # ── Step 7: Solve CVaR-LP ──
-    # Return floor is now SOFT (penalty in objective) not hard constraint.
-    logger.warning(f"CVaR-LP: N={N}, T={target_weeks}, constraints={len(add_A)}, cap={per_fund_cap:.2f}")
+    # ── Step 6: Solve CVaR-LP with BL posterior as soft return preference ────
+    # Tags were set explicitly as each constraint was added above:
+    #   'equity'  — equity band lo/hi       → never dropped
+    #   'debt'    — debt band lo/hi          → never dropped
+    #   'gold'    — gold fixed + silver cap  → never dropped
+    #   'cap_mix' — Large/Mid/Small bands    → never dropped (until Layer 3)
+    #   'amc'     — AMC 30% cap              → dropped in Layer 2
+    #   'corr'    — correlation pairs        → dropped in Layer 1
+    #   'soft'    — dncap, crisis, duration, credit, mid+small → dropped in Layer 2
+    def _filter(tags_to_drop):
+        rA, rb, rs = [], [], []
+        for i in range(len(add_A)):
+            if add_tag[i] not in tags_to_drop:
+                rA.append(add_A[i]); rb.append(add_b[i]); rs.append(add_sense[i])
+        return rA, rb, rs
+
     try:
-        result = _cvar_lp(scenario_matrix, CVAR_ALPHA, upper_bounds, add_A, add_b, add_sense,
+        result = _cvar_lp(scenario_matrix, CVAR_ALPHA, upper_bounds,
+                          add_A, add_b, add_sense,
                           return_bonus=posterior_weekly)
 
-        # ── Progressive constraint relaxation ──────────────────────────────────
-        # Return floor is now soft — first try dropping correlation pairs
+        # Layer 1: drop correlation pairs only
         if result['status'] != 'optimal':
-            logger.warning("CVaR-LP infeasible with full constraints — dropping correlation pairs")
-            rA, rb, rs = [], [], []
-            for i in range(len(add_A)):
-                n_nz = sum(1 for v in add_A[i] if abs(v) > 1e-9)
-                if n_nz != 2:
-                    rA.append(add_A[i]); rb.append(add_b[i]); rs.append(add_sense[i])
+            logger.warning("CVaR-LP infeasible — dropping correlation pairs")
+            rA, rb, rs = _filter({'corr'})
             result = _cvar_lp(scenario_matrix, CVAR_ALPHA, upper_bounds, rA, rb, rs,
                               return_bonus=posterior_weekly)
-            logger.warning(f"Without corr pairs: {result['status']} ({len(rA)} constraints)")
 
-        # Layer 2: drop AMC cap constraints
+        # Layer 2: drop AMC cap + soft constraints (keep equity/debt/gold/cap_mix)
         if result['status'] != 'optimal':
-            logger.warning("CVaR-LP infeasible — dropping AMC cap constraints")
-            rA, rb, rs = [], [], []
-            for i in range(len(add_A)):
-                n_nz = sum(1 for v in add_A[i] if abs(v) > 1e-9)
-                if n_nz >= int(N * 0.3):  # keep broad constraints only
-                    rA.append(add_A[i]); rb.append(add_b[i]); rs.append(add_sense[i])
+            logger.warning("CVaR-LP infeasible — dropping AMC cap and soft constraints")
+            rA, rb, rs = _filter({'corr', 'amc', 'soft'})
             result = _cvar_lp(scenario_matrix, CVAR_ALPHA, upper_bounds, rA, rb, rs,
                               return_bonus=posterior_weekly)
-            logger.warning(f"Without AMC cap: {result['status']} ({len(rA)} constraints)")
+            if result['status'] == 'optimal':
+                governance_flags.append({
+                    "type": "amc_cap_dropped",
+                    "severity": "warning",
+                    "message": "AMC concentration cap dropped due to infeasibility.",
+                })
 
-        # Layer 3: bare minimum — just equity/debt band
+        # Layer 3: equity/debt/gold only — drop cap_mix too
         if result['status'] != 'optimal':
-            logger.warning(f"CVaR-LP bare minimum: N={N}, cap={per_fund_cap:.2f}")
-            result = _cvar_lp(scenario_matrix, CVAR_ALPHA, upper_bounds,
-                              add_A[:4], add_b[:4], add_sense[:4],
+            logger.warning("CVaR-LP bare minimum — equity/debt/gold only")
+            rA, rb, rs = _filter({'corr', 'amc', 'soft', 'cap_mix'})
+            result = _cvar_lp(scenario_matrix, CVAR_ALPHA, upper_bounds, rA, rb, rs,
                               return_bonus=posterior_weekly)
-            logger.warning(f"Bare equity+debt band: {result['status']}")
 
         if result['status'] != 'optimal':
             logger.warning("CVaR-LP completely infeasible — LP fallback")
-            return None, funds, "lp_fallback"
+            return None, funds, "lp_fallback", governance_flags
 
     except Exception as e:
         logger.warning(f"CVaR-LP exception: {e} — LP fallback")
-        return None, funds, "lp_fallback"
+        return None, funds, "lp_fallback", governance_flags
 
-    # ── Step 8: Enforce maxFunds via iterative trimming ──
+    # ── Step 7: Trim to max_funds ─────────────────────────────────────────────
     weights = result['weights']
     max_funds = m.get("max_funds", TARGET_FUNDS_HI)
-    min_holding = m.get("min_holding_pct", 5.0) / 100
+    min_holding = m.get("min_holding_pct", 4.0) / 100
 
-    # ── Trim to maxFunds ──────────────────────────────────────────────────────
     for trim_iter in range(20):
         active = sum(1 for w in weights if w > 0.005)
         if active <= max_funds:
             break
-        min_idx = None
-        min_w = float('inf')
-        for i in range(N):
-            if weights[i] > 0.005 and weights[i] < min_w:
-                min_w = weights[i]
-                min_idx = i
+        min_idx = min((i for i in range(N) if weights[i] > 0.005),
+                      key=lambda i: weights[i], default=None)
         if min_idx is None:
             break
         upper_bounds[min_idx] = 0
         try:
-            result = _cvar_lp(scenario_matrix, CVAR_ALPHA, upper_bounds, add_A, add_b, add_sense,
-                              return_bonus=posterior_weekly)
-            if result['status'] == 'optimal':
-                weights = result['weights']
+            r2 = _cvar_lp(scenario_matrix, CVAR_ALPHA, upper_bounds,
+                          add_A, add_b, add_sense, return_bonus=posterior_weekly)
+            if r2['status'] == 'optimal':
+                weights = r2['weights']
             else:
                 break
         except:
             break
 
-    # ── Enforce min_holding (5%) — drop funds below threshold and re-solve ───
+    # ── Step 8: Enforce min_holding ───────────────────────────────────────────
     for min_iter in range(20):
         below = [i for i in range(N) if 0 < weights[i] < min_holding]
         if not below:
             break
-        # Drop the smallest weight fund below threshold
         drop_idx = min(below, key=lambda i: weights[i])
         upper_bounds[drop_idx] = 0
         try:
-            result = _cvar_lp(scenario_matrix, CVAR_ALPHA, upper_bounds, add_A, add_b, add_sense,
-                              return_bonus=posterior_weekly)
-            if result['status'] == 'optimal':
-                weights = result['weights']
+            r2 = _cvar_lp(scenario_matrix, CVAR_ALPHA, upper_bounds,
+                          add_A, add_b, add_sense, return_bonus=posterior_weekly)
+            if r2['status'] == 'optimal':
+                weights = r2['weights']
             else:
                 break
         except:
             break
 
-    # Convert to percentage weights aligned with valid_funds
     weights_pct = weights * 100
+    logger.info(f"BL+CVaR solved: {sum(1 for w in weights_pct if w > 0.5)} funds, "
+                f"CVaR={result.get('cvar', 0):.4f}, flags={len(governance_flags)}")
 
-    logger.warning(f"BL+CVaR solved: {sum(1 for w in weights_pct if w > 0.5)} funds, "
-                f"CVaR={result.get('cvar', 0):.4f}")
-
-    return weights_pct, valid_funds, "bl_cvar"
-
+    return weights_pct, valid_funds, "bl_cvar", governance_flags
 
 
 def _pick_candidates(eq_pool, debt_pool, hybrid_pool, m):
-    """
-    Select candidates per sleeve:
-    - Equity: restricted to allowed_equity_cats (or all core), eq_per_cat best-fit per category
-    - Debt: picked in DEBT_PRIORITY order, capped at max_debt_funds.
-            For agg/mod-agg (max_debt_funds=1), the single debt fund must be from AGG_DEBT_CATS.
-    - Hybrid: picked in HYBRID_PRIORITY order, hyb_per_cat funds per category.
-    """
     cap_l, cap_m, cap_s = m["cap_large"], m["cap_mid"], m["cap_small"]
+
     def cap_dev(f):
         return (abs(_sf(f.get("large_cap")) - cap_l) +
                 abs(_sf(f.get("mid_cap"))   - cap_m) +
@@ -1389,7 +1351,7 @@ def _pick_candidates(eq_pool, debt_pool, hybrid_pool, m):
     eq_by_cat = defaultdict(list)
     for f in eq_pool:
         if f.get("category") in allowed_eq:
-            eq_by_cat[f.get("category","")].append(f)
+            eq_by_cat[f.get("category", "")].append(f)
 
     eq_sorted = []
     eq_cat_limits = m.get("eq_cat_limits", {})
@@ -1397,13 +1359,13 @@ def _pick_candidates(eq_pool, debt_pool, hybrid_pool, m):
         if cat in eq_by_cat:
             n = eq_cat_limits.get(cat, m["eq_per_cat"])
             eq_sorted.extend(sorted(eq_by_cat[cat], key=cap_dev)[:n])
-    for cat, funds in eq_by_cat.items():
+    for cat, flist in eq_by_cat.items():
         if cat not in CORE_EQUITY_CATS:
             n = eq_cat_limits.get(cat, m["eq_per_cat"])
-            eq_sorted.extend(sorted(funds, key=cap_dev)[:n])
+            eq_sorted.extend(sorted(flist, key=cap_dev)[:n])
 
     # ── Debt ──────────────────────────────────────────────────────────────────
-    debt_allowed = {c for c,t in DEBT_RISK_TIER.items() if t in m["debt_tiers"]}
+    debt_allowed = {c for c, t in DEBT_RISK_TIER.items() if t in m["debt_tiers"]}
     max_debt = m.get("max_debt_funds", 3)
 
     if m.get("allowed_debt_cats"):
@@ -1427,7 +1389,7 @@ def _pick_candidates(eq_pool, debt_pool, hybrid_pool, m):
             break
 
     # ── Hybrid ────────────────────────────────────────────────────────────────
-    hyb_allowed = {c for c,t in HYBRID_RISK_TIER.items() if t in m["hybrid_tiers"]}
+    hyb_allowed = {c for c, t in HYBRID_RISK_TIER.items() if t in m["hybrid_tiers"]}
     hyb_by_cat = defaultdict(list)
     for f in hybrid_pool:
         if f.get("category") in hyb_allowed:
@@ -1451,22 +1413,18 @@ def _pick_candidates(eq_pool, debt_pool, hybrid_pool, m):
     return out
 
 
-def _pick_gold_candidates(gold_pool, gold_lo, gold_hi):
+def _pick_gold_candidates(gold_pool, gold_fixed):
     """
-    Pick top gold/silver funds by AUM (largest, most liquid).
-    No R1/R2 filter — precious metals have no skill-based rating.
-    Returns 1–2 funds: best by AUM, second only if genuinely different category
-    (e.g. one gold ETF + one silver ETF, or one ETF + one FoF).
+    Pick gold/silver funds by AUM. Silver capped at 30% of precious metals sleeve.
+    Returns 1–2 funds (one ETF + one FoF at most).
     """
-    if not gold_pool or not gold_lo:
+    if not gold_pool or not gold_fixed:
         return []
-    # Sort by AUM descending
     sorted_gold = sorted(gold_pool, key=lambda f: _sf(f.get("fund_size")), reverse=True)
     picked = []
     seen_cats = set()
     for f in sorted_gold:
         cat = (f.get("category") or "").lower()
-        # Allow at most one per broad type: ETF vs FoF
         broad = "fof" if ("fof" in cat or "fund of fund" in cat) else "etf"
         if broad not in seen_cats:
             seen_cats.add(broad)
@@ -1478,21 +1436,29 @@ def _pick_gold_candidates(gold_pool, gold_lo, gold_hi):
 
 def _build_portfolio(model_key, all_funds, db=None):
     m = MODELS[model_key]
-    _build_portfolio._db = db  # stash db for _optimize_sharpe
-    eq_pool     = [f for f in all_funds
+    _build_portfolio._db = db
+
+    # Apply fund eligibility filter to non-Precious Metals funds
+    eligible_funds = []
+    for f in all_funds:
+        if f.get("asset_class") == "Precious Metals":
+            eligible_funds.append(f)  # gold not filtered by eligibility
+        elif _is_eligible(f):
+            eligible_funds.append(f)
+
+    eq_pool     = [f for f in eligible_funds
                    if f["asset_class"] == "Equity"
                    and f.get("category") in CORE_EQUITY_CATS]
-    debt_pool   = [f for f in all_funds if f["asset_class"] == "Debt"]
-    hybrid_pool = [f for f in all_funds if f["asset_class"] == "Hybrid"]
-    gold_pool   = [f for f in all_funds if f["asset_class"] == "Precious Metals"]
+    debt_pool   = [f for f in eligible_funds if f["asset_class"] == "Debt"]
+    hybrid_pool = [f for f in eligible_funds if f["asset_class"] == "Hybrid"]
+    gold_pool   = [f for f in eligible_funds if f["asset_class"] == "Precious Metals"]
 
-    gold_lo = m.get("gold_lo", 0)
-    gold_hi = m.get("gold_hi", 0)
-    gold_candidates = _pick_gold_candidates(gold_pool, gold_lo, gold_hi)
+    gold_fixed = m.get("gold_fixed", 0)
+    gold_candidates = _pick_gold_candidates(gold_pool, gold_fixed)
 
     candidates = _pick_candidates(eq_pool, debt_pool, hybrid_pool, m)
 
-    # Merge gold candidates into the pool (after dedup, before solve)
+    # Merge gold
     seen, candidates_deduped = set(), []
     for f in candidates + gold_candidates:
         key = f.get("isin") or (f.get("name") or "").strip().lower()
@@ -1501,49 +1467,46 @@ def _build_portfolio(model_key, all_funds, db=None):
             candidates_deduped.append(f)
     candidates = candidates_deduped
 
-    # Tag gold funds so solver can apply gold + fund-house constraints
     gold_isins = {f.get("isin") for f in gold_candidates if f.get("isin")}
 
-    # Phase 3: attempt true Sharpe optimization; fall back to LP if needed
-    # qp_funds may be a subset of candidates (funds with sufficient NAV history)
-    # Keep original candidates for LP fallback
     original_candidates = candidates
-    min_funds_needed = m.get("min_funds", MIN_FUNDS)
+    governance_flags = []
 
-    qp_weights, qp_funds, used_method = _optimize_sharpe(
+    qp_weights, qp_funds, used_method, gov_flags = _optimize_sharpe(
         candidates, m, gold_isins=gold_isins, db=_build_portfolio._db
     )
-    qp_active = int(np.sum(qp_weights > 0)) if qp_weights is not None else 0
+    governance_flags.extend(gov_flags)
 
-    # Accept BL+CVaR if it produced >= 6 active funds (relaxed from TARGET_FUNDS_LO=8)
-    # BL+CVaR naturally concentrates into fewer, higher-quality funds than LP.
-    # We trust the optimizer's fund count as long as it meets the model minimum (≥6).
+    qp_active = int(np.sum(qp_weights > 0)) if qp_weights is not None else 0
     qp_accept_threshold = max(6, m.get("min_funds", 6) - 1)
+
     if qp_weights is not None and qp_active >= qp_accept_threshold:
-        # QP succeeded — use qp_funds + qp_weights
         weights   = qp_weights
         candidates = qp_funds
         used_tol  = "bl_cvar"
-        logger.info(f"BL+CVaR succeeded for {model_key}: {qp_active} funds (threshold={qp_accept_threshold})")
     else:
-        # QP failed or insufficient funds — fall back to LP with original full candidate pool
-        logger.info(f"BL+CVaR fallback for {model_key} (qp_active={qp_active}, need>={qp_accept_threshold}) — using LP")
+        logger.info(f"BL+CVaR fallback for {model_key} — using LP")
         candidates = original_candidates
         weights, used_tol = _solve_with_retry(candidates, m, gold_isins=gold_isins)
+        if used_tol == 999 or (isinstance(used_tol, int) and used_tol > 0):
+            governance_flags.append({
+                "type": "bl_cvar_fallback",
+                "severity": "info",
+                "message": "BL+CVaR insufficient fund count — LP feasibility solver used.",
+            })
 
+    # ── Build result list ──────────────────────────────────────────────────────
     result = []
     seen_result = set()
-    # For QP results, use a lower threshold (1%) — QP weights are already optimized
-    # For LP results, use MIN_W_LOOSE (3%) as before
     w_threshold = 1.0 if used_tol in ("sharpe_qp", "bl_cvar") else MIN_W_LOOSE - 0.1
     if weights is not None:
         for f, w in zip(candidates, weights):
             key = f.get("isin") or (f.get("name") or "").strip().lower()
             if w >= w_threshold and key not in seen_result:
                 seen_result.add(key)
-                sleeve = ("Equity" if f["asset_class"]=="Equity"
-                          else "Hybrid" if f["asset_class"]=="Hybrid"
-                          else "Gold" if f["asset_class"]=="Precious Metals"
+                sleeve = ("Equity" if f["asset_class"] == "Equity"
+                          else "Hybrid" if f["asset_class"] == "Hybrid"
+                          else "Gold" if f["asset_class"] == "Precious Metals"
                           else "Debt")
                 result.append({**f, "weight": round(float(w), 1), "sleeve": sleeve})
         tot = sum(f["weight"] for f in result)
@@ -1551,6 +1514,23 @@ def _build_portfolio(model_key, all_funds, db=None):
             for f in result:
                 f["weight"] = round(f["weight"] * 100 / tot, 1)
 
+    # ── Liquid/Overnight exclusivity (doc) ────────────────────────────────────
+    result = _enforce_liquid_overnight_exclusivity(result)
+
+    # ── Largest-remainder whole-% rounding (doc Section 13) ──────────────────
+    if result:
+        raw_weights = [f["weight"] for f in result]
+        rounded = _round_weights_lr(raw_weights, per_fund_cap_pct=PER_FUND_CAP, funds=result)
+        for f, rw in zip(result, rounded):
+            f["weight"] = rw
+        # Final renorm to ensure sum=100 (rounding may be off by 1)
+        tot = sum(f["weight"] for f in result)
+        if tot > 0 and abs(tot - 100) > 0.5:
+            # Fallback to 1dp if rounding failed
+            for f, ow in zip(result, raw_weights):
+                f["weight"] = round(ow, 1)
+
+    # ── Output calculations ────────────────────────────────────────────────────
     def _eq_pct(f):
         v = _s(f.get("equity_pct"))
         if v is not None and v > 0: return v
@@ -1576,53 +1556,43 @@ def _build_portfolio(model_key, all_funds, db=None):
             cap_num_m += ew * _sf(f.get("mid_cap"))
             cap_num_s += ew * _sf(f.get("small_cap"))
             cap_den   += ew
-    rb_large = round(cap_num_l/cap_den, 1) if cap_den else None
-    rb_mid   = round(cap_num_m/cap_den, 1) if cap_den else None
-    rb_small = round(cap_num_s/cap_den, 1) if cap_den else None
+    rb_large = round(cap_num_l / cap_den, 1) if cap_den else None
+    rb_mid   = round(cap_num_m / cap_den, 1) if cap_den else None
+    rb_small = round(cap_num_s / cap_den, 1) if cap_den else None
 
     def wavg(key):
         vals = [(f["weight"], _sf(f.get(key))) for f in result if _s(f.get(key)) is not None]
         if not vals: return None
-        tw = sum(w for w,_ in vals)
-        return round(sum(w*v for w,v in vals)/tw, 2) if tw else None
+        tw = sum(w for w, _ in vals)
+        return round(sum(w * v for w, v in vals) / tw, 2) if tw else None
 
     def wavg_exclude_precious(key):
-        """Weighted average excluding Precious Metals funds (gold/silver).
-        Their down_capture values are invalid (-300+) as they benchmark differently."""
         vals = [(f["weight"], _sf(f.get(key))) for f in result
                 if _s(f.get(key)) is not None
                 and f.get("asset_class", "") != "Precious Metals"
                 and "gold" not in (f.get("category") or "").lower()
                 and "silver" not in (f.get("category") or "").lower()]
         if not vals: return None
-        tw = sum(w for w,_ in vals)
-        return round(sum(w*v for w,v in vals)/tw, 2) if tw else None
+        tw = sum(w for w, _ in vals)
+        return round(sum(w * v for w, v in vals) / tw, 2) if tw else None
 
     def wavg_coverage(key):
-        """Returns % of total portfolio weight that contributed to this metric."""
         total_w = sum(f["weight"] for f in result)
         valid_w = sum(f["weight"] for f in result if _s(f.get(key)) is not None)
         if total_w == 0: return None
         return round(valid_w / total_w * 100, 1)
 
     EQUITY_CAT_ORDER = [
-        "India Fund Large-Cap",
-        "India Fund Large & Mid-Cap",
-        "Cat: Flexi Cap Funds",
-        "Cat: Multi Cap Funds",
-        "India Fund Focused Fund",
-        "India Fund Mid-Cap",
-        "India Fund Small-Cap",
-        "Cat: Contra / Value Funds",
+        "India Fund Large-Cap", "India Fund Large & Mid-Cap", "Cat: Flexi Cap Funds",
+        "Cat: Multi Cap Funds", "India Fund Focused Fund", "India Fund Mid-Cap",
+        "India Fund Small-Cap", "Cat: Contra / Value Funds",
     ]
     SLEEVE_ORDER = {"Equity": 0, "Hybrid": 1, "Debt": 2, "Gold": 3, "Alternates": 4}
 
     def sort_key(f):
         sleeve_rank = SLEEVE_ORDER.get(f["sleeve"], 9)
-        if f["sleeve"] == "Equity":
-            cat_rank = EQUITY_CAT_ORDER.index(f.get("category")) if f.get("category") in EQUITY_CAT_ORDER else 99
-        else:
-            cat_rank = 0
+        cat_rank = (EQUITY_CAT_ORDER.index(f.get("category"))
+                    if f["sleeve"] == "Equity" and f.get("category") in EQUITY_CAT_ORDER else 0)
         return (sleeve_rank, cat_rank)
 
     result.sort(key=sort_key)
@@ -1641,10 +1611,16 @@ def _build_portfolio(model_key, all_funds, db=None):
         "suitability": m["suitability"], "group": "risk",
         "fund_count": len(result),
         "used_method": used_tol if isinstance(used_tol, str) else f"lp_tol{used_tol}",
+        "governance_flags": governance_flags,
         "target": {
             "eq_lo": m["eq_lo"], "eq_hi": m["eq_hi"],
             "debt_lo": m["debt_lo"], "debt_hi": m["debt_hi"],
-            "large_cap": m["cap_large"], "mid_cap": m["cap_mid"], "small_cap": m["cap_small"], "cap_tol": CAP_TOL,
+            "large_cap": m["cap_large"], "mid_cap": m["cap_mid"],
+            "small_cap": m["cap_small"], "cap_tol": CAP_TOL,
+            "gold_fixed": gold_fixed,
+            "mid_small_ceiling": m.get("mid_small_ceiling"),
+            "min_aaa_aa_pct": m.get("min_aaa_aa_pct"),
+            "max_duration": m.get("max_duration"),
         },
         "actual": {
             "equity_pct":     round(eff_equity, 1),
@@ -1655,27 +1631,25 @@ def _build_portfolio(model_key, all_funds, db=None):
             "small_cap":      rb_small,
         },
         "asset_mix": {
-            "Equity":         round(eff_equity, 1),
-            "Debt":           round(eff_debt, 1),
-            "Cash & Others":  round(eff_other, 1),
-            "Gold":           round(sum(f["weight"] for f in result if f["asset_class"] == "Precious Metals"), 1),
+            "Equity":        round(eff_equity, 1),
+            "Debt":          round(eff_debt, 1),
+            "Cash & Others": round(eff_other, 1),
+            "Gold":          round(sum(f["weight"] for f in result
+                                       if f["asset_class"] == "Precious Metals"), 1),
         },
         "blended": {
-            # Returns
-            "return_1y":   wavg("return_1y"),
-            "return_3y":   wavg("return_3y"),
-            "return_5y":   wavg("return_5y"),
-            "return_1m":   wavg("return_1m"),
-            "return_3m":   wavg("return_3m"),
-            "return_6m":   wavg("return_6m"),
-            "return_ytd":  wavg("return_ytd"),
-            # Calendar year returns
-            "return_cy2021": wavg("return_cy2021"),
-            "return_cy2022": wavg("return_cy2022"),
-            "return_cy2023": wavg("return_cy2023"),
-            "return_cy2024": wavg("return_cy2024"),
-            "return_cy2025": wavg("return_cy2025"),
-            # Risk metrics
+            "return_1y":      wavg("return_1y"),
+            "return_3y":      wavg("return_3y"),
+            "return_5y":      wavg("return_5y"),
+            "return_1m":      wavg("return_1m"),
+            "return_3m":      wavg("return_3m"),
+            "return_6m":      wavg("return_6m"),
+            "return_ytd":     wavg("return_ytd"),
+            "return_cy2021":  wavg("return_cy2021"),
+            "return_cy2022":  wavg("return_cy2022"),
+            "return_cy2023":  wavg("return_cy2023"),
+            "return_cy2024":  wavg("return_cy2024"),
+            "return_cy2025":  wavg("return_cy2025"),
             "sharpe_3y":      wavg("sharpe_ratio_3y"),
             "sortino_3y":     wavg("sortino_ratio_3y"),
             "alpha_3y":       wavg("alpha_3y"),
@@ -1686,8 +1660,6 @@ def _build_portfolio(model_key, all_funds, db=None):
             "std_dev_5y":     wavg("std_dev_5y"),
             "expense_ratio":  wavg("expense_ratio"),
         },
-        # Coverage: % of portfolio weight that contributed to each risk metric
-        # < 100% means some funds (typically debt/gold) had no data for that metric
         "blended_coverage": {
             "sharpe_3y":       wavg_coverage("sharpe_ratio_3y"),
             "alpha_3y":        wavg_coverage("alpha_3y"),
@@ -1704,10 +1676,12 @@ def _build_portfolio(model_key, all_funds, db=None):
                 "nav": f.get("nav"),
                 "return_1y": f.get("return_1y"), "return_3y": f.get("return_3y"),
                 "return_5y": f.get("return_5y"), "sharpe_3y": f.get("sharpe_ratio_3y"),
-                "alpha_3y": f.get("alpha_3y"), "std_dev_3y": f.get("std_dev_3y"), "std_dev_5y": f.get("std_dev_5y"), "expense_ratio": f.get("expense_ratio"),
+                "alpha_3y": f.get("alpha_3y"), "std_dev_3y": f.get("std_dev_3y"),
+                "std_dev_5y": f.get("std_dev_5y"), "expense_ratio": f.get("expense_ratio"),
                 "aum_cr": f.get("fund_size"), "morningstar_rating": f.get("morningstar_rating"),
                 "equity_pct": f.get("equity_pct"), "bond_pct": f.get("bond_pct"),
-                "large_cap": f.get("large_cap"), "mid_cap": f.get("mid_cap"), "small_cap": f.get("small_cap"),
+                "large_cap": f.get("large_cap"), "mid_cap": f.get("mid_cap"),
+                "small_cap": f.get("small_cap"),
             } for f in result
         ],
     }
@@ -1724,7 +1698,8 @@ def _get_funds(db, data_date):
                return_cy2021, return_cy2022, return_cy2023, return_cy2024, return_cy2025,
                expense_ratio, std_dev_3y, std_dev_5y,
                alpha_3y, beta_3y, up_capture_3y, down_capture_3y,
-               fund_size, amfi_code, nav, morningstar_rating, branding_name
+               fund_size, amfi_code, nav, morningstar_rating, branding_name,
+               modified_duration, avg_credit_quality
         FROM daily_fund_data
         WHERE data_date = :date AND nav IS NOT NULL
           AND (ranking IN ('R1','R2') OR asset_class = 'Precious Metals')
@@ -1756,9 +1731,14 @@ def debug_portfolios(date: str = Query(None)):
         for k in MODELS:
             try:
                 p = _build_portfolio(k, funds, db=db)
-                results["models"][k] = {"ok": True, "fund_count": p["fund_count"], "method": p.get("used_method","lp")}
+                results["models"][k] = {
+                    "ok": True, "fund_count": p["fund_count"],
+                    "method": p.get("used_method", "lp"),
+                    "governance_flags": p.get("governance_flags", []),
+                }
             except Exception as e:
-                results["models"][k] = {"ok": False, "error": str(e), "trace": traceback.format_exc()}
+                results["models"][k] = {"ok": False, "error": str(e),
+                                        "trace": traceback.format_exc()}
         return results
     except Exception as e:
         return {"fatal": str(e), "trace": traceback.format_exc()}
@@ -1785,7 +1765,8 @@ def get_portfolios(date: str = Query(None)):
                 out.append(p)
             except Exception as e:
                 logger.error(f"build {k} failed: {e}\n{traceback.format_exc()}")
-        return {"portfolios": sorted(out, key=lambda x: x["risk_score"]), "data_date": str(data_date)}
+        return {"portfolios": sorted(out, key=lambda x: x["risk_score"]),
+                "data_date": str(data_date)}
     finally:
         db.close()
 
