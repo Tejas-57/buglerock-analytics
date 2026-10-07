@@ -16,6 +16,7 @@ PUBLIC_ROUTES = {
     "/api/auth/setup-password",
     "/api/auth/verify-setup-token",
     "/api/status",
+    "/api/benchmarks/recompute-returns",
     "/api/health",
     "/docs",
     "/openapi.json",

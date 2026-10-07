@@ -4,7 +4,9 @@ const API = process.env.REACT_APP_API_URL || '';
 function BenchmarkPicker({ selectedDate, value, onChange }) {
   const [allBMs, setAllBMs] = React.useState([]);
   const [open, setOpen] = React.useState(false);
-  const dateStr = selectedDate instanceof Date ? selectedDate.toISOString().slice(0, 10) : (selectedDate || '');
+  const dateStr = selectedDate instanceof Date
+    ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth()+1).padStart(2,'0')}-${String(selectedDate.getDate()).padStart(2,'0')}`
+    : (selectedDate || '');
   const [rawBmWeights, setRawBmWeights] = React.useState({});
 
   React.useEffect(() => {

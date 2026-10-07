@@ -208,6 +208,38 @@ function fmtL(v) { return v >= 100000 ? '₹' + (v / 100000).toFixed(2) + 'L' : 
 export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], ips, onEdit, onOptimise, onDataUpdate, setWeights, setFunds, setSnapshots, selectedDate, onBackToBuild }) {
   const [activeTab, setActiveTab] = useState('xray');
 
+  // Refresh benchmark return data on mount — ips.benchmarks may carry stale returns
+  // from before the latest benchmark_returns recompute
+  const [refreshedBenchmarks, setRefreshedBenchmarks] = React.useState(benchmarks);
+  // Shadow the benchmarks prop with refreshed data throughout this component
+  // eslint-disable-next-line no-param-reassign
+  benchmarks = refreshedBenchmarks;
+  React.useEffect(() => {
+    if (!benchmarks || benchmarks.length === 0) return;
+    fetch(`${API}/api/benchmarks/returns`)
+      .then(r => r.json())
+      .then(d => {
+        const latest = {};
+        (d.benchmarks || []).forEach(b => { latest[b.index_name] = b; });
+        const refreshed = benchmarks.map(bm => {
+          const fresh = latest[bm.name] || latest[bm.display_name];
+          if (!fresh) return bm;
+          return {
+            ...bm,
+            return_1m: fresh.return_1m, return_3m: fresh.return_3m,
+            return_6m: fresh.return_6m, return_1y: fresh.return_1y,
+            return_3y: fresh.return_3y, return_5y: fresh.return_5y,
+            return_ytd: fresh.return_ytd,
+            return_cy2025: fresh.return_cy2025, return_cy2024: fresh.return_cy2024,
+            return_cy2023: fresh.return_cy2023, return_cy2022: fresh.return_cy2022,
+            return_cy2021: fresh.return_cy2021,
+          };
+        });
+        setRefreshedBenchmarks(refreshed);
+      })
+      .catch(() => { setRefreshedBenchmarks(benchmarks); });
+  }, [benchmarks.map(b => b.name).join(',')]);
+
   // Sensitivity tab sliders
   const [sensMarket, setSensMarket] = useState(0);
   const [histVar, setHistVar] = useState(null);
