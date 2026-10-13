@@ -18,7 +18,8 @@ Table: clients
   - created_by (user email)
   - created_at, updated_at
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from auth.middleware.auth_middleware import get_current_user
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from models.database import SessionLocal
@@ -97,25 +98,26 @@ def _row_to_dict(row) -> dict:
 
 
 @router.get("/clients")
-def list_clients(db: Session = Depends(get_db)):
+def list_clients(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     _migrate_clients_table(db)
     rows = db.execute(text("""
-        SELECT * FROM clients ORDER BY updated_at DESC
-    """)).fetchall()
+        SELECT * FROM clients WHERE created_by = :email ORDER BY updated_at DESC
+    """), {"email": current_user["email"]}).fetchall()
     return {"clients": [_row_to_dict(r) for r in rows]}
 
 
 @router.get("/clients/{client_id}")
-def get_client(client_id: str, db: Session = Depends(get_db)):
+def get_client(client_id: str, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     _migrate_clients_table(db)
-    row = db.execute(text("SELECT * FROM clients WHERE id = :id"), {"id": client_id}).fetchone()
+    row = db.execute(text("SELECT * FROM clients WHERE id = :id AND created_by = :email"),
+                     {"id": client_id, "email": current_user["email"]}).fetchone()
     if not row:
         raise HTTPException(404, f"Client {client_id} not found")
     return _row_to_dict(row)
 
 
 @router.post("/clients")
-def create_client(body: dict, db: Session = Depends(get_db)):
+def create_client(body: dict, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     _migrate_clients_table(db)
     client_id = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -161,7 +163,7 @@ def create_client(body: dict, db: Session = Depends(get_db)):
         "assessment_date": body.get("assessment_date"),
         "valid_until": body.get("valid_until"),
         "assessment_basis": body.get("assessment_basis"),
-        "created_by": body.get("created_by"),
+        "created_by": current_user["email"],
         "created_at": now,
         "updated_at": now,
     })
@@ -171,9 +173,10 @@ def create_client(body: dict, db: Session = Depends(get_db)):
 
 
 @router.put("/clients/{client_id}")
-def update_client(client_id: str, body: dict, db: Session = Depends(get_db)):
+def update_client(client_id: str, body: dict, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     _migrate_clients_table(db)
-    row = db.execute(text("SELECT id FROM clients WHERE id = :id"), {"id": client_id}).fetchone()
+    row = db.execute(text("SELECT id FROM clients WHERE id = :id AND created_by = :email"),
+                     {"id": client_id, "email": current_user["email"]}).fetchone()
     if not row:
         raise HTTPException(404, f"Client {client_id} not found")
 
@@ -224,8 +227,9 @@ def update_client(client_id: str, body: dict, db: Session = Depends(get_db)):
 
 
 @router.delete("/clients/{client_id}")
-def delete_client(client_id: str, db: Session = Depends(get_db)):
+def delete_client(client_id: str, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     _migrate_clients_table(db)
-    db.execute(text("DELETE FROM clients WHERE id = :id"), {"id": client_id})
+    db.execute(text("DELETE FROM clients WHERE id = :id AND created_by = :email"),
+               {"id": client_id, "email": current_user["email"]})
     db.commit()
     return {"ok": True}
