@@ -244,4 +244,26 @@ def fetch_all_benchmarks(check_days: int = 5) -> dict:
     nse    = fetch_nse_benchmark(check_days=check_days)
     crisil = fetch_crisil_benchmark(check_days=check_days)
     nifty  = sync_nifty_indices_from_sheet()
+
+    # Recompute benchmark returns after every NAV sync using latest period_dates
+    # This keeps benchmark_returns table current even when no new Morningstar email arrives
+    try:
+        from services.db_service import get_period_dates, get_latest_data_date
+        from services.benchmark_db_service import compute_and_store_benchmark_returns
+
+        period_dates = get_period_dates()
+        data_date    = get_latest_data_date()
+
+        if period_dates and data_date:
+            result = compute_and_store_benchmark_returns(
+                {k: {"start": str(v["start"]), "end": str(v["end"])}
+                 for k, v in period_dates.items()},
+                str(data_date),
+            )
+            logger.info(f"benchmark_returns recomputed: {result}")
+        else:
+            logger.warning("fetch_all_benchmarks: no period_dates or data_date — skipping return recompute")
+    except Exception as e:
+        logger.error(f"benchmark_returns recompute failed: {e}", exc_info=True)
+
     return {"nse": nse, "crisil": crisil, "nifty_indices": nifty}

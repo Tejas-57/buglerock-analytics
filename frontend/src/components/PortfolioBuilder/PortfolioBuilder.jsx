@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import './PortfolioBuilder.css';
-import ClientIPS from './steps/ClientIPS';
+import { useClient } from '../../context/ClientContext';
 import BuildPortfolio from './steps/BuildPortfolio';
 import Analyse from './steps/Analyse';
 import Optimise from './steps/Optimise';
@@ -9,7 +10,7 @@ import Compare from './steps/Compare';
 import PDFProposal from './steps/PDFProposal';
 
 const STEPS = [
-  { id: 1, label: 'Client & IPS' },
+  { id: 1, label: 'Client Mandate' },
   { id: 2, label: 'Build portfolio' },
   { id: 3, label: 'Analyse' },
   { id: 4, label: 'Optimise' },
@@ -40,6 +41,8 @@ function load(key, fallback) {
 function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
 
 export default function PortfolioBuilder({ selectedDate }) {
+  const { activeClient } = useClient();
+  const navigate = useNavigate();
   const [activeStep, setActiveStep] = useState(() => {
     // Check for a one-time goto instruction (e.g. from Watchlist Build Portfolio)
     const goto = localStorage.getItem('br_ptf_goto_step');
@@ -227,7 +230,12 @@ export default function PortfolioBuilder({ selectedDate }) {
         {/* Step panels */}
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           {activeStep === 1 && (
-            <ClientIPS ips={ips} setIps={setIps} onSave={saveIPS} onSkip={skipIPS} selectedDate={selectedDate} />
+            <ClientMandateCard
+              activeClient={activeClient}
+              ips={ips}
+              onContinue={() => { setIpsSaved(true); setActiveStep(2); }}
+              onNavigateCIP={() => navigate('/client/profile')}
+            />
           )}
           {activeStep === 2 && (
             <BuildPortfolio
@@ -303,6 +311,7 @@ export default function PortfolioBuilder({ selectedDate }) {
               snapshots={snapshots}
               benchmarks={ips.benchmarks || []}
               ips={ips}
+              activeClient={activeClient}
               selectedPortfolio={selectedPortfolio}
               setSelectedPortfolio={setSelectedPortfolio}
               onEditPortfolio={() => setActiveStep(2)}
@@ -310,6 +319,101 @@ export default function PortfolioBuilder({ selectedDate }) {
               analyseData={analyseData}
             />
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+// ── Client Mandate Card — replaces ClientIPS ─────────────────────────────────
+const RISK_META = {
+  conservative:     { label: 'Conservative',           color: '#1A7A52' },
+  mod_conservative: { label: 'Moderately Conservative', color: '#2563EB' },
+  balanced:         { label: 'Balanced',                color: '#D97706' },
+  mod_aggressive:   { label: 'Moderately Aggressive',   color: '#EA580C' },
+  aggressive:       { label: 'Aggressive',              color: '#912F63' },
+};
+
+function ClientMandateCard({ activeClient, ips, onContinue, onNavigateCIP }) {
+  const c = activeClient;
+  const riskMeta = c?.risk_profile ? RISK_META[c.risk_profile] : null;
+  const constraints = c?.constraints || {};
+
+  if (!c) {
+    return (
+      <div style={{ padding: '32px 0', maxWidth: 680 }}>
+        <div style={{ background: '#FEF3C7', border: '1px solid #D97706', borderRadius: 10, padding: '16px 20px', marginBottom: 20, fontSize: 13, color: '#92400E' }}>
+          <strong>No client selected.</strong> Select a client from the sidebar to load their approved mandate,
+          or continue without a mandate — the portfolio will be built without client-specific constraints.
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            style={{ padding: '9px 18px', background: '#fff', border: '1.5px solid #E5E7EB', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer', color: '#3E3452' }}
+            onClick={onContinue}
+          >
+            Continue without mandate →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ maxWidth: 680 }}>
+      <div style={{ background: '#fff', border: '1.5px solid #E5E7EB', borderRadius: 12, padding: '20px 24px', marginBottom: 16 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: '#9CA3AF', marginBottom: 8 }}>
+          Client Mandate
+        </div>
+        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 16, lineHeight: 1.5 }}>
+          Read-only summary of the client's approved Investment Profile.
+          To change any of this, edit the Client Investment Profile directly.
+        </div>
+
+        {/* Client name + risk */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <div style={{ width: 40, height: 40, borderRadius: '50%', background: `linear-gradient(135deg, ${riskMeta?.color || '#6B7280'}, #3E3452)`, color: '#fff', fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            {(c.name || '?')[0].toUpperCase()}
+          </div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#3E3452' }}>{c.name}</div>
+            {riskMeta && (
+              <div style={{ fontSize: 12, fontWeight: 600, color: riskMeta.color }}>{riskMeta.label}</div>
+            )}
+          </div>
+        </div>
+
+        {/* Key mandate fields */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px 16px', marginBottom: 16 }}>
+          {[
+            ['Investment amount', c.investment_amount ? `₹${Number(c.investment_amount).toLocaleString('en-IN')}` : '—'],
+            ['Objective',         c.objective         || '—'],
+            ['Horizon',           c.horizon           || '—'],
+            ['Review frequency',  constraints.reviewFrequency  || '—'],
+            ['Rebalancing',       constraints.rebalancingPolicy || '—'],
+            ['Deployment',        constraints.deploymentStrategy || '—'],
+            ['Benchmark',         constraints.benchmarks?.length > 0
+              ? constraints.benchmarks.map(b => `${b.name} (${b.weight}%)`).join(', ')
+              : (constraints.benchmark || '—')],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#9CA3AF', marginBottom: 2 }}>{label}</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#3E3452' }}>{value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, borderTop: '1px solid #F3F4F6', paddingTop: 14 }}>
+          <button
+            onClick={onNavigateCIP}
+            style={{ padding: '7px 14px', background: '#fff', border: '1.5px solid #E5E7EB', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', color: '#912F63' }}
+          >
+            Edit in CIP →
+          </button>
+          <button
+            onClick={onContinue}
+            style={{ padding: '7px 18px', background: '#912F63', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', color: '#fff' }}
+          >
+            Continue →
+          </button>
         </div>
       </div>
     </div>

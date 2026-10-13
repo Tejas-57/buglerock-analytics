@@ -3,7 +3,7 @@ import './Header.css';
 
 export default function Header({ selectedDate, user, onLogout }) {
   const dateStr = selectedDate instanceof Date
-    ? selectedDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })
+    ? selectedDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
     : selectedDate;
 
   return (
@@ -12,6 +12,8 @@ export default function Header({ selectedDate, user, onLogout }) {
         <div className="header-title">Analytics Platform</div>
       </div>
       <div className="header-right">
+
+        {/* ── Date ── */}
         <div className="date-selector">
           <div className="date-label">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -21,9 +23,10 @@ export default function Header({ selectedDate, user, onLogout }) {
             </svg>
             AS OF DATE
           </div>
-          <span className="date-input" style={{ cursor:'default', userSelect:'none' }}>{dateStr}</span>
+          <span className="date-input" style={{ cursor: 'default', userSelect: 'none' }}>{dateStr}</span>
         </div>
 
+        {/* ── User ── */}
         {user && (
           <div className="header-user">
             <span className="header-username">{user.name.split(' ')[0]}</span>
@@ -40,5 +43,3 @@ export default function Header({ selectedDate, user, onLogout }) {
     </header>
   );
 }
-
-/* Add these to your existing Header.css */

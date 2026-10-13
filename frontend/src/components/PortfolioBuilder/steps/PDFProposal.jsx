@@ -97,13 +97,50 @@ function pc(v)      { return v != null ? (parseFloat(v)>=0?'+':'')+parseFloat(v)
 function rc(v, good, bad)  { return v==null?'#A2A0A0':parseFloat(v)>=good?'#1A7A52':parseFloat(v)<=bad?'#912F63':'#D97706'; }
 function rcL(v, good, bad) { return v==null?'#A2A0A0':parseFloat(v)<=good?'#1A7A52':parseFloat(v)>=bad?'#912F63':'#D97706'; }
 
-export default function PDFProposal({ funds, weights, originalWeights, snapshots={}, benchmarks=[], ips, selectedPortfolio, setSelectedPortfolio, onEditPortfolio, onCompare, analyseData={} }) {
+const HORIZON_TO_YEARS = { short: 3, medium: 5, long: 7, veryLong: 10 };
+
+const RISK_LABEL = {
+  conservative: 'Conservative', mod_conservative: 'Moderately Conservative',
+  balanced: 'Balanced', mod_aggressive: 'Moderately Aggressive', aggressive: 'Aggressive',
+};
+
+// Build a merged IPS object from activeClient + ips (activeClient takes priority)
+function mergeIPS(activeClient, ips) {
+  if (!activeClient) return ips || {};
+  const c = activeClient;
+  const constraints = c.constraints || {};
+  return {
+    name:              c.name                || ips?.name            || 'Client',
+    rm:                c.rm_name             || ips?.rm              || 'BugleRock Capital',
+    amount:            c.investment_amount   ? String(c.investment_amount) : (ips?.amount || ''),
+    monthlySIP:        c.sip                 ? String(c.sip)         : (ips?.monthlySIP || ''),
+    primaryObjective:  c.objective           || ips?.primaryObjective || 'Wealth creation',
+    riskProfile:       c.risk_profile        ? (RISK_LABEL[c.risk_profile] || c.risk_profile) : (ips?.riskProfile || 'Moderate'),
+    tenure:            c.horizon             ? String(HORIZON_TO_YEARS[c.horizon] || 10) : (ips?.tenure || '10'),
+    proposalDate:      constraints.proposalDate || ips?.proposalDate || new Date().toISOString().slice(0,10),
+    reviewFrequency:   constraints.reviewFrequency  || ips?.reviewFrequency  || 'Quarterly',
+    rebalancing:       constraints.rebalancingPolicy || ips?.rebalancing      || 'Annual rebalancing',
+    deploymentMode:    constraints.deploymentStrategy || ips?.deploymentMode  || '',
+    deploymentNotes:   constraints.deploymentNotes   || ips?.deploymentNotes  || '',
+    notes:             constraints.notes             || ips?.adviserNotes     || '',
+    benchmarks:        constraints.benchmarks?.length > 0 ? constraints.benchmarks : (ips?.benchmarks || []),
+    alloc:             constraints.alloc     || ips?.alloc            || {},
+    targetReturn:      constraints.targetReturn || ips?.targetReturn  || '',
+    constraints:       constraints.notes     || ips?.constraints      || '',
+  };
+}
+
+export default function PDFProposal({ funds, weights, originalWeights, snapshots={}, benchmarks=[], ips, activeClient, selectedPortfolio, setSelectedPortfolio, onEditPortfolio, onCompare, analyseData={} }) {
+  // Merge activeClient into ips — activeClient fields take priority
+  const mergedIPS = mergeIPS(activeClient, ips);
+  // Use CIP benchmarks if available and no benchmarks passed directly
+  const effectiveBenchmarks = effectiveBenchmarks.length > 0 ? benchmarks : (mergedIPS.benchmarks || []);
   const hasOpt = Object.keys(originalWeights || {}).length > 0;
   const { stressData, overlapData, corrData, bmStress } = analyseData || {};
 
   function blendBmVal(getter) {
     let val = 0, cov = 0;
-    benchmarks.forEach(b => {
+    effectiveBenchmarks.forEach(b => {
       const v = getter(b);
       if (v == null || isNaN(parseFloat(v))) return;
       val += parseFloat(v) * (b.weight || 0);
@@ -115,18 +152,18 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
   function blendBmMeta(getter) {
     let val = 0, cov = 0;
     const missing = [];
-    benchmarks.forEach(b => {
+    effectiveBenchmarks.forEach(b => {
       const v = getter(b);
       if (v == null || isNaN(parseFloat(v))) { missing.push(b.display_name); return; }
       val += parseFloat(v) * (b.weight || 0);
       cov += (b.weight || 0);
     });
-    return { value: cov > 0 ? val/cov : null, partial: missing.length > 0 && missing.length < benchmarks.length, missing };
+    return { value: cov > 0 ? val/cov : null, partial: missing.length > 0 && missing.length < effectiveBenchmarks.length, missing };
   }
 
-  const isMultiBm = benchmarks.length > 1;
-  const bmDisplayName = isMultiBm ? 'Blended BM' : (benchmarks[0]?.display_name || 'Benchmark');
-  const bmComposition = isMultiBm ? benchmarks.map(b => `${b.display_name} ${b.weight}%`).join(' + ') : null;
+  const isMultiBm = effectiveBenchmarks.length > 1;
+  const bmDisplayName = isMultiBm ? 'Blended BM' : (effectiveBenchmarks[0]?.display_name || 'Benchmark');
+  const bmComposition = isMultiBm ? effectiveBenchmarks.map(b => `${b.display_name} ${b.weight}%`).join(' + ') : null;
 
   const BM_PERIOD_MAP_PDF = [
     ['1M', b=>b.return_1m],['3M',b=>b.return_3m],['6M',b=>b.return_6m],
@@ -144,7 +181,7 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
     return Object.entries(byBm).map(([name,periods])=>`${name}: missing ${periods.join(', ')}`);
   })();
   const bmFootnotePDF = [
-    bmComposition ? `Benchmark: ${bmComposition}. Blended using IPS weights.` : `Benchmark: ${benchmarks[0]?.display_name || '—'}.`,
+    bmComposition ? `Benchmark: ${bmComposition}. Blended using IPS weights.` : `Benchmark: ${effectiveBenchmarks[0]?.display_name || '—'}.`,
     bmMissingNotesPDF.length > 0 ? `~ Partial data — ${bmMissingNotesPDF.join('; ')}` : '',
   ].filter(Boolean).join(' ');
 
@@ -153,8 +190,8 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
     ? `<div style="margin-top:10px;padding:9px 14px;background:#F9F8F9;border:1px solid #F2F0F3;border-left:3px solid #A795AE;border-radius:4px;font-size:10px;color:#A2A0A0;line-height:1.7">${bmFootnotePDF}</div>`
     : '';
 
-  const bm = benchmarks.length > 0 ? {
-    name: benchmarks.length === 1 ? benchmarks[0].display_name : benchmarks.map(b => `${b.display_name} (${b.weight}%)`).join(' + '),
+  const bm = effectiveBenchmarks.length > 0 ? {
+    name: effectiveBenchmarks.length === 1 ? effectiveBenchmarks[0].display_name : effectiveBenchmarks.map(b => `${b.display_name} (${b.weight}%)`).join(' + '),
     rets: {
       r1m:  blendBmVal(b => b.return_1m),
       r3m:  blendBmVal(b => b.return_3m),
@@ -173,9 +210,9 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
 
   const activeWeights = selectedPortfolio === 'optimised' && hasOpt ? weights : (hasOpt ? originalWeights : weights);
   const B  = blendPtf(funds, activeWeights, snapshots);
-  const investAmt = ips?.amount ? parseFloat(ips.amount.replace(/[^0-9.]/g, '')) : 1000000;
-  const sipAmt    = ips?.monthlySIP ? parseFloat(ips.monthlySIP.replace(/[^0-9.]/g, '')) : 0;
-  const tenureYrs = ips?.tenure ? parseInt(ips.tenure) || 10 : 10;
+  const investAmt = mergedIPS.amount ? parseFloat(String(mergedIPS.amount).replace(/[^0-9.]/g, '')) : 1000000;
+  const sipAmt    = mergedIPS.monthlySIP ? parseFloat(String(mergedIPS.monthlySIP).replace(/[^0-9.]/g, '')) : 0;
+  const tenureYrs = mergedIPS.tenure ? parseInt(mergedIPS.tenure) || 10 : 10;
 
   const [generating, setGenerating] = useState(false);
 
@@ -261,19 +298,19 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
     };
 
     const payload = {
-      client:        ips?.name || 'Client',
-      rm:            ips?.rm || 'BugleRock Capital',
-      invest:        ips?.amount ? '₹'+ips.amount : '—',
-      goal:          ips?.primaryObjective || 'Wealth creation',
-      risk:          ips?.riskProfile || 'Moderate',
+      client:        mergedIPS.name        || 'Client',
+      rm:            mergedIPS.rm          || 'BugleRock Capital',
+      invest:        mergedIPS.amount      ? '₹'+mergedIPS.amount : '—',
+      goal:          mergedIPS.primaryObjective || 'Wealth creation',
+      risk:          mergedIPS.riskProfile || 'Moderate',
       tenure:        tenureYrs,
-      deploy:        ips?.deploymentMode || null,
-      targetRet:     ips?.targetReturn || null,
-      reviewFreq:    ips?.reviewFrequency || 'Quarterly',
-      constraints:   ips?.constraints || null,
-      notes:         ips?.notes || null,
-      today:         ips?.proposalDate
-        ? new Date(ips.proposalDate).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})
+      deploy:        mergedIPS.deploymentMode   || null,
+      targetRet:     mergedIPS.targetReturn     || null,
+      reviewFreq:    mergedIPS.reviewFrequency  || 'Quarterly',
+      constraints:   mergedIPS.constraints      || null,
+      notes:         mergedIPS.notes            || null,
+      today:         mergedIPS.proposalDate
+        ? new Date(mergedIPS.proposalDate).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})
         : new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}),
       benchmarkName: bm.name,
       funds: funds.filter(f => activeWeights[f.isin] != null).map(f => ({
@@ -302,7 +339,7 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `BugleRock_Proposal_${(ips?.name||'Client').replace(/\s+/g,'_')}.pptx`;
+        a.download = `BugleRock_Proposal_${(mergedIPS.name||'Client').replace(/\s+/g,'_')}.pptx`;
         document.body.appendChild(a);
         a.click();
         setTimeout(() => { URL.revokeObjectURL(url); document.body.removeChild(a); }, 1000);
@@ -312,19 +349,19 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
 
   function buildAndOpen(resolvedStress, resolvedOverlap, resolvedCorr, w, secs) {
     const sec = id => secs ? secs.has(id) : true; // section enabled?
-    const CLIENT   = ips?.name || 'Client';
-    const RM       = ips?.rm   || 'BugleRock Capital';
-    const INVEST   = ips?.amount ? '₹'+ips.amount : '—';
-    const GOAL     = ips?.primaryObjective || 'Wealth creation';
-    const RISK     = ips?.riskProfile || 'Moderate';
-    const TENURE   = ips?.tenure ? ips.tenure+' years' : '10 years';
-    const DEPLOY   = ips?.deploymentMode || '—';
-    const TRET     = ips?.targetReturn || '—';
-    const REVFREQ  = ips?.reviewFrequency || 'Quarterly';
-    const CONSTRAIN= ips?.constraints || '';
-    const NOTES    = ips?.notes || '';
-    const TODAY    = ips?.proposalDate
-      ? new Date(ips.proposalDate).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})
+    const CLIENT   = mergedIPS.name              || 'Client';
+    const RM       = mergedIPS.rm                || 'BugleRock Capital';
+    const INVEST   = mergedIPS.amount            ? '₹'+mergedIPS.amount : '—';
+    const GOAL     = mergedIPS.primaryObjective  || 'Wealth creation';
+    const RISK     = mergedIPS.riskProfile       || 'Moderate';
+    const TENURE   = mergedIPS.tenure            ? mergedIPS.tenure+' years' : '10 years';
+    const DEPLOY   = mergedIPS.deploymentMode    || '—';
+    const TRET     = mergedIPS.targetReturn      || '—';
+    const REVFREQ  = mergedIPS.reviewFrequency   || 'Quarterly';
+    const CONSTRAIN= mergedIPS.constraints       || '';
+    const NOTES    = mergedIPS.notes             || '';
+    const TODAY    = mergedIPS.proposalDate
+      ? new Date(mergedIPS.proposalDate).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})
       : new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'});
 
     const BERRY  = '#912F63', PLUM = '#3E3452', LAV = '#A795AE';
@@ -782,7 +819,7 @@ ${sec("ips") ? `<!-- ═══ PAGE 2: IPS ═══ -->
     ${infoCell('Deployment mode',DEPLOY)}
     ${infoCell('Monthly SIP',sipAmt>0?'₹'+sipAmt.toLocaleString('en-IN'):'—')}
     ${infoCell('Review frequency',REVFREQ)}
-    ${infoCell('Benchmark', isMultiBm ? bm.name : (benchmarks[0]?.display_name || '—'))}
+    ${infoCell('Benchmark', isMultiBm ? bm.name : (effectiveBenchmarks[0]?.display_name || '—'))}
   </div>
   ${CONSTRAIN?tblBox('Investment constraints &amp; exclusions',`<div style="padding:11px 16px;font-size:12px;line-height:1.8;color:${GR80}">${CONSTRAIN}</div>`):''}
   ${NOTES?tblBox('Adviser notes &amp; special instructions',`<div style="padding:11px 16px;font-size:12px;line-height:1.8;color:${GR80}">${NOTES}</div>`):''}
@@ -1269,13 +1306,13 @@ ${sec("annexure") ? `<!-- ═══ ANNEXURE: FUND SNAPSHOTS ═══ -->
         <div style={{ background:'#fff',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',padding:18,marginBottom:20 }}>
           <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12 }}>
             {[
-              { l:'Client',           v: ips?.name || '(not set)' },
-              { l:'Investment amount',v: ips?.amount ? '₹'+ips.amount : '(not set)' },
+              { l:'Client',           v: mergedIPS.name || '(not set)' },
+              { l:'Investment amount',v: mergedIPS.amount ? '₹'+mergedIPS.amount : '(not set)' },
               { l:'Portfolio funds',  v: funds.length+' funds' },
-              { l:'Objective',        v: ips?.primaryObjective || '(not set)' },
-              { l:'Risk profile',     v: ips?.riskProfile || '(not set)' },
+              { l:'Objective',        v: mergedIPS.primaryObjective || '(not set)' },
+              { l:'Risk profile',     v: mergedIPS.riskProfile || '(not set)' },
               { l:'Benchmark',        v: bm2name },
-              { l:'IPS',              v: ips?.name ? '✓ Saved' : 'Not saved',   c: ips?.name ? POS2 : 'var(--text-muted)' },
+              { l:'Client profile',   v: mergedIPS.name ? '✓ Loaded' : 'Not set', c: mergedIPS.name ? POS2 : 'var(--text-muted)' },
               { l:'Optimisation',     v: hasOpt ? '✓ Applied' : 'Not run',      c: hasOpt ? POS2 : 'var(--text-muted)' },
               { l:'Portfolio for proposal', v: selectedPortfolio==='optimised'&&hasOpt?'Optimised':'Original', c: BERRY2 },
             ].map((item,i) => (

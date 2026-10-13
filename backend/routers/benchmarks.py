@@ -166,6 +166,15 @@ def get_benchmark_returns_endpoint(
                 return {"benchmarks": [], "count": 0, "date": None}
             date = str(latest)
 
+        # If exact date has no data, fall back to nearest available date on or before
+        with engine.connect() as conn:
+            nearest = conn.execute(text("""
+                SELECT MAX(data_date) FROM benchmark_returns
+                WHERE data_date <= :date
+            """), {"date": date}).scalar()
+        if nearest:
+            date = str(nearest)
+
         if index:
             result = get_benchmark_returns(index, date)
             if not result:
@@ -177,6 +186,35 @@ def get_benchmark_returns_endpoint(
     except Exception as e:
         logger.error(f"get_benchmark_returns_endpoint failed: {e}")
         return {"benchmarks": [], "count": 0, "error": str(e)}
+
+
+@router.post("/benchmarks/recompute-returns")
+def recompute_benchmark_returns():
+    """
+    Manually trigger recomputation of benchmark_returns from benchmark_nav.
+    Use this after deploying the fix or whenever returns look stale.
+    """
+    try:
+        from services.db_service import get_period_dates, get_latest_data_date
+        from services.benchmark_db_service import compute_and_store_benchmark_returns
+
+        period_dates = get_period_dates()
+        data_date    = get_latest_data_date()
+
+        if not period_dates:
+            return {"error": "No period_dates in DB — Morningstar email not yet parsed"}
+        if not data_date:
+            return {"error": "No data_date found"}
+
+        result = compute_and_store_benchmark_returns(
+            {k: {"start": str(v["start"]), "end": str(v["end"])}
+             for k, v in period_dates.items()},
+            str(data_date),
+        )
+        return {"ok": True, "data_date": str(data_date), "result": result}
+    except Exception as e:
+        logger.error(f"recompute_benchmark_returns failed: {e}", exc_info=True)
+        return {"error": str(e)}
 
 
 @router.get("/benchmarks/load-status")

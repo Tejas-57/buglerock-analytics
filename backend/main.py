@@ -8,7 +8,7 @@ from datetime import date
 
 load_dotenv()
 
-from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, benchmarks, optimise, holdings, proposal, models
+from routers import home, performance, peer, simulator, rolling, chat, status, funds, gmail, nav, benchmarks, optimise, holdings, proposal, models, clients
 from auth.routers.auth import router as auth_router  # CORRECT
 from auth.middleware.auth_middleware import AuthMiddleware
 from models.database import init_db
@@ -42,6 +42,7 @@ app.include_router(optimise.router,    prefix="/api")
 app.include_router(holdings.router,    prefix="/api/holdings")
 app.include_router(proposal.router,    prefix="/api/proposal")
 app.include_router(models.router,      prefix="/api/models")
+app.include_router(clients.router,     prefix="/api")
 app.include_router(auth_router)
 
 

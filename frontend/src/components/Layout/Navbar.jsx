@@ -1,6 +1,144 @@
-import React from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useState, useRef, useEffect } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
 import './Navbar.css';
+import './NavClientSwitcher.css';
+
+const RISK_COLORS = {
+  conservative:     '#1A7A52',
+  mod_conservative: '#2563EB',
+  balanced:         '#D97706',
+  mod_aggressive:   '#EA580C',
+  aggressive:       '#912F63',
+};
+
+const RISK_SHORT = {
+  conservative:     'Conservative',
+  mod_conservative: 'Mod. Conservative',
+  balanced:         'Balanced',
+  mod_aggressive:   'Mod. Aggressive',
+  aggressive:       'Aggressive',
+};
+
+// Client switcher — lives in navbar CLIENT section
+function NavClientSwitcher({ activeClient, clients, onSelectClient, onNewClient, onDeleteClient }) {
+  const [open, setOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null); // client to delete
+  const ref = useRef(null);
+  const navigate = useNavigate();
+
+  function handleDelete(e, client) {
+    e.stopPropagation();
+    setConfirmDelete(client);
+  }
+
+  function confirmDeleteClient() {
+    if (confirmDelete) {
+      onDeleteClient?.(confirmDelete.id);
+      setConfirmDelete(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function handler(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const riskColor = activeClient?.risk_profile ? RISK_COLORS[activeClient.risk_profile] : '#9CA3AF';
+
+  return (
+    <div className="nav-client-switcher" ref={ref}>
+      <button
+        className={`nav-client-btn ${open ? 'open' : ''}`}
+        onClick={() => setOpen(o => !o)}
+      >
+        <div className="nav-client-avatar" style={{ background: activeClient ? `linear-gradient(135deg, ${riskColor}, #3E3452)` : '#E5E7EB' }}>
+          {activeClient ? (activeClient.name || '?')[0].toUpperCase() : '?'}
+        </div>
+        <div className="nav-client-info">
+          <div className="nav-client-name">{activeClient ? activeClient.name : 'No client'}</div>
+          {activeClient?.risk_profile && (
+            <div className="nav-client-risk" style={{ color: riskColor }}>
+              {RISK_SHORT[activeClient.risk_profile]}
+            </div>
+          )}
+        </div>
+        <span className="nav-client-caret">▾</span>
+      </button>
+
+      {open && (
+        <div className="nav-client-dropdown">
+          {/* Confirm delete dialog */}
+          {confirmDelete && (
+            <div className="nav-client-confirm">
+              <div className="nav-client-confirm-text">
+                Delete <strong>{confirmDelete.name}</strong>? This cannot be undone.
+              </div>
+              <div className="nav-client-confirm-btns">
+                <button className="nav-client-confirm-cancel" onClick={() => setConfirmDelete(null)}>Cancel</button>
+                <button className="nav-client-confirm-delete" onClick={confirmDeleteClient}>Delete</button>
+              </div>
+            </div>
+          )}
+
+          {!confirmDelete && (clients && clients.length > 0 ? (
+            clients.map(c => (
+              <div
+                key={c.id}
+                className={`nav-client-item ${activeClient?.id === c.id ? 'active' : ''}`}
+                onClick={() => {
+                  onSelectClient(c);
+                  setOpen(false);
+                  navigate('/client');
+                }}
+              >
+                <div className="nav-client-item-avatar" style={{
+                  background: c.risk_profile
+                    ? `linear-gradient(135deg, ${RISK_COLORS[c.risk_profile]}, #3E3452)`
+                    : '#E5E7EB'
+                }}>
+                  {(c.name || '?')[0].toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="nav-client-item-name">{c.name}</div>
+                  {c.risk_profile && (
+                    <div className="nav-client-item-risk" style={{ color: RISK_COLORS[c.risk_profile] }}>
+                      {RISK_SHORT[c.risk_profile]}
+                    </div>
+                  )}
+                </div>
+                {activeClient?.id === c.id && <span className="nav-client-item-check">✓</span>}
+                <button
+                  className="nav-client-item-delete"
+                  onClick={e => handleDelete(e, c)}
+                  title="Delete client"
+                >
+                  🗑
+                </button>
+              </div>
+            ))
+          ) : (
+            <div className="nav-client-empty">No clients yet</div>
+          ))}
+          <div className="nav-client-divider" />
+          <button
+            className="nav-client-new"
+            onClick={() => {
+              setOpen(false);
+              onNewClient?.();
+              navigate('/client/profile');
+            }}
+          >
+            + New client
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const NAV_SECTIONS = [
   {
@@ -14,29 +152,36 @@ const NAV_SECTIONS = [
   {
     section: 'ANALYSE',
     items: [
-      { path: '/home',                 label: 'Fund Detail',        icon: HomeIcon },
-      { path: '/peer-comparison',      label: 'Compare Funds',      icon: PeerIcon },
+      { path: '/home',                 label: 'Fund Detail',          icon: HomeIcon },
+      { path: '/peer-comparison',      label: 'Compare Funds',        icon: PeerIcon },
       { path: '/peer-group-analytics', label: 'Peer Group Analytics', icon: PeerGroupIcon },
+    ],
+  },
+  {
+    section: 'CLIENT',
+    items: [
+      { path: '/client',         label: 'Client Dashboard',         icon: ClientDashIcon },
+      { path: '/client/profile', label: 'Client Investment Profile', icon: ClientProfileIcon },
     ],
   },
   {
     section: 'BUILD',
     items: [
-      { path: '/portfolio',          label: 'Portfolio Builder',   icon: PortfolioIcon },
-      { path: '/models',             label: 'Model Portfolios',    icon: ModelsIcon },
-      { path: '/retirement-planner', label: 'Retirement Planner',  icon: RetirementIcon },
+      { path: '/portfolio',          label: 'Portfolio Builder',  icon: PortfolioIcon },
+      { path: '/models',             label: 'Model Portfolios',   icon: ModelsIcon },
+      { path: '/retirement-planner', label: 'Retirement Planner', icon: RetirementIcon },
     ],
   },
   {
     section: 'CALCULATE',
     items: [
-      { path: '/simulator',          label: 'SIP Simulator',       icon: SimulatorIcon },
-      { path: '/rolling-analytics',  label: 'Rolling Analytics',   icon: RollingIcon },
+      { path: '/simulator',         label: 'SIP Simulator',    icon: SimulatorIcon },
+      { path: '/rolling-analytics', label: 'Rolling Analytics', icon: RollingIcon },
     ],
   },
 ];
 
-export default function Navbar() {
+export default function Navbar({ activeClient, clients, onSelectClient, onNewClient, onDeleteClient }) {
   return (
     <nav className="navbar">
       <div className="navbar-logo">
@@ -61,6 +206,20 @@ export default function Navbar() {
         {NAV_SECTIONS.map(({ section, items }) => (
           <React.Fragment key={section}>
             <li className="nav-section-label">{section}</li>
+
+            {/* Client switcher appears inside CLIENT section */}
+            {section === 'CLIENT' && (
+              <li className="nav-client-switcher-wrap">
+                <NavClientSwitcher
+                  activeClient={activeClient}
+                  clients={clients}
+                  onSelectClient={onSelectClient}
+                  onNewClient={onNewClient}
+                  onDeleteClient={onDeleteClient}
+                />
+              </li>
+            )}
+
             {items.map(({ path, label, icon: Icon }) => (
               <li key={path}>
                 <NavLink to={path} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
@@ -160,6 +319,22 @@ function RetirementIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 12a9 9 0 1018 0 9 9 0 00-18 0z"/><path d="M12 7v5l3 2"/>
+    </svg>
+  );
+}
+function ClientDashIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+    </svg>
+  );
+}
+function ClientProfileIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+      <circle cx="12" cy="7" r="4"/>
     </svg>
   );
 }
