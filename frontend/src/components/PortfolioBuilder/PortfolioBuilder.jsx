@@ -72,7 +72,8 @@ export default function PortfolioBuilder({ selectedDate }) {
   const [selectedPortfolio, setSelectedPortfolio] = useState('original');
   const [snapshots, setSnapshots] = useState({});
   const [optimiserResult, setOptimiserResult] = useState(null);
-  const [analyseData, setAnalyseData] = useState({ stressData: null, overlapData: null, corrData: null });
+  const [analyseData, setAnalyseData] = useState({ stressData: null, overlapData: null, corrData: null, bmStress: null });
+  const updateAnalyseData = React.useCallback(patch => setAnalyseData(prev => ({ ...prev, ...patch })), []);
 
   // Reset originalWeights and optimiserResult when fund composition changes
   const fundIsins = funds.map(f => f.isin).sort().join(',');
@@ -262,7 +263,7 @@ export default function PortfolioBuilder({ selectedDate }) {
               ips={ips}
               onEdit={() => setActiveStep(2)}
               onOptimise={() => { markDone(3); setActiveStep(4); }}
-              onDataUpdate={setAnalyseData}
+              onDataUpdate={updateAnalyseData}
               setWeights={setWeights}
               setFunds={setFunds}
               setSnapshots={setSnapshots}

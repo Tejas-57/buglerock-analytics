@@ -640,8 +640,8 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
   // Lift computed data up to PortfolioBuilder for PDF export
   React.useEffect(() => {
-    if (onDataUpdate) onDataUpdate({ stressData, overlapData, corrData });
-  }, [stressData, overlapData, corrData]);
+    if (onDataUpdate) onDataUpdate({ stressData, overlapData, corrData, bmStress });
+  }, [stressData, overlapData, corrData, bmStress]);
 
   const corrPortfolioKey = useRef(null);
 
