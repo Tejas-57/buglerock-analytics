@@ -134,7 +134,7 @@ export default function PDFProposal({ funds, weights, originalWeights, snapshots
   // Merge activeClient into ips — activeClient fields take priority
   const mergedIPS = mergeIPS(activeClient, ips);
   // Use CIP benchmarks if available and no benchmarks passed directly
-  const effectiveBenchmarks = effectiveBenchmarks.length > 0 ? benchmarks : (mergedIPS.benchmarks || []);
+  const effectiveBenchmarks = benchmarks.length > 0 ? benchmarks : (mergedIPS.benchmarks || []);
   const hasOpt = Object.keys(originalWeights || {}).length > 0;
   const { stressData, overlapData, corrData, bmStress } = analyseData || {};
 
