@@ -386,11 +386,17 @@ export function rtRunSimulation(IN, NSIM) {
   const deps = base.depletionYrs;
   R.medianDepAge = base.sortedDep.length ? IN.retAge + base.sortedDep[Math.floor(base.sortedDep.length / 2)] : null;
 
-  // Build goalsByYear and lumpsByYear maps (keyed by years-from-now) for report
+  // Build goalsByYear using inflation-adjusted future values (same as simulation uses)
+  // g.amt is today's ₹ — we must inflate to the goal year to show correct cashflow amounts
   const goalsByYear = {};
+  const goalInfl = fullIN.infl || 0.06;
   (fullIN.goals || []).forEach(g => {
     const yr = Math.round(g.age - fullIN.age);
-    if (yr >= 0) goalsByYear[yr] = (goalsByYear[yr] || 0) + (g.amt || 0);
+    if (yr >= 0) {
+      const gInfl = g.infl != null ? g.infl : goalInfl;
+      const fv = (g.amt || 0) * Math.pow(1 + gInfl, yr);
+      goalsByYear[yr] = (goalsByYear[yr] || 0) + fv;
+    }
   });
   const lumpsByYear = {};
   (fullIN.lumps || []).forEach(l => {
