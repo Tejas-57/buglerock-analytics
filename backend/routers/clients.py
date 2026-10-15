@@ -101,8 +101,15 @@ def _row_to_dict(row) -> dict:
 def list_clients(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     _migrate_clients_table(db)
     rows = db.execute(text("""
-        SELECT * FROM clients WHERE created_by = :email ORDER BY updated_at DESC
+        SELECT * FROM clients
+        WHERE created_by = :email OR created_by IS NULL
+        ORDER BY updated_at DESC
     """), {"email": current_user["email"]}).fetchall()
+    # Backfill created_by for any null rows — claim them for this user
+    db.execute(text("""
+        UPDATE clients SET created_by = :email WHERE created_by IS NULL
+    """), {"email": current_user["email"]})
+    db.commit()
     return {"clients": [_row_to_dict(r) for r in rows]}
 
 

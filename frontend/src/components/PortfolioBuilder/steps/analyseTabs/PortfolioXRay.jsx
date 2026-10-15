@@ -121,6 +121,8 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
           secBreakdown:    d.sec_breakdown,
           avgCqLabel:      d.avg_credit_quality,
           totalDebtWeight: d.debt_weight_pct,
+          avgDuration:     d.avg_duration,
+          avgMaturity:     d.avg_maturity,
         });
         setDebtLoading(false);
       })
@@ -396,25 +398,21 @@ export default function PortfolioXRay({ B, AC, funds, weights, snapshots = {}, b
                   </div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 12 }}>Sector Breakdown</div>
-                  {debtComposition.secBreakdown.map(({ label, pct }) => {
-                    const clr = pct === 0 ? 'var(--text-muted)' : label === 'Government' ? '#3E3452' : label === 'Corporate' ? '#912F63' : label === 'Cash & Equivalents' ? '#A795AE' : '#6D5479';
-                    return (
-                      <div key={label} style={{ marginBottom: 10 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
-                          <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{label}</span>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: clr }}>{pct.toFixed(1)}%</span>
-                        </div>
-                        <div style={{ background: 'var(--bg-secondary)', borderRadius: 4, height: 5, overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: Math.min(100, pct).toFixed(1) + '%', background: clr, borderRadius: 4, transition: 'width .3s' }} />
-                        </div>
-                      </div>
-                    );
-                  })}
+                  <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--brand-primary)', marginBottom: 12 }}>Debt Parameters</div>
+                  {[
+                    ['Modified Duration', debtComposition.avgDuration != null ? `${debtComposition.avgDuration.toFixed(2)} yrs` : '—'],
+                    ['Avg Maturity',      debtComposition.avgMaturity != null ? `${debtComposition.avgMaturity.toFixed(2)} yrs` : '—'],
+                    ['Debt Weight',       `${debtComposition.totalDebtWeight?.toFixed(1)}%`],
+                  ].map(([label, val]) => (
+                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                      <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{label}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: '#3E3452', fontFamily: 'var(--font-mono)' }}>{val}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
               <div style={{ padding: '8px 20px 12px', fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', fontStyle: 'italic' }}>
-                Computed from underlying bond holdings of all debt and hybrid funds, weighted by portfolio allocation × debt fraction. Percentages are rebased to 100% of the debt sleeve — not the total portfolio.
+                Credit quality sourced from Morningstar fund-level data, weighted by portfolio allocation × bond fraction. Percentages are rebased to 100% of the debt sleeve.
               </div>
             </div>
           )}

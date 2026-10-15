@@ -497,123 +497,129 @@ def get_debt_composition(
     bond_pcts: str = Query(..., description="Comma-separated bond_pct per fund (0-100)"),
 ):
     """
-    Compute weighted debt portfolio composition in a single DB query.
-    Returns credit quality breakdown and debt sector breakdown,
-    rebased to 100% of the debt sleeve.
+    Compute weighted debt portfolio composition using daily_fund_data (Morningstar-sourced).
+    Uses fund-level credit quality fields — same source as Fund Detail tab.
+    Returns credit quality breakdown and avg credit quality, rebased to 100% of the debt sleeve.
     """
-    from models.database import SessionLocal, FundHolding
+    from models.database import SessionLocal, DailyFundData
     from sqlalchemy import text
 
-    isin_list    = [x.strip() for x in isins.split(",")    if x.strip()]
-    weight_list  = [float(x.strip()) for x in weights.split(",")  if x.strip()]
-    bond_pct_list= [float(x.strip()) for x in bond_pcts.split(",") if x.strip()]
+    isin_list     = [x.strip() for x in isins.split(",")   if x.strip()]
+    weight_list   = [float(x.strip()) for x in weights.split(",")  if x.strip()]
+    bond_pct_list = [float(x.strip()) for x in bond_pcts.split(",") if x.strip()]
 
     if not (len(isin_list) == len(weight_list) == len(bond_pct_list)):
         from fastapi import HTTPException
         raise HTTPException(400, "isins, weights and bond_pcts must have same length")
 
-    # Effective debt weight per fund
-    weight_map   = dict(zip(isin_list, weight_list))
-    bond_pct_map = dict(zip(isin_list, bond_pct_list))
-
     db = SessionLocal()
     try:
-        # Single query — fetch all bond holdings for all funds at once
-        rows = db.query(FundHolding).filter(
-            FundHolding.isin.in_(isin_list),
-            FundHolding.holding_type.in_(["B", "BT", "BD", "DS", "CR", "CA"]),
-            FundHolding.weighting != None,
-            FundHolding.weighting > 0,
-        ).all()
+        # Fetch latest daily data for all funds in one query
+        rows = db.execute(text("""
+            SELECT DISTINCT ON (isin)
+                isin,
+                credit_aaa, credit_aa, credit_a, credit_bbb,
+                credit_bb, credit_b, credit_below_b, credit_nr,
+                avg_credit_quality,
+                modified_duration, avg_maturity
+            FROM daily_fund_data
+            WHERE isin = ANY(:isins)
+            ORDER BY isin, data_date DESC
+        """), {"isins": isin_list}).fetchall()
 
-        # Credit quality bucket mapping
-        CQ_MAP = {
-            'sovereign': 'AAA / Equiv', 'crisil aaa': 'AAA / Equiv', 'icra aaa': 'AAA / Equiv',
-            'care aaa': 'AAA / Equiv', 'ind aaa': 'AAA / Equiv',
-            'crisil aa+': 'AA', 'crisil aa': 'AA', 'crisil aa-': 'AA',
-            'icra aa+': 'AA', 'icra aa': 'AA', 'icra aa-': 'AA',
-            'care aa+': 'AA', 'care aa': 'AA', 'care aa-': 'AA',
-            'ind aa+': 'AA', 'ind aa': 'AA', 'ind aa-': 'AA',
-            'crisil a+': 'A', 'crisil a': 'A', 'crisil a-': 'A',
-            'icra a+': 'A', 'icra a': 'A', 'icra a-': 'A',
-            'care a+': 'A', 'care a': 'A', 'care a-': 'A',
-            'crisil bbb': 'BBB', 'icra bbb': 'BBB', 'care bbb': 'BBB',
-            'crisil bb': 'BB', 'icra bb': 'BB',
-            'crisil b': 'B', 'icra b': 'B',
-        }
-        CQ_ORDER  = ['AAA / Equiv', 'AA', 'A', 'BBB', 'BB', 'B', 'Below B', 'Not Rated']
-        CQ_SCORE  = {'AAA / Equiv': 7, 'AA': 6, 'A': 5, 'BBB': 4, 'BB': 3, 'B': 2, 'Below B': 1, 'Not Rated': 0}
-        TYPE_SEC  = {
-            'BT': 'Government', 'BD': 'Government', 'DS': 'Government',
-            'B':  'Corporate',
-            'CA': 'Cash & Equivalents', 'CR': 'Cash & Equivalents',
-        }
-        SEC_ORDER = ['Government', 'Corporate', 'Cash & Equivalents', 'Municipal', 'Securitized', 'Derivative', 'Other']
+        fund_data = {r.isin: r for r in rows}
 
-        # Group rows by fund isin
+        CQ_FIELDS = [
+            ("credit_aaa",     "AAA / Equiv"),
+            ("credit_aa",      "AA"),
+            ("credit_a",       "A"),
+            ("credit_bbb",     "BBB"),
+            ("credit_bb",      "BB"),
+            ("credit_b",       "B"),
+            ("credit_below_b", "Below B"),
+            ("credit_nr",      "Not Rated"),
+        ]
+        CQ_ORDER = ["AAA / Equiv", "AA", "A", "BBB", "BB", "B", "Below B", "Not Rated"]
+        CQ_SCORE = {"AAA / Equiv": 7, "AA": 6, "A": 5, "BBB": 4, "BB": 3, "B": 2, "Below B": 1, "Not Rated": 0}
+
         from collections import defaultdict
-        by_fund = defaultdict(list)
-        for r in rows:
-            by_fund[r.isin].append(r)
+        cq_totals    = defaultdict(float)
+        total_debt_w = 0.0
+        avg_cq_num   = 0.0
+        dur_num      = 0.0
+        mat_num      = 0.0
+        dur_denom    = 0.0
 
-        cq_totals  = defaultdict(float)
-        sec_totals = defaultdict(float)
-        total_debt_w   = 0.0
-        avg_cq_num     = 0.0
-
-        for isin in isin_list:
-            fund_w   = weight_map.get(isin, 0) / 100.0
-            bond_pct = bond_pct_map.get(isin, 0) / 100.0
-            eff_w    = fund_w * bond_pct          # effective debt weight (0–1)
+        for isin, port_w, bond_pct in zip(isin_list, weight_list, bond_pct_list):
+            fund_w  = port_w / 100.0
+            b_pct   = bond_pct / 100.0
+            eff_w   = fund_w * b_pct   # effective debt weight (0-1)
             if eff_w <= 0:
                 continue
 
-            fund_rows = by_fund.get(isin, [])
-            if not fund_rows:
+            row = fund_data.get(isin)
+            if not row:
                 continue
 
-            holding_total = sum(float(r.weighting) for r in fund_rows) or 1.0
+            total_debt_w += eff_w * 100  # always count debt weight
 
-            for r in fund_rows:
-                h_w = (float(r.weighting) / holding_total) * eff_w * 100  # scaled weight
+            # Credit quality — use Morningstar fund-level fields
+            # These are already % of the fund's bond portfolio
+            cq_sum = 0.0
+            for field, bucket in CQ_FIELDS:
+                val = getattr(row, field, None)
+                if val is None or (isinstance(val, float) and val != val):
+                    continue
+                contrib = (val / 100.0) * eff_w * 100
+                cq_totals[bucket] += contrib
+                avg_cq_num        += CQ_SCORE[bucket] * contrib
+                cq_sum            += contrib
 
-                # Credit quality
-                cq_raw  = (r.indian_credit_quality or '').lower().strip()
-                bucket  = CQ_MAP.get(cq_raw, 'Not Rated')
-                cq_totals[bucket]  += h_w
-                avg_cq_num         += CQ_SCORE.get(bucket, 0) * h_w
+            # Remainder (CQ fields don't sum to 100%) → Not Rated
+            remainder = eff_w * 100 - cq_sum
+            if remainder > 0.5:
+                cq_totals['Not Rated'] += remainder
 
-                # Debt sector
-                sector = TYPE_SEC.get(r.holding_type, 'Other')
-                sec_totals[sector] += h_w
-
-            total_debt_w += eff_w * 100
+            # Duration and maturity
+            if row.modified_duration is not None:
+                dur_num   += row.modified_duration * eff_w
+                dur_denom += eff_w
+            if row.avg_maturity is not None:
+                mat_num += row.avg_maturity * eff_w
 
         if total_debt_w <= 0:
             return {"cq_breakdown": [], "sec_breakdown": [], "avg_credit_quality": None, "debt_weight_pct": 0}
 
         # Normalise to debt sleeve %
-        cq_breakdown  = [
+        cq_breakdown = [
             {"label": b, "pct": round(cq_totals.get(b, 0) / total_debt_w * 100, 1)}
             for b in CQ_ORDER
         ]
-        sec_breakdown = [
-            {"label": s, "pct": round(sec_totals.get(s, 0) / total_debt_w * 100, 1)}
-            for s in SEC_ORDER
-        ]
 
-        # Average credit quality label
-        avg_score = avg_cq_num / total_debt_w
-        avg_label = ('AAA' if avg_score >= 6.5 else 'AA+' if avg_score >= 5.5
-                     else 'AA' if avg_score >= 5 else 'AA-' if avg_score >= 4.5
-                     else 'A' if avg_score >= 4 else 'BBB' if avg_score >= 3
-                     else 'BB' if avg_score >= 2 else 'B')
+        # Average credit quality score → label
+        avg_score = avg_cq_num / total_debt_w if total_debt_w > 0 else 0
+        avg_label = (
+            "AAA" if avg_score >= 6.5 else
+            "AA+" if avg_score >= 5.75 else
+            "AA"  if avg_score >= 5.25 else
+            "AA-" if avg_score >= 4.75 else
+            "A+"  if avg_score >= 4.5  else
+            "A"   if avg_score >= 4.0  else
+            "BBB" if avg_score >= 3.0  else
+            "BB"  if avg_score >= 2.0  else "B"
+        )
+
+        # Weighted duration, YTM, maturity
+        avg_duration = round(dur_num / dur_denom, 2) if dur_denom > 0 else None
+        avg_maturity = round(mat_num / dur_denom, 2) if dur_denom > 0 else None
 
         return {
-            "cq_breakdown":      cq_breakdown,
-            "sec_breakdown":     sec_breakdown,
+            "cq_breakdown":       cq_breakdown,
+            "sec_breakdown":      [],
             "avg_credit_quality": avg_label,
-            "debt_weight_pct":   round(total_debt_w, 1),
+            "debt_weight_pct":    round(total_debt_w, 1),
+            "avg_duration":       avg_duration,
+            "avg_maturity":       avg_maturity,
         }
 
     finally:
