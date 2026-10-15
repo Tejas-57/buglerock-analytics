@@ -92,12 +92,15 @@ export function rtRunMC(IN, overrideSIP) {
   const netBeforeTax = Math.max(0, lifestyleAtRet - otherIncAtRet - npsAnnualAnnuity);
   const firstNeed = netBeforeTax > 0 ? netBeforeTax / (1 - IN.tax) : 0;
 
+  // Inflate one-time retirement expense from today's ₹ to retirement year
+  const oneTimeFV = (IN.oneTime || 0) * Math.pow(1 + IN.infl, yrsAccum);
+
   // Required corpus (closed-form approximation)
   const g_r = IN.postMu - IN.infl;
   let reqCorpus = Math.abs(g_r) < 0.001
     ? firstNeed * yrsRetire
     : firstNeed * (1 - Math.pow((1 + IN.infl) / (1 + IN.postMu), yrsRetire)) / (IN.postMu - IN.infl);
-  reqCorpus += (IN.oneTime || 0);
+  reqCorpus += oneTimeFV;
 
   // Late-retirement glide targets (default to post-ret if not provided)
   const lateMu = IN.lateMu != null ? IN.lateMu : IN.postMu;
@@ -138,7 +141,7 @@ export function rtRunMC(IN, overrideSIP) {
 
     // Add EPF + NPS at retirement
     c += epfAtRet + npsLump;
-    if (IN.oneTime) c -= IN.oneTime;
+    if (IN.oneTime) c -= oneTimeFV;
     corpusAtRet.push(c);
 
     // ── Retirement drawdown ──

@@ -233,7 +233,8 @@ export function rtBuildFullSections(R) {
     if (sipIn) sipA2 *= (1 + IN.stepUp);
     const epfIn = ca === IN.retAge ? R.epfAtRet + R.npsLump : 0;
     const li2 = (R.lumpsByYear || {})[y] || 0, gi2 = (R.goalsByYear || {})[y] || 0;
-    const oneT2 = ca === IN.retAge && IN.oneTime ? IN.oneTime : 0;
+    const oneTimeFV2 = (IN.oneTime || 0) * Math.pow(1 + IN.infl, IN.retAge - IN.age);
+    const oneT2 = ca === IN.retAge && IN.oneTime ? oneTimeFV2 : 0;
     let wd2 = 0;
     if (isRet2) {
       const bn2 = R.annualExpToday * Math.pow(1 + IN.infl, y);
@@ -258,7 +259,9 @@ export function rtBuildFullSections(R) {
 
   // ── Goals table ──
   const goalRows = IN.goals.filter((g) => g.amt > 0).map((g, i) => {
-    const yr = g.age - IN.age, fv = g.amt * Math.pow(1 + IN.infl, yr);
+    const yr = g.age - IN.age;
+    const gInfl = g.infl != null ? g.infl : IN.infl; // use per-goal inflation if set
+    const fv = g.amt * Math.pow(1 + gInfl, yr);
     const p50AtGoal = R.P50[yr] || 0;
     const feasible = p50AtGoal > fv * 1.25;
     return `<tr>`

@@ -446,7 +446,7 @@ function InputForm({ f, set, setForm, goals, setGoals, lumps, setLumps, onRun, r
               <option value="0">No — fixed</option>
             </select>
           </div>
-          <Field f={f} set={set} k="onetime" label="One-time expense at retirement (₹)" min="0" />
+          <Field f={f} set={set} k="onetime" label="One-time expense at retirement — today's ₹ (auto-inflated to retirement year)" min="0" />
           <Field f={f} set={set} k="tax" label="Tax on withdrawals (%)" min="0" max="30" step="1" />
         </div>
         <div style={{ marginTop: 16 }}>
