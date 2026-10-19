@@ -8,6 +8,8 @@ AI-native investment analytics platform for BugleRock Capital. Enables wealth ma
 
 These rules apply to every Claude session working on this project. No exceptions.
 
+> **Claude Code (VS Code) workflow:** work on a branch, open a pull request, test the Vercel preview, then merge to `main`. Rules 1 and 2 below only apply to the browser workflow; Claude Code edits files in place.
+
 ### 1. Full files only
 When making any change to a file, always output the **complete file** — never diffs, never partial snippets, never "replace lines X–Y". The full file goes to `/mnt/user-data/outputs/` so it can be downloaded and replaced directly.
 
