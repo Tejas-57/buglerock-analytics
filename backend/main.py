@@ -210,6 +210,12 @@ async def startup():
     except Exception as e:
         logger.warning(f"Benchmark Returns migration failed: {e}")
 
+    # Background jobs write to the database. Default is on (production); set
+    # RUN_BACKGROUND_JOBS=false in a local .env to avoid touching a shared DB.
+    if os.getenv("RUN_BACKGROUND_JOBS", "true").strip().lower() in ("0", "false", "no", "off"):
+        logger.info("RUN_BACKGROUND_JOBS is off — skipping parser check, Gmail poll and crons")
+        return
+
     await check_parser_version()
     from services.morningstar_service import seed_accesscode_from_env
     seed_accesscode_from_env()
