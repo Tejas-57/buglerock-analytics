@@ -1,8 +1,19 @@
 {
   "permissions": {
     "allow": [
-      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\tejas.s_buglerock\\\\buglerock-analytics\" -Force)",
-      "Bash(Select-Object Name, Mode)"
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(npm run build:*)",
+      "Bash(python -m py_compile:*)"
+    ],
+    "deny": [
+      "Read(./backend/.env)",
+      "Read(./backend/credentials/**)",
+      "Bash(git push origin main:*)",
+      "Bash(git push --force:*)"
     ]
   }
 }
