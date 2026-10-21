@@ -10,7 +10,7 @@ Mutual-fund research and portfolio platform. React frontend (Vercel, `fundiq.bug
 - Edit files in place. The "full files only" and "no multi-line terminal code" rules in the README are for the browser workflow and do not apply here.
 
 ## Running locally
-- Backend: `cd backend && uvicorn main:app --reload --port 8000`
+- Backend: `cd backend && venv\scripts\activate && python main.py` (port 8000, auto-reload)
 - Frontend: `cd frontend && npm start` (http://localhost:3000)
 - Frontend build check: `cd frontend && npm run build`
 - Node dependency for PPT export: `cd backend && npm install`
