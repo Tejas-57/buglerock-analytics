@@ -34,10 +34,12 @@ USERS = [
     ("BR Analytics",     "analytics@buglerock.asia",  "admin", True),   # service account — no email
     ("Tejas Singh",      "tejas.s@buglerock.asia",    "admin", False),
     ("Divyansh Agarwal", "divyansh.a@buglerock.asia", "user",  False),
-    ("Sujaya Lakshmi",   "sujaya.l@buglerock.asia",   "user",  False),
+    ("Sujaya Lakshmi",   "sujaya.l@buglerock.asia",   "admin",  False),
     ("Arjun Prasanna",   "arjun.p@buglerock.asia",    "user",  False),
     ("Pranav Shenoy",    "pranav.s@buglerock.asia",   "user",  False),
     ("Ishwar Raj",       "ishwar.r@buglerock.asia",   "user",  False),
+    ("Kiran Surve",      "kiran.s@buglerock.asia",   "user",  False),
+    ("Medha",            "intern.blr2@buglerock.asia", "user", False ),
 ]
 
 db = SessionLocal()
