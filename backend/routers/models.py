@@ -5,14 +5,16 @@ BugleRock Multi-Asset Model Portfolios — BL + CVaR-LP constraint solver.
 Universe: R1/R2 ranked funds only (Active Equity, Debt, Hybrid).
 Commodities/Alternates bucket is wired in for when Gold/Silver funds get ranked.
 
-Solver: Black-Litterman posterior → CVaR-LP (Rockafellar-Uryasev) via HiGHS.
-Fallback: scipy.optimize.linprog, method="highs" (pure feasibility LP, objective=0).
+Solver (SOLVER_MODE = "lp"): scipy.optimize.linprog, method="highs" — pure feasibility LP,
+objective=0 (rulebook sections 6-8).
+BL+CVaR-LP (Black-Litterman posterior → Rockafellar-Uryasev CVaR) is kept in this file but
+switched off. Set SOLVER_MODE = "bl_cvar" to re-enable it; the LP then acts as its fallback.
 
 Methodology: BugleRock Model Portfolio Construction Architecture v1 (Sep 2026)
   Changes from Aug 2026 rulebook:
     - Gold fixed allocation per profile (not a range)
     - AMC cap reduced 35% → 30%
-    - Per-fund cap unified to min(100/6, 20%) = 16.67%
+    - Per-fund cap unified to 15% for all models
     - Min holding profile-scaled: 4/4/3/3/4%
     - Down-capture ceilings corrected: 92/90/88/86/84
     - Return floor: hard constraint (profile-scaled), relaxes with governance flag
@@ -117,20 +119,23 @@ DUAL_ALLOWED_CATS = {
 }
 
 # ── Model definitions ──────────────────────────────────────────────────────────
+# Per-fund cap override for Conservative / Mod Conservative (default is MAX_W / PER_FUND_CAP, 15%)
+CONSERVATIVE_MAX_W = round(100.0 / 6, 4)
+
 MODELS = {
     "conservative": {
         # BL+CVaR constraint params
         "dncap_ceiling": 92, "stress_ceiling": -10,
-        "max_funds": 10, "min_holding_pct": 4,          # doc: 4% for conservative
+        "cvar_max_funds": 10, "min_holding_pct": 4,          # doc: 4% for conservative
         "return_floor": 6.5,                             # % annualised, hard constraint
         "mid_small_ceiling": 15,                         # % absolute portfolio look-through
         "min_aaa_aa_pct": 89,                            # % of debt sleeve min AAA+AA
         "max_duration": 2.5,                             # years, weighted mod duration
         "gold_fixed": 5,                                 # % fixed gold allocation (doc)
         "label": "Conservative", "risk": "Low", "risk_score": 1,
-        "horizon": "3+ years", "volatility": "5–6%", "max_drawdown": "5–10%",
+        "horizon": "3+ years", "volatility": "5–6%", "risk_lambda": 2.0, "max_drawdown": "5–10%",
         "suitability": "A low-volatility portfolio designed for capital preservation and stable returns, emphasizing fixed income with limited equity exposure. Ideal for investors with lower risk tolerance.",
-        "eq_lo": 22, "eq_hi": 28, "debt_lo": 62, "debt_hi": 73,
+        "eq_lo": 15, "eq_hi": 25, "debt_lo": 75, "debt_hi": 85,
         "cap_large": 75, "cap_mid": 15, "cap_small": 10,
         "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [1, 2],
         "allowed_debt_cats": [
@@ -146,7 +151,7 @@ MODELS = {
             "Cat: Flexi Cap Funds",
         ],
         "max_debt_funds": 3,
-        "eq_per_cat": 1, "hyb_per_cat": 2, "min_funds": 7,
+        "eq_per_cat": 1, "hyb_per_cat": 2, "min_funds": 7, "max_w": CONSERVATIVE_MAX_W,
         "hyb_cat_limits": {
             "India Fund Conservative Allocation": 2,
             "India Fund Equity Savings - Conservative": 2,
@@ -158,16 +163,16 @@ MODELS = {
     },
     "mod_conservative": {
         "dncap_ceiling": 90, "stress_ceiling": -14,     # doc: 90 (was 92)
-        "max_funds": 10, "min_holding_pct": 4,
+        "cvar_max_funds": 10, "min_holding_pct": 4,
         "return_floor": 7.0,
         "mid_small_ceiling": 20,
         "min_aaa_aa_pct": 85,
         "max_duration": 3.0,
         "gold_fixed": 5,
         "label": "Moderately Conservative", "risk": "Low–Moderate", "risk_score": 2,
-        "horizon": "3–5 years", "volatility": "6–7%", "max_drawdown": "8–12%",
+        "horizon": "3–5 years", "volatility": "6–7%", "risk_lambda": 1.5, "max_drawdown": "8–12%",
         "suitability": "Modest growth with limited equity exposure. Short-to-medium duration debt balanced with hybrid allocation for cautious investors wanting more than pure debt.",
-        "eq_lo": 33, "eq_hi": 42, "debt_lo": 52, "debt_hi": 62,
+        "eq_lo": 25, "eq_hi": 35, "debt_lo": 65, "debt_hi": 75,
         "cap_large": 70, "cap_mid": 20, "cap_small": 10,
         "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [1, 2, 3],
         "allowed_equity_cats": [
@@ -176,7 +181,7 @@ MODELS = {
             "Cat: Multi Cap Funds",
         ],
         "max_debt_funds": 3,
-        "eq_per_cat": 2, "hyb_per_cat": 2, "min_funds": 7,
+        "eq_per_cat": 2, "hyb_per_cat": 2, "min_funds": 7, "max_w": CONSERVATIVE_MAX_W,
         "hyb_cat_limits": {
             "India Fund Dynamic Asset Allocation": 2,
             "India Fund Equity Savings - Aggressive": 2,
@@ -189,16 +194,16 @@ MODELS = {
     },
     "balanced": {
         "dncap_ceiling": 88, "stress_ceiling": -28,     # doc: 88 (was 92)
-        "max_funds": 11, "min_holding_pct": 3,          # doc: 3% for balanced
+        "cvar_max_funds": 11, "min_holding_pct": 3,          # doc: 3% for balanced
         "return_floor": 7.5,
         "mid_small_ceiling": 30,
         "min_aaa_aa_pct": 80,
         "max_duration": 4.0,
         "gold_fixed": 6,                                 # doc: 6% for balanced
         "label": "Balanced", "risk": "Moderate", "risk_score": 3,
-        "horizon": "3–5 years", "volatility": "6–9%", "max_drawdown": "10–15%",
+        "horizon": "3–5 years", "volatility": "6–9%", "risk_lambda": 1.0, "max_drawdown": "10–15%",
         "suitability": "Moderate growth portfolio with reduced volatility, balancing capital appreciation and income generation. Ideal for investors with moderate risk appetite and medium-term goals.",
-        "eq_lo": 50, "eq_hi": 60, "debt_lo": 40, "debt_hi": 50,
+        "eq_lo": 45, "eq_hi": 55, "debt_lo": 45, "debt_hi": 55,
         "cap_large": 60, "cap_mid": 25, "cap_small": 15, "cap_tol": 15,
         "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [1, 2, 3, 4],
         "allowed_equity_cats": [
@@ -225,21 +230,21 @@ MODELS = {
     },
     "mod_aggressive": {
         "dncap_ceiling": 86, "stress_ceiling": -30,     # doc: 86 (was 88)
-        "max_funds": 14, "min_holding_pct": 3,          # doc: 3% for mod_aggressive
+        "cvar_max_funds": 14, "min_holding_pct": 3,          # doc: 3% for mod_aggressive
         "return_floor": 8.0,
         "mid_small_ceiling": 40,
         "min_aaa_aa_pct": 75,
         "max_duration": 5.0,
         "gold_fixed": 7,                                 # doc: 7%
         "label": "Moderately Aggressive", "risk": "Moderate–High", "risk_score": 4,
-        "horizon": "5–7 years", "volatility": "8–12%", "max_drawdown": "12–18%",
+        "horizon": "5–7 years", "volatility": "8–12%", "risk_lambda": 0.5, "max_drawdown": "12–18%",
         "suitability": "Growth-tilted portfolio with a debt ballast. Primarily equity across the cap spectrum, complemented by aggressive hybrid funds and minimal fixed income.",
-        "eq_lo": 68, "eq_hi": 76, "debt_lo": 22, "debt_hi": 33,
+        "eq_lo": 65, "eq_hi": 75, "debt_lo": 25, "debt_hi": 35,
         "cap_large": 50, "cap_mid": 27, "cap_small": 23,
         "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [2, 3, 4],
         "allowed_equity_cats": None,
         "max_debt_funds": 2,
-        "eq_per_cat": 2, "hyb_per_cat": 1,
+        "eq_per_cat": 2, "hyb_per_cat": 2,
         "eq_cat_limits": {
             # Core equity categories: Large-Cap, Large&Mid, Flexi, Mid, Small → 2 each (eq_per_cat default)
             # All others capped at 1
@@ -248,9 +253,8 @@ MODELS = {
             "Cat: Contra / Value Funds": 1,
         },
         "hyb_cat_limits": {
-            # Max 1 per category — 3 hybrid slots total
-            "India Fund Dynamic Asset Allocation":    1,
-            "India Fund Aggressive Allocation":       1,
+            "India Fund Dynamic Asset Allocation":    2,
+            "India Fund Aggressive Allocation":       2,
             "India Fund Equity Savings - Aggressive": 1,
             "India Fund Equity Savings":              0,
             "India Fund Equity Savings - Conservative": 0,
@@ -260,51 +264,39 @@ MODELS = {
     },
     "aggressive": {
         "dncap_ceiling": 84, "stress_ceiling": -40,     # doc: 84 (was 86)
-        "max_funds": 13, "min_holding_pct": 4,          # doc: 4% for aggressive
+        "cvar_max_funds": 13, "min_holding_pct": 4,          # doc: 4% for aggressive
         "return_floor": 8.5,
         "mid_small_ceiling": 50,
         "min_aaa_aa_pct": 70,
         "max_duration": 6.0,
-        "gold_fixed": 8,                                 # doc: 8%
+        "gold_fixed": 7,                                 # 7% (was 8% per doc)
+        "max_w": 12.0,                                   # per-fund cap 12% (default 15%) so the pool spreads over 9+ funds
         "label": "Aggressive", "risk": "High", "risk_score": 5,
-        "horizon": "5+ years", "volatility": "10–15%", "max_drawdown": "15–20%",
+        "horizon": "5+ years", "volatility": "10–15%", "risk_lambda": 0.0, "max_drawdown": "15–20%",
         "suitability": "Maximizes growth potential through higher equity allocation across all cap segments, suitable for investors with a long-term horizon and higher risk tolerance.",
-        "eq_lo": 80, "eq_hi": 87, "debt_lo": 8, "debt_hi": 23,
+        "eq_lo": 75, "eq_hi": 85, "debt_lo": 15, "debt_hi": 25,
         "cap_large": 35, "cap_mid": 33, "cap_small": 32,
         "debt_tiers": [1, 2, 3, 4, 5], "hybrid_tiers": [2, 3, 4],
         "allowed_equity_cats": None,
         "max_debt_funds": 1,
-        "eq_per_cat": 2, "hyb_per_cat": 1,
+        "eq_per_cat": 2, "hyb_per_cat": 2,
         "eq_cat_limits": {
-            "India Fund Large-Cap": 1,
-            "India Fund Large & Mid-Cap": 1,
-            "Cat: Flexi Cap Funds": 2,
             "Cat: Multi Cap Funds": 1,
             "India Fund Focused Fund": 1,
-            "India Fund Mid-Cap": 1,
-            "India Fund Small-Cap": 1,
-            "Cat: Contra / Value Funds": 1,
-        },
-        # Max 3 hybrids total, 1 per category — only high-equity hybrids allowed
-        "hyb_cat_limits": {
-            "India Fund Dynamic Asset Allocation":   1,
-            "India Fund Aggressive Allocation":      1,
-            "India Fund Equity Savings - Aggressive":1,
-            "India Fund Balanced Allocation":        0,
-            "India Fund Multi Asset Allocation":     0,
-            "India Fund Equity Savings":             0,
-            "India Fund Equity Savings - Conservative": 0,
-            "India Fund Conservative Allocation":    0,
-            "India Fund Arbitrage Fund":             0,
         },
     },
 }
 
+# "lp"      — feasibility LP (rulebook sections 6-8). Active.
+# "bl_cvar" — Black-Litterman + CVaR-LP first, LP as fallback. Code kept, switched off.
+SOLVER_MODE = "lp"
+
 MIN_FUNDS = 9
-MAX_FUNDS = 11
+MAX_FUNDS = 15
 MIN_W_TIGHT = 5.0
 MIN_W_LOOSE = 3.0
 FUND_COUNT_THRESHOLD = 11
+BAND_MARGIN = 3.0   # solver aims this far inside the eq/debt floors; clean-up + rounding give some back
 
 CORE_EQUITY_CATS = [
     "India Fund Large-Cap",
@@ -318,10 +310,11 @@ CORE_EQUITY_CATS = [
 ]
 
 CAP_TOL = 5.0
-MAX_W = 20.0
+MAX_W = 15.0
 
-# Per-fund cap: min(100/6, 20%) = 16.67% (doc Section 9)
-PER_FUND_CAP = round(100.0 / 6, 4)   # 16.6667%
+# Per-fund cap: 15% by default; Conservative and Mod Conservative override with "max_w"
+# (16.67%) because their debt-heavy pools are too thin to meet the bands at 15%.
+PER_FUND_CAP = 15.0
 PER_FUND_CAP_FRAC = PER_FUND_CAP / 100.0
 
 # AMC cap: 30% (doc Section 9, down from 35%)
@@ -426,11 +419,82 @@ def _enforce_liquid_overnight_exclusivity(result_funds):
     return result_funds
 
 
+def _filter_weights(w, funds, gold_isins, max_funds, max_w=None):
+    """
+    Post-solve clean-up (rulebook section 8): drop weights below MIN_W_LOOSE, then below
+    MIN_W_TIGHT when the portfolio has <= FUND_COUNT_THRESHOLD funds, then trim to max_funds.
+    Gold/silver funds are exempt from every drop so the fixed gold allocation survives;
+    the other funds are rescaled to fill (100 - gold). Returns weights summing to 100, or None.
+    """
+    w = np.array(w, dtype=float)
+    gold_mask = np.array([f.get("isin") in (gold_isins or ()) for f in funds])
+    other = ~gold_mask
+    target = 100.0 - float(w[gold_mask].sum())
+
+    def rescale(arr):
+        s = arr[other].sum()
+        if s <= 0:
+            return False
+        arr[other] = arr[other] / s * target
+        return True
+
+    w[other & (w < MIN_W_LOOSE)] = 0.0
+    if not rescale(w):
+        return None
+
+    if int((w > 0).sum()) <= FUND_COUNT_THRESHOLD:
+        w2 = w.copy()
+        w2[other & (w2 < MIN_W_TIGHT)] = 0.0
+        if rescale(w2):
+            w = w2
+
+    nonzero = np.where(w > 0)[0]
+    if len(nonzero) > max_funds:
+        droppable = sorted((i for i in nonzero if other[i]), key=lambda i: w[i])
+        for i in droppable[:len(nonzero) - max_funds]:
+            w[i] = 0.0
+        rescale(w)
+
+    # Rescaling can push a fund back over the per-fund cap: clip and hand the excess to the others
+    if max_w is not None:
+        for _ in range(10):
+            over = other & (w > max_w + 1e-9)
+            if not over.any():
+                break
+            excess = float((w[over] - max_w).sum())
+            w[over] = max_w
+            room = other & (w > 0) & (w < max_w - 1e-9)
+            if not room.any():
+                break
+            w[room] += excess * w[room] / w[room].sum()
+
+    # If the cap left no room to place the excess, the weights no longer sum to 100: reject
+    if abs(float(w.sum()) - 100.0) > 0.05:
+        return None
+
+    return np.round(w, 2)
+
+
+def _objective_vector(funds, risk_lambda):
+    """
+    LP objective (minimised): -(3Y return - risk_lambda * 3Y std dev) per fund, in % points.
+    Blended return and SD are weighted averages of fund values, so this stays linear.
+    Missing values take the pool average. risk_lambda=0 -> pure return; higher -> lower risk.
+    """
+    ret = np.array([_s(f.get("return_3y")) if _s(f.get("return_3y")) is not None else np.nan for f in funds], dtype=float)
+    sd  = np.array([f["sd_nav"] if f.get("sd_nav") is not None
+                    else (_s(f.get("std_dev_3y")) if _s(f.get("std_dev_3y")) is not None else np.nan)
+                    for f in funds], dtype=float)
+    ret = np.where(np.isnan(ret), np.nanmean(ret) if not np.all(np.isnan(ret)) else 0.0, ret)
+    sd  = np.where(np.isnan(sd),  np.nanmean(sd)  if not np.all(np.isnan(sd))  else 0.0, sd)
+    return -(ret - risk_lambda * sd) / 100.0
+
+
 def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
            cap_large, cap_mid, cap_small,
            cap_tol=CAP_TOL, max_w=MAX_W,
            gold_isins=None, gold_lo=0, gold_hi=0,
-           fund_house_cap=FUND_HOUSE_CAP):
+           fund_house_cap=FUND_HOUSE_CAP, margin=0.0, risk_lambda=None):
     """
     Pure feasibility LP via HiGHS. Returns weight array (sums to 100) or None.
     """
@@ -460,6 +524,8 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
     eq_weight_coef = eq_pct / 100.0
 
     A_ub, b_ub = [], []
+    eq_lo   = min(eq_lo + margin,   (eq_lo + eq_hi) / 2)
+    debt_lo = min(debt_lo + margin, (debt_lo + debt_hi) / 2)
     A_ub.append(-eq_pct / 100.0);  b_ub.append(-eq_lo)
     A_ub.append( eq_pct / 100.0);  b_ub.append( eq_hi)
     A_ub.append(-debt_pct / 100.0); b_ub.append(-debt_lo)
@@ -492,33 +558,23 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
 
     A_ub = np.array(A_ub); b_ub = np.array(b_ub)
     A_eq = np.ones((1, n)); b_eq = np.array([100.0])
-    bounds = [(0.0, max_w)] * n
-    c = np.zeros(n)
+    c = np.zeros(n) if risk_lambda is None else _objective_vector(funds, risk_lambda)
+    gold_flag = np.array([f.get("isin") in (gold_isins or ()) for f in funds])
+    barred = np.zeros(n, dtype=bool)
 
-    res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method="highs")
-    if res.status == 0:
-        w = res.x
-        w[w < MIN_W_LOOSE] = 0.0
-        total = w.sum()
-        if total <= 0:
+    # Solve, bar any non-gold fund that lands under the minimum weight and solve again, so the
+    # clean-up afterwards has nothing left to drop (rescaling could break the AMC and per-fund caps)
+    for _ in range(n):
+        res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq,
+                      bounds=[(0.0, 0.0 if barred[i] else max_w) for i in range(n)], method="highs")
+        if res.status != 0:
             return None
-        w = w / total * 100
-
-        nonzero = np.where(w > 0)[0]
-        if len(nonzero) <= FUND_COUNT_THRESHOLD:
-            w2 = w.copy()
-            w2[w2 < MIN_W_TIGHT] = 0.0
-            if w2.sum() > 0:
-                w = w2 / w2.sum() * 100
-                nonzero = np.where(w > 0)[0]
-
-        if len(nonzero) > MAX_FUNDS:
-            sorted_idx = nonzero[np.argsort(w[nonzero])]
-            drop = sorted_idx[:len(nonzero) - MAX_FUNDS]
-            w[drop] = 0.0
-            w = w / w.sum() * 100
-
-        return np.round(w, 2)
+        active = int((res.x > 1e-6).sum())
+        floor_w = MIN_W_TIGHT if active <= FUND_COUNT_THRESHOLD else MIN_W_LOOSE
+        small = (~gold_flag) & (res.x > 1e-6) & (res.x < floor_w - 1e-6)
+        if not small.any():
+            return _filter_weights(res.x, funds, gold_isins, MAX_FUNDS, max_w)
+        barred[np.argmin(np.where(small, res.x, np.inf))] = True
     return None
 
 
@@ -533,7 +589,9 @@ def _solve_with_retry(funds, m, gold_isins=None):
     gold_lo = m.get("gold_fixed", m.get("gold_lo", 0))
     gold_hi = gold_lo  # fixed allocation in LP fallback too
 
-    forced_max_w = min(MAX_W, 100.0 / min_funds)
+    model_max_w = m.get("max_w", MAX_W)
+    risk_lambda = m.get("risk_lambda")
+    forced_max_w = min(model_max_w, 100.0 / min_funds)
 
     from scipy.optimize import linprog
 
@@ -556,6 +614,13 @@ def _solve_with_retry(funds, m, gold_isins=None):
     A_ub_p1 = [-eq_pct/100, eq_pct/100, -debt_pct/100, debt_pct/100]
     b_ub_p1 = [-m["eq_lo"], m["eq_hi"], -m["debt_lo"], m["debt_hi"]]
 
+    # Cap mix (large/mid/small) enforced from the first pass at the model's own tolerance
+    eq_coef = eq_pct / 100.0
+    for key, target in (("large_cap", cap_l), ("mid_cap", cap_m), ("small_cap", cap_s)):
+        arr = np.array([_sf(f.get(key)) for f in funds])
+        A_ub_p1.append(-eq_coef * (arr - (target - base_tol))); b_ub_p1.append(0)
+        A_ub_p1.append( eq_coef * (arr - (target + base_tol))); b_ub_p1.append(0)
+
     if gold_isins and gold_lo > 0:
         gold_mask = np.array([1.0 if f.get("isin") in gold_isins else 0.0 for f in funds])
         if gold_mask.sum() > 0:
@@ -573,41 +638,47 @@ def _solve_with_retry(funds, m, gold_isins=None):
             row = np.zeros(n); row[idxs] = 1.0
             A_ub_p1.append(row); b_ub_p1.append(FUND_HOUSE_CAP)
 
-    A_ub_p1 = np.array(A_ub_p1); b_ub_p1 = np.array(b_ub_p1)
-    res = linprog(np.zeros(n), A_ub=A_ub_p1, b_ub=b_ub_p1,
-                  A_eq=np.ones((1,n)), b_eq=np.array([100.0]),
-                  bounds=[(0.0, forced_max_w)]*n, method="highs")
-
-    if res.status == 0:
-        w = res.x.copy()
-        w[w < MIN_W_LOOSE] = 0.0
-        total = w.sum()
-        if total > 0:
-            w = w / total * 100
-            nonzero = np.where(w > 0)[0]
-            if len(nonzero) <= FUND_COUNT_THRESHOLD:
-                w2 = w.copy(); w2[w2 < MIN_W_TIGHT] = 0.0
-                if w2.sum() > 0:
-                    w = w2 / w2.sum() * 100
-                    nonzero = np.where(w > 0)[0]
-            if len(nonzero) > max_funds:
-                drop = nonzero[np.argsort(w[nonzero])][:len(nonzero)-max_funds]
-                w[drop] = 0.0; w = w / w.sum() * 100
-            if np.sum(w > 0) >= min_funds:
-                return np.round(w, 2), 999
+    A_ub_p1 = np.array(A_ub_p1)
+    # Aim inside the floors first (clean-up + rounding give some back); retry on the exact band
+    for margin in (BAND_MARGIN, 0.0):
+        b = np.array(b_ub_p1, dtype=float)
+        b[0] = -min(m["eq_lo"] + margin,   (m["eq_lo"] + m["eq_hi"]) / 2)
+        b[2] = -min(m["debt_lo"] + margin, (m["debt_lo"] + m["debt_hi"]) / 2)
+        c1 = np.zeros(n) if risk_lambda is None else _objective_vector(funds, risk_lambda)
+        gold_flag = np.array([f.get("isin") in (gold_isins or ()) for f in funds])
+        barred = np.zeros(n, dtype=bool)
+        # Solve, bar any non-gold fund that lands under the minimum weight, and solve again,
+        # so the clean-up afterwards has nothing left to drop and the bands still hold
+        for _ in range(n):
+            res = linprog(c1, A_ub=A_ub_p1, b_ub=b,
+                          A_eq=np.ones((1,n)), b_eq=np.array([100.0]),
+                          bounds=[(0.0, 0.0 if barred[i] else forced_max_w) for i in range(n)],
+                          method="highs")
+            if res.status != 0:
+                break
+            active = int((res.x > 1e-6).sum())
+            floor_w = MIN_W_TIGHT if active <= FUND_COUNT_THRESHOLD else MIN_W_LOOSE
+            small = (~gold_flag) & (res.x > 1e-6) & (res.x < floor_w - 1e-6)
+            if not small.any():
+                w = _filter_weights(res.x, funds, gold_isins, max_funds, forced_max_w)
+                if w is not None and np.sum(w > 0) >= min_funds:
+                    return w, 999
+                break
+            barred[np.argmin(np.where(small, res.x, np.inf))] = True
 
     for tol in [base_tol, base_tol+3, base_tol+6, base_tol+10, base_tol+15]:
-        w = _solve(funds, m["eq_lo"], m["eq_hi"], m["debt_lo"], m["debt_hi"],
-                   cap_l, cap_m, cap_s, tol, MAX_W,
-                   gold_isins=gold_isins, gold_lo=gold_lo, gold_hi=gold_hi,
-                   fund_house_cap=FUND_HOUSE_CAP)
-        if w is not None:
-            return w, tol
+        for margin in (BAND_MARGIN, BAND_MARGIN / 2, 0.0):
+            w = _solve(funds, m["eq_lo"], m["eq_hi"], m["debt_lo"], m["debt_hi"],
+                       cap_l, cap_m, cap_s, tol, model_max_w,
+                       gold_isins=gold_isins, gold_lo=gold_lo, gold_hi=gold_hi,
+                       fund_house_cap=FUND_HOUSE_CAP, risk_lambda=risk_lambda, margin=margin)
+            if w is not None:
+                return w, tol
 
     w = _solve(funds, m["eq_lo"]-5, m["eq_hi"]+5, m["debt_lo"]-5, m["debt_hi"]+5,
-               cap_l, cap_m, cap_s, base_tol+20, MAX_W,
+               cap_l, cap_m, cap_s, base_tol+20, model_max_w,
                gold_isins=gold_isins, gold_lo=gold_lo, gold_hi=gold_hi,
-               fund_house_cap=FUND_HOUSE_CAP)
+               fund_house_cap=FUND_HOUSE_CAP, risk_lambda=risk_lambda)
     return (w, base_tol+20) if w is not None else (None, None)
 
 
@@ -765,6 +836,107 @@ def _sample_covariance(nav_data, isins, n_weeks=SAMPLE_COV_WEEKS):
             Sigma[j, i] = Sigma[i, j]
 
     return Sigma
+
+
+NAV_RISK_YEARS   = 3
+_NAV_SERIES_CACHE = {}   # {"day": date, "series": {isin: NAV Series}} - one DB fetch per day
+NAV_RISK_MIN_OBS = 500   # daily returns a fund needs (about 2 years) to get an NAV-based SD
+
+
+def _nav_risk(isins, db):
+    """
+    Annualised covariance of daily NAV returns over the last NAV_RISK_YEARS years.
+    Returns {"isins": [...], "index": {isin: i}, "Sigma": ndarray (decimal, annualised)} or None.
+    Funds with too little history are left out (callers fall back to the reported SD).
+    """
+    if db is None or not isins:
+        return None
+    try:
+        import pandas as pd
+        from sqlalchemy import text
+        from datetime import timedelta
+        today = date_type.today()
+        if _NAV_SERIES_CACHE.get("day") != today:
+            _NAV_SERIES_CACHE.clear()
+            _NAV_SERIES_CACHE["day"] = today
+            _NAV_SERIES_CACHE["series"] = {}
+        cache = _NAV_SERIES_CACHE["series"]
+        missing = [i for i in set(isins) if i not in cache]
+        if missing:
+            start = (today - timedelta(days=int(NAV_RISK_YEARS * 365.25))).isoformat()
+            rows = db.execute(text("""
+                SELECT isin, date, nav FROM nav_history
+                WHERE isin = ANY(:isins) AND nav IS NOT NULL AND nav > 0 AND date >= :start
+            """), {"isins": missing, "start": start}).fetchall()
+            df = pd.DataFrame(rows, columns=["isin", "date", "nav"])
+            for i in missing:
+                sub = df[df["isin"] == i]
+                cache[i] = pd.Series(sub["nav"].astype(float).values, index=pd.to_datetime(sub["date"]))
+        have = [i for i in isins if i in cache and len(cache[i]) > 0]
+        if not have:
+            return None
+        navs = pd.concat({i: cache[i] for i in dict.fromkeys(have)}, axis=1).sort_index()
+        rets = navs.ffill(limit=5).pct_change(fill_method=None)
+        rets = rets.loc[:, rets.count() >= NAV_RISK_MIN_OBS]
+        if rets.shape[1] == 0:
+            return None
+        cov = rets.cov(min_periods=250) * 252
+        cov = cov.dropna(how="all").dropna(axis=1, how="all")
+        keep = [c for c in cov.columns if not cov[c].isna().any()]
+        keep = [c for c in keep if c in cov.index]
+        cov = cov.loc[keep, keep]
+        if cov.shape[0] == 0:
+            return None
+        S = cov.values
+        S = (S + S.T) / 2
+        vals, vecs = np.linalg.eigh(S)          # pairwise covariance can be slightly non-PSD
+        S = (vecs * np.clip(vals, 0, None)) @ vecs.T
+        return {"isins": keep, "index": {k: i for i, k in enumerate(keep)}, "Sigma": S}
+    except Exception as e:
+        logger.warning(f"NAV risk calc failed: {e}")
+        return None
+
+
+_FIRST_NAV_CACHE = {}
+
+
+def _first_nav_dates(db):
+    """{isin: first NAV date} for every fund in nav_history; cached per calendar day."""
+    key = date_type.today()
+    if _FIRST_NAV_CACHE.get("day") != key:
+        from sqlalchemy import text
+        rows = db.execute(text("SELECT isin, MIN(date) FROM nav_history WHERE nav IS NOT NULL AND nav > 0 GROUP BY isin")).fetchall()
+        _FIRST_NAV_CACHE["day"] = key
+        _FIRST_NAV_CACHE["data"] = {r[0]: r[1] for r in rows}
+    return _FIRST_NAV_CACHE["data"]
+
+
+def _has_min_history(f, first_navs, years=NAV_RISK_YEARS, grace_days=7):
+    """True if the fund's NAV history reaches back `years` years (small grace for weekends/holidays)."""
+    from datetime import timedelta
+    first = first_navs.get(f.get("isin"))
+    if first is None:
+        return False
+    cutoff = date_type.today() - timedelta(days=int(years * 365.25)) + timedelta(days=grace_days)
+    return first <= cutoff
+
+
+def _portfolio_sd(result, risk):
+    """
+    sqrt(w' Sigma w) in % for the funds that have NAV risk data, weights renormalised.
+    Returns (sd_pct, covered_weight_pct) or (None, 0).
+    """
+    if not risk:
+        return None, 0.0
+    idx = [(risk["index"][f["isin"]], f["weight"]) for f in result if f.get("isin") in risk["index"]]
+    tw = sum(w for _, w in idx)
+    if tw <= 0:
+        return None, 0.0
+    ii = [i for i, _ in idx]
+    w = np.array([wt for _, wt in idx]) / tw
+    var = float(w @ risk["Sigma"][np.ix_(ii, ii)] @ w)
+    total = sum(f["weight"] for f in result)
+    return round(float(np.sqrt(max(var, 0.0))) * 100, 2), round(tw / total * 100, 1) if total else 0.0
 
 
 def _black_litterman_posterior(pi, Sigma, tau, P, Q, Omega):
@@ -1011,7 +1183,7 @@ def _optimize_sharpe(funds, m, gold_isins=None, db=None):
     gold_isins_set = gold_isins or set()
     gold_fixed = m.get("gold_fixed", 0)  # fixed allocation %
 
-    # Per-fund cap: 16.67% for all profiles (doc)
+    # Per-fund cap: 15% for all profiles
     upper_bounds = [PER_FUND_CAP_FRAC] * N
 
     add_A, add_b, add_sense, add_tag = [], [], [], []
@@ -1290,7 +1462,7 @@ def _optimize_sharpe(funds, m, gold_isins=None, db=None):
 
     # ── Step 7: Trim to max_funds ─────────────────────────────────────────────
     weights = result['weights']
-    max_funds = m.get("max_funds", TARGET_FUNDS_HI)
+    max_funds = m.get("cvar_max_funds", TARGET_FUNDS_HI)
     min_holding = m.get("min_holding_pct", 4.0) / 100
 
     for trim_iter in range(20):
@@ -1435,8 +1607,14 @@ def _pick_gold_candidates(gold_pool, gold_fixed):
 
 
 def _build_portfolio(model_key, all_funds, db=None):
-    m = MODELS[model_key]
+    m = dict(MODELS[model_key])
     _build_portfolio._db = db
+
+    # Rulebook equity/debt bands are shares of the non-gold portfolio; rebase them so
+    # equity + debt + fixed gold can sum to 100.
+    non_gold = (100.0 - m.get("gold_fixed", 0)) / 100.0
+    for k in ("eq_lo", "eq_hi", "debt_lo", "debt_hi"):
+        m[k] = round(m[k] * non_gold, 1)
 
     # Apply fund eligibility filter to non-Precious Metals funds
     eligible_funds = []
@@ -1445,6 +1623,14 @@ def _build_portfolio(model_key, all_funds, db=None):
             eligible_funds.append(f)  # gold not filtered by eligibility
         elif _is_eligible(f):
             eligible_funds.append(f)
+
+    # Every candidate (gold included) needs NAV history for the full risk lookback
+    if db is not None:
+        try:
+            first_navs = _first_nav_dates(db)
+            eligible_funds = [f for f in eligible_funds if _has_min_history(f, first_navs)]
+        except Exception as e:
+            logger.warning(f"NAV history check failed, skipping min-history filter: {e}")
 
     eq_pool     = [f for f in eligible_funds
                    if f["asset_class"] == "Equity"
@@ -1472,10 +1658,21 @@ def _build_portfolio(model_key, all_funds, db=None):
     original_candidates = candidates
     governance_flags = []
 
-    qp_weights, qp_funds, used_method, gov_flags = _optimize_sharpe(
-        candidates, m, gold_isins=gold_isins, db=_build_portfolio._db
-    )
-    governance_flags.extend(gov_flags)
+    # NAV-based risk (daily returns, 3Y): per-fund SD feeds the solver objective, the
+    # covariance matrix gives the portfolio SD shown on screen.
+    nav_risk = _nav_risk([f.get("isin") for f in candidates if f.get("isin")], db)
+    if nav_risk:
+        for f in candidates:
+            i = nav_risk["index"].get(f.get("isin"))
+            f["sd_nav"] = round(float(np.sqrt(nav_risk["Sigma"][i, i])) * 100, 2) if i is not None else None
+
+    use_bl_cvar = SOLVER_MODE == "bl_cvar"
+    qp_weights = None
+    if use_bl_cvar:
+        qp_weights, qp_funds, used_method, gov_flags = _optimize_sharpe(
+            candidates, m, gold_isins=gold_isins, db=_build_portfolio._db
+        )
+        governance_flags.extend(gov_flags)
 
     qp_active = int(np.sum(qp_weights > 0)) if qp_weights is not None else 0
     qp_accept_threshold = max(6, m.get("min_funds", 6) - 1)
@@ -1485,10 +1682,11 @@ def _build_portfolio(model_key, all_funds, db=None):
         candidates = qp_funds
         used_tol  = "bl_cvar"
     else:
-        logger.info(f"BL+CVaR fallback for {model_key} — using LP")
+        if use_bl_cvar:
+            logger.info(f"BL+CVaR fallback for {model_key} — using LP")
         candidates = original_candidates
         weights, used_tol = _solve_with_retry(candidates, m, gold_isins=gold_isins)
-        if used_tol == 999 or (isinstance(used_tol, int) and used_tol > 0):
+        if use_bl_cvar and (used_tol == 999 or (isinstance(used_tol, int) and used_tol > 0)):
             governance_flags.append({
                 "type": "bl_cvar_fallback",
                 "severity": "info",
@@ -1502,7 +1700,8 @@ def _build_portfolio(model_key, all_funds, db=None):
     if weights is not None:
         for f, w in zip(candidates, weights):
             key = f.get("isin") or (f.get("name") or "").strip().lower()
-            if w >= w_threshold and key not in seen_result:
+            is_gold = f.get("isin") in gold_isins and w > 0
+            if (w >= w_threshold or is_gold) and key not in seen_result:
                 seen_result.add(key)
                 sleeve = ("Equity" if f["asset_class"] == "Equity"
                           else "Hybrid" if f["asset_class"] == "Hybrid"
@@ -1520,7 +1719,7 @@ def _build_portfolio(model_key, all_funds, db=None):
     # ── Largest-remainder whole-% rounding (doc Section 13) ──────────────────
     if result:
         raw_weights = [f["weight"] for f in result]
-        rounded = _round_weights_lr(raw_weights, per_fund_cap_pct=PER_FUND_CAP, funds=result)
+        rounded = _round_weights_lr(raw_weights, per_fund_cap_pct=m.get("max_w", PER_FUND_CAP), funds=result)
         for f, rw in zip(result, rounded):
             f["weight"] = rw
         # Final renorm to ensure sum=100 (rounding may be off by 1)
@@ -1559,6 +1758,8 @@ def _build_portfolio(model_key, all_funds, db=None):
     rb_large = round(cap_num_l / cap_den, 1) if cap_den else None
     rb_mid   = round(cap_num_m / cap_den, 1) if cap_den else None
     rb_small = round(cap_num_s / cap_den, 1) if cap_den else None
+
+    port_sd, port_sd_cov = _portfolio_sd(result, nav_risk)
 
     def wavg(key):
         vals = [(f["weight"], _sf(f.get(key))) for f in result if _s(f.get(key)) is not None]
@@ -1616,7 +1817,7 @@ def _build_portfolio(model_key, all_funds, db=None):
             "eq_lo": m["eq_lo"], "eq_hi": m["eq_hi"],
             "debt_lo": m["debt_lo"], "debt_hi": m["debt_hi"],
             "large_cap": m["cap_large"], "mid_cap": m["cap_mid"],
-            "small_cap": m["cap_small"], "cap_tol": CAP_TOL,
+            "small_cap": m["cap_small"], "cap_tol": m.get("cap_tol", CAP_TOL),
             "gold_fixed": gold_fixed,
             "mid_small_ceiling": m.get("mid_small_ceiling"),
             "min_aaa_aa_pct": m.get("min_aaa_aa_pct"),
@@ -1656,7 +1857,7 @@ def _build_portfolio(model_key, all_funds, db=None):
             "beta_3y":        wavg("beta_3y"),
             "up_capture_3y":  wavg("up_capture_3y"),
             "down_capture_3y": wavg_exclude_precious("down_capture_3y"),
-            "std_dev_3y":     wavg("std_dev_3y"),
+            "std_dev_3y":     port_sd if port_sd is not None else wavg("std_dev_3y"),
             "std_dev_5y":     wavg("std_dev_5y"),
             "expense_ratio":  wavg("expense_ratio"),
         },
@@ -1666,8 +1867,9 @@ def _build_portfolio(model_key, all_funds, db=None):
             "beta_3y":         wavg_coverage("beta_3y"),
             "up_capture_3y":   wavg_coverage("up_capture_3y"),
             "down_capture_3y": wavg_coverage("down_capture_3y"),
-            "std_dev_3y":      wavg_coverage("std_dev_3y"),
+            "std_dev_3y":      port_sd_cov if port_sd is not None else wavg_coverage("std_dev_3y"),
         },
+        "std_dev_3y_method": "nav_covariance_daily_3y" if port_sd is not None else "weighted_average",
         "funds": [
             {
                 "isin": f["isin"], "name": f["name"], "category": f.get("category"),
@@ -1676,7 +1878,8 @@ def _build_portfolio(model_key, all_funds, db=None):
                 "nav": f.get("nav"),
                 "return_1y": f.get("return_1y"), "return_3y": f.get("return_3y"),
                 "return_5y": f.get("return_5y"), "sharpe_3y": f.get("sharpe_ratio_3y"),
-                "alpha_3y": f.get("alpha_3y"), "std_dev_3y": f.get("std_dev_3y"),
+                "alpha_3y": f.get("alpha_3y"),
+                "std_dev_3y": f.get("std_dev_3y") if f.get("std_dev_3y") is not None else f.get("sd_nav"),
                 "std_dev_5y": f.get("std_dev_5y"), "expense_ratio": f.get("expense_ratio"),
                 "aum_cr": f.get("fund_size"), "morningstar_rating": f.get("morningstar_rating"),
                 "equity_pct": f.get("equity_pct"), "bond_pct": f.get("bond_pct"),

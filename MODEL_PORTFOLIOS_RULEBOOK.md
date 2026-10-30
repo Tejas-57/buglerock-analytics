@@ -1,22 +1,24 @@
 # BugleRock Model Portfolios — Rulebook
 
 > **Source files:** `backend/routers/models.py` · `frontend/src/components/ModelPortfolios/ModelPortfolios.jsx`  
-> **Last updated:** 2026-08-04  
+> **Last updated:** 2026-10-27  
 > Every future change to model portfolio logic must be reflected in this document alongside the code change.
 
 ---
 
 ## 1. Overview
 
-BugleRock's model portfolios are five risk-tiered, constraint-based portfolios constructed daily from the R1/R2 ranked mutual fund universe. They are **not equal-weight** and **not manually curated** — a linear programming solver finds optimal weights that satisfy a set of financial constraints defined per model.
+BugleRock's model portfolios are five risk-tiered, constraint-based portfolios constructed daily from the R1/R2 ranked mutual fund universe. They are **not equal-weight** and **not manually curated** — a linear programming solver finds weights that satisfy a set of financial constraints defined per model and, within those constraints, favours higher 3Y return per unit of risk (section 6.1). Gold is a fixed allocation per model (section 6.5).
 
-| Model | Risk | Equity Target | Debt Target |
-|---|---|---|---|
-| Conservative | Low | 22–28% | 62–73% |
-| Moderately Conservative | Low–Moderate | 33–42% | 52–62% |
-| Balanced | Moderate | 52–58% | 42–48% |
-| Moderately Aggressive | Moderate–High | 68–76% | 27–33% |
-| Aggressive | High | 80–87% | 17–23% |
+| Model | Risk | Equity (centre ±5) | Debt (centre ±5) | Fixed gold |
+|---|---|---|---|---|
+| Conservative | Low | 20% (15–25%) | 80% (75–85%) | 5% |
+| Moderately Conservative | Low–Moderate | 30% (25–35%) | 70% (65–75%) | 5% |
+| Balanced | Moderate | 50% (45–55%) | 50% (45–55%) | 6% |
+| Moderately Aggressive | Moderate–High | 70% (65–75%) | 30% (25–35%) | 7% |
+| Aggressive | High | 80% (75–85%) | 20% (15–25%) | 7% |
+
+**Rebasing for gold.** Equity and debt bands are defined as shares of the non-gold portfolio. The solver applies them scaled by `(100 - gold) / 100`, rounded to 1 dp. Example: Aggressive equity 75–85% becomes 69.8–79.0% with 7% gold. Equity + debt + gold plus a small cash/other residual (from fund holdings) make up 100%. The rebased bands are what the screen shows as targets.
 
 ---
 
@@ -110,18 +112,24 @@ After assembling all three sleeves, duplicates (same ISIN or same fund name) are
 ## 5. Global Solver Constants
 
 ```python
+SOLVER_MODE = "lp"       # "lp" active; "bl_cvar" (Black-Litterman + CVaR) kept in code but switched off
 MIN_FUNDS = 9            # Default minimum funds per portfolio
 MAX_FUNDS = 15           # Hard cap — never more than 15 funds
-MIN_W_LOOSE = 3.0        # Weights below 3% are zeroed (loose filter, always applied)
-MIN_W_TIGHT = 5.0        # Weights below 5% are zeroed (tight filter, applied if ≤11 funds)
+MIN_W_LOOSE = 3.0        # Weights below 3% are not allowed (loose filter, always applied)
+MIN_W_TIGHT = 5.0        # Weights below 5% are not allowed (tight filter, applied if ≤11 funds)
 FUND_COUNT_THRESHOLD = 11 # Threshold at which tight filter is applied
 CAP_TOL = 5.0            # Default cap mix tolerance ±5%
-MAX_W = 20.0             # Absolute max weight per fund (hard cap)
+MAX_W = 15.0             # Max weight per fund (all models except Conservative / Mod Conservative)
+PER_FUND_CAP = 15.0      # Same cap, used by the whole-% rounding check
+FUND_HOUSE_CAP = 30.0    # Max combined weight per AMC (branding_name)
+BAND_MARGIN = 3.0        # Solver aims this far inside the equity/debt floors (see section 7)
+NAV_RISK_YEARS = 3       # Lookback for NAV-based risk and minimum fund history
 ```
 
 **Per-model overrides possible:**
 - `min_funds` — overrides `MIN_FUNDS` for that model (e.g. Conservative and Mod Conservative use 7)
-- `max_funds` — overrides `MAX_FUNDS`
+- `max_w` — overrides `MAX_W`; **Conservative and Mod Conservative use 16.67%** (their debt-heavy pools are too thin to meet the bands at 15%); **Aggressive uses 12%** (at 15% its pool settles on 8 funds)
+- `risk_lambda` — risk penalty in the solver objective (section 6.1)
 - `cap_tol` — overrides `CAP_TOL` (e.g. Balanced uses 15 due to mixed hybrid pool)
 
 ---
@@ -129,7 +137,23 @@ MAX_W = 20.0             # Absolute max weight per fund (hard cap)
 ## 6. The Solver — How It Works
 
 ### 6.1 What is HiGHS?
-`scipy.optimize.linprog` with `method="highs"` — a high-performance Linear Programming solver. It finds weights satisfying all constraints simultaneously. We use it as a **pure feasibility LP** — the objective function is zero (we don't optimise for anything, we just find a valid solution).
+`scipy.optimize.linprog` with `method="highs"` — a high-performance Linear Programming solver. It finds weights satisfying all constraints simultaneously.
+
+**Objective.** Among all weight sets that satisfy the constraints, the solver minimises
+```
+-Σ wᵢ · (return_3yᵢ - risk_lambda · sd_navᵢ)
+```
+i.e. it maximises weighted 3Y return minus a penalty on weighted SD. Both terms are linear, so the problem stays an LP. `sd_navᵢ` is the fund's own annualised SD from daily NAVs (section 9.3); if missing, the Morningstar SD, then the pool average.
+
+| Model | `risk_lambda` |
+|---|---|
+| Conservative | 2.0 |
+| Mod Conservative | 1.5 |
+| Balanced | 1.0 |
+| Mod Aggressive | 0.5 |
+| Aggressive | 0.0 (pure return) |
+
+A higher value pushes the model towards lower-risk funds, which is what separates the five models on return and SD.
 
 ### 6.2 Weight Variables
 `w₁, w₂, ... wₙ` — portfolio weight for each of the N candidate funds (in %).
@@ -144,10 +168,17 @@ All constraints are linear in the weights:
 
 **Per-fund weight bounds:**
 ```
-0 ≤ wᵢ ≤ max_w   (for all i)
+0 ≤ wᵢ ≤ max_w   (15%; 16.67% for Conservative and Mod Conservative; 12% for Aggressive)
 ```
 
-**Effective equity (weighted average, accounts for hybrid equity content):**
+**Fixed gold:**
+```
+Σ w_gold = gold_fixed   (5 / 5 / 6 / 7 / 7%)
+```
+
+**AMC cap:** funds sharing a `branding_name` together hold at most 30%.
+
+**Effective equity (weighted average, accounts for hybrid equity content; rebased bands):**
 ```
 Σ wᵢ · equity_pctᵢ / 100  ≥  eq_lo
 Σ wᵢ · equity_pctᵢ / 100  ≤  eq_hi
@@ -171,6 +202,12 @@ The true cap mix is a ratio: `Σ(wᵢ · eq_pctᵢ · largeᵢ) / Σ(wᵢ · eq_
 
 **Important:** Only funds where `large + mid + small > 1` participate in cap mix constraints. Funds with missing or all-zero cap data are excluded — consistent with how cap mix is calculated in the output.
 
+### 6.5 Gold sleeve and eligibility
+- Gold/silver candidates come from `Precious Metals` funds; the picker (`_pick_gold_candidates`) offers the best-ranked gold funds.
+- The gold weight is fixed per model and is **exempt from every weight filter** (3% / 5% minimums, rescaling), so the fixed allocation always survives.
+- **Eligibility filter** (non-gold funds): a fund must have `return_3y` and at least one calendar-year return for 2021–2025. Gold is exempt from this filter.
+- **Minimum NAV history:** every candidate, gold included, needs NAV data reaching back 3 years (7-day grace). This removes newer gold/silver fund-of-funds, so it mainly shapes the gold pool.
+
 ### 6.4 Equity/Debt Content per Fund
 The solver uses these values per fund:
 
@@ -189,41 +226,46 @@ If `equity_pct` is null for an equity fund, 100% is assumed. If `bond_pct` is nu
 
 The solver runs in two passes to balance fund count vs constraint satisfaction:
 
-### Pass 1 — Forced fund count, no cap mix
+### Pass 1 — Forced fund count, with cap mix
 ```
-forced_max_w = min(MAX_W, 100 / min_funds)
+forced_max_w = min(max_w, 100 / min_funds)
 ```
 - For `min_funds=9`: `forced_max_w = 11.11%`
 - For `min_funds=7`: `forced_max_w = 14.29%`
 
-By capping each fund at `100/min_funds`, the solver mathematically must spread weight across at least `min_funds` funds to sum to 100%. Cap mix constraints are **omitted** in Pass 1 — only equity and debt targets are enforced.
+Capping each fund at `100/min_funds` forces the solver to spread weight across at least `min_funds` funds. The equity/debt bands, fixed gold, AMC cap **and the large/mid/small cap mix** (at the model's `cap_tol`) are all enforced from the first pass.
 
-If Pass 1 produces ≥ `min_funds` funds → **use this result** (tagged as `tol=999`).
+- **Safety margin:** the solver first aims `BAND_MARGIN` (3 points) above the equity and debt floors, because clean-up and rounding give a little back. If that is infeasible it retries on the exact band.
+- **Minimum weights:** after each solve, any non-gold fund below the minimum weight (3%, or 5% when 11 or fewer funds are active) is barred and the LP is solved again, so the clean-up has nothing left to drop and the bands still hold.
+- If the result has at least `min_funds` funds → **use it** (tagged `tol=999`).
 
-### Pass 2 — Full constraints, relaxed cap mix tolerance
-If Pass 1 fails (infeasible or < `min_funds` funds after filtering):
-- Use `MAX_W = 20%` per fund (more flexibility, but fund count no longer guaranteed)
-- Include cap mix constraints
-- Retry with progressively relaxed tolerance: `base_tol → +3 → +6 → +10 → +15`
-- `base_tol` defaults to `CAP_TOL=5`, or model's own `cap_tol` if set
+### Pass 2 — Relaxed cap mix tolerance
+If Pass 1 fails (infeasible, or fewer than `min_funds` funds):
+- Use `max_w` per fund (15%, or 16.67% for the two Conservative models) — fund count is no longer guaranteed
+- Retry with progressively relaxed cap mix tolerance: `base_tol → +3 → +6 → +10 → +15`, trying margin 3.0, 1.5 then 0 at each level
+- `base_tol` defaults to `CAP_TOL=5`, or the model's own `cap_tol`
 
-If all tolerance levels fail → last resort: widen equity/debt bands by ±5 and use `base_tol+20`.
+If all levels fail → last resort: widen equity/debt bands by ±5 and use `base_tol+20`.
 
 ### Why Two Passes?
-Fund count and cap mix constraints conflict for some models. Conservative/Mod Conservative have tight debt floors (62%+) that require specific fund types — forcing cap mix on top of that at `forced_max_w` can be infeasible. The two-pass approach prioritises fund count (Pass 1) but falls back gracefully (Pass 2).
+Fund count and cap mix conflict for some models. Conservative / Mod Conservative have debt floors that need specific fund types and a small candidate pool, so they usually solve in Pass 2 (tags `lp_tol20.0` / `lp_tol8.0`). Balanced, Mod Aggressive and Aggressive solve in Pass 1 (`lp_tol999`).
 
 ---
 
-## 8. Post-Solver Weight Filtering
+## 8. Post-Solver Weight Filtering and Rounding
 
-After the solver returns weights:
+After the solver returns weights (`_filter_weights`, non-gold funds only; gold is exempt):
 
-1. **Loose filter** — always applied: `wᵢ < 3%` → set to 0
-2. **Renormalise** — remaining weights scaled to sum to 100%
-3. **Tight filter** — applied only if fund count ≤ `FUND_COUNT_THRESHOLD (11)`: `wᵢ < 5%` → set to 0, renormalise again
-4. **MAX_FUNDS cap** — if fund count > 15, drop lowest-weight funds until 15 remain
+1. **Loose filter** — `wᵢ < 3%` → set to 0
+2. **Renormalise** — non-gold weights scaled to fill `100 - gold`
+3. **Tight filter** — only if fund count ≤ `FUND_COUNT_THRESHOLD (11)`: `wᵢ < 5%` → set to 0, renormalise again
+4. **MAX_FUNDS cap** — if fund count > 15, drop lowest-weight non-gold funds until 15 remain
+5. **Cap re-check** — rescaling can push a fund over the per-fund cap; the excess is clipped and handed to other funds. If it cannot be placed (weights no longer sum to 100) the result is rejected and the solver moves to the next pass.
 
-The tight filter prevents many small token positions (e.g. 3.2% in 12 funds), keeping portfolios clean and manageable.
+Then in `_build_portfolio`:
+
+6. **Liquid / Overnight exclusivity** — a portfolio may hold Liquid **or** Overnight, never both. If both appear, the one with the smaller weight is dropped and the rest rescaled.
+7. **Whole-% rounding** — largest-remainder rounding to whole percentages summing to 100. It falls back to 1 dp if a fund exceeds its per-fund cap (+0.5) or an AMC exceeds 30% (+0.5), so the largest weight can show up to 0.5 above the cap (e.g. 17% for a 16.67% cap).
 
 ---
 
@@ -250,8 +292,21 @@ A fund with `L=50, M=50, S=0` is **included** — zero small cap is genuine data
 
 Finally, rb_large + rb_mid + rb_small are normalised to sum to exactly 100%.
 
-### 9.3 Blended Portfolio Metrics (`wavg`)
-All portfolio-level metrics (1Y/3Y/5Y return, Std Dev, Sharpe, Expense Ratio) are weighted averages rebased to available data:
+### 9.3 Portfolio Standard Deviation (3Y, NAV-based)
+Std Dev (3Y) is **not** an average of fund SDs. It is calculated from daily NAV returns over the last 3 years:
+```
+Σ  = covariance matrix of daily NAV returns × 252   (annualised)
+SD = sqrt( wᵀ Σ w ) × 100
+```
+- Debt funds are included (Morningstar supplies no SD for any debt fund), and diversification between funds is reflected.
+- Funds need at least 500 daily returns (about 2 years) and 250 common days per pair; a fund short of that is left out and the remaining weights are rebased (coverage is reported in `blended_coverage.std_dev_3y`). In practice every candidate has 3 years (section 6.5).
+- Pairwise covariance can be slightly non-positive-definite; negative eigenvalues are clipped to zero.
+- The fund table shows the NAV-based SD for any fund that has no Morningstar SD.
+- The response carries `std_dev_3y_method` (`nav_covariance_daily_3y`, or `weighted_average` if NAV data cannot be read).
+- Daily NAV series are cached per day, so the five portfolios share one database fetch.
+
+### 9.3b Blended Portfolio Metrics (`wavg`)
+All other portfolio-level metrics (1Y/3Y/5Y return, 5Y Std Dev, Sharpe, Expense Ratio) are weighted averages rebased to available data:
 ```
 wavg(metric) = Σ(weightᵢ × metricᵢ) / Σ(weightᵢ)
                [sum only over funds where metricᵢ is not null]
@@ -271,9 +326,11 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 ### Conservative
 | Parameter | Value |
 |---|---|
-| Equity target | 22–28% |
-| Debt target | 62–73% |
-| Cap mix target | L=75% M=15% S=10% ±5% |
+| Equity target | 20% ±5 (rebased for 5% gold: 14.2–23.8%) |
+| Debt target | 80% ±5 (rebased: 71.2–80.8%) |
+| Cap mix target | L=75% M=15% S=10% ±5% (ranges 70–80 / 10–20 / 5–15) |
+| Fixed gold | 5% |
+| Max weight per fund | **16.67%** |
 | Min funds | **7** |
 | Hybrid tiers | 1, 2 (Conservative Allocation + Equity Savings only) |
 | Equity categories | Large-Cap, Large & Mid-Cap, Flexi Cap |
@@ -296,9 +353,11 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 ### Moderately Conservative
 | Parameter | Value |
 |---|---|
-| Equity target | 33–42% |
-| Debt target | 52–62% |
-| Cap mix target | L=70% M=20% S=10% ±5% |
+| Equity target | 30% ±5 (rebased for 5% gold: 23.8–33.2%) |
+| Debt target | 70% ±5 (rebased: 61.8–71.2%) |
+| Cap mix target | L=70% M=20% S=10% ±5% (ranges 65–75 / 15–25 / 5–15) |
+| Fixed gold | 5% |
+| Max weight per fund | **16.67%** |
 | Min funds | **7** |
 | Hybrid tiers | 1, 2, 3 |
 | Equity categories | Large & Mid-Cap, Flexi Cap, Multi Cap |
@@ -317,16 +376,18 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 
 **Design intent:** Modest step up from Conservative. More equity via Large & Mid Cap and Flexi Cap (higher return potential than pure Large Cap). DAA hybrids carry meaningful equity. No arbitrage. Debt floor lower than Conservative (52% vs 62%) to give room for higher-equity hybrids.
 
-**Note on bands:** Original debt_lo was 67% (same as Conservative) but this was infeasible with the DAA hybrid pool at forced_max_w=14.3%. Relaxed to 52% to allow the solver to use DAA hybrids without contradiction.
+**Note on bands:** the equity/debt bands are now the centre ±5 definition above, rebased for gold. The 16.67% per-fund cap is kept for this model because the 15% cap makes the debt floor unreachable with this pool.
 
 ---
 
 ### Balanced
 | Parameter | Value |
 |---|---|
-| Equity target | 52–58% |
-| Debt target | 42–48% |
-| Cap mix target | L=60% M=25% S=15% **±15%** |
+| Equity target | 50% ±5 (rebased for 6% gold: 42.3–51.7%) |
+| Debt target | 50% ±5 (rebased: 42.3–51.7%) |
+| Cap mix target | L=60% M=25% S=15% **±15%** (ranges 45–75 / 10–40 / 0–30) |
+| Fixed gold | 6% |
+| Max weight per fund | 15% |
 | Min funds | 9 (default) |
 | Hybrid tiers | 1, 2, 3, 4 |
 | Equity categories | Large-Cap, Large & Mid-Cap, Flexi Cap, Multi Cap, Focused, Mid-Cap |
@@ -352,9 +413,11 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 ### Moderately Aggressive
 | Parameter | Value |
 |---|---|
-| Equity target | 68–76% |
-| Debt target | 27–33% |
-| Cap mix target | L=50% M=27% S=23% ±5% |
+| Equity target | 70% ±5 (rebased for 7% gold: 60.5–69.8%) |
+| Debt target | 30% ±5 (rebased: 23.2–32.6%) |
+| Cap mix target | L=50% M=27% S=23% ±5% (ranges 45–55 / 22–32 / 18–28) |
+| Fixed gold | 7% |
+| Max weight per fund | 15% |
 | Min funds | 9 (default) |
 | Hybrid tiers | 2, 3, 4 (no tier 1) |
 | Equity categories | All `CORE_EQUITY_CATS` |
@@ -382,9 +445,11 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 ### Aggressive
 | Parameter | Value |
 |---|---|
-| Equity target | 80–87% |
-| Debt target | 17–23% |
-| Cap mix target | L=35% M=33% S=32% ±5% |
+| Equity target | 80% ±5 (rebased for 7% gold: 69.8–79.0%) |
+| Debt target | 20% ±5 (rebased: 14.0–23.2%) |
+| Cap mix target | L=35% M=33% S=32% ±5% (ranges 30–40 / 28–38 / 27–37) |
+| Fixed gold | 7% |
+| Max weight per fund | **12%** |
 | Min funds | 9 (default) |
 | Hybrid tiers | 2, 3, 4 (no tier 1) |
 | Equity categories | All `CORE_EQUITY_CATS` |
@@ -420,12 +485,12 @@ Shows rebased L/M/S with target marker. Bars represent actual portfolio cap mix 
 | 1Y Return | `blended.return_1y` (wavg, rebased) |
 | 3Y CAGR | `blended.return_3y` (wavg, rebased) |
 | 5Y CAGR | `blended.return_5y` (wavg, rebased) |
-| Std Dev (3Y) | `blended.std_dev_3y` (wavg, rebased) |
+| Std Dev (3Y) | `blended.std_dev_3y` (covariance of daily NAV returns, annualised; section 9.3) |
 | Std Dev (5Y) | `blended.std_dev_5y` (wavg, rebased) |
 | Sharpe (3Y) | `blended.sharpe_3y` (wavg, rebased) |
 | Expense Ratio | `blended.expense_ratio` (wavg, rebased) |
 
-All metrics rebased to funds that have data for that metric.
+All other metrics are rebased to funds that have data for that metric. The volatility label on each model card (e.g. Conservative "5–6%") is descriptive text from the Aug 2026 version and is measured on a different basis from the NAV-based SD.
 
 ### Fund Table Columns
 Fund | Sleeve | Rank | Weight | 1Y | 3Y | Std Dev 3Y | Std Dev 5Y | Sharpe | ER | Cap mix
@@ -478,3 +543,13 @@ python debug_categories.py      # print all distinct category strings in DB
 | 2026-08-04 | Portfolio metrics row: added Std Dev (3Y) and Std Dev (5Y) | `ModelPortfolios.jsx` | Requested by user |
 | 2026-08-04 | Fund table: added Std Dev 3Y and Std Dev 5Y columns | `ModelPortfolios.jsx` | Requested by user |
 | 2026-08-13 | No model portfolio logic changes this session — all changes were in other components | — | See SESSION_SUMMARY_AUG13.md for full session changes |
+| 2026-10-27 | Reverted to the LP solver as the main path (`SOLVER_MODE="lp"`); BL+CVaR kept in code but off. Max funds 15 | `models.py` | Requested: initial linear solver with constraints |
+| 2026-10-27 | Equity/debt bands redefined as 20/80, 30/70, 50/50, 70/30, 80/20 each ±5, rebased by `(100 - gold)/100`; gold fixed 5/5/6/7/8% exempt from weight filters | `models.py` | Rulebook bands and fixed gold could not both fit (e.g. Aggressive floors 80+17 = 97 vs 92 available) |
+| 2026-10-27 | Cap mix constraint applied from Pass 1; safety margin on equity/debt floors; iterative removal of sub-minimum weights | `models.py` | Mod Aggressive / Aggressive were outside their L/M/S ranges; clean-up and rounding pulled results below floors |
+| 2026-10-27 | Max weight per fund 15% for all models; 16.67% (`max_w`) for Conservative and Mod Conservative | `models.py` | Conservative pools too thin to meet debt bands at 15% |
+| 2026-10-27 | Solver objective: maximise 3Y return minus `risk_lambda` × SD (2.0 / 1.5 / 1.0 / 0.5 / 0.0) | `models.py` | Return and SD barely differed between models |
+| 2026-10-27 | Portfolio SD now from covariance of daily NAV returns (3Y, annualised ×252); NAV-based SD shown for funds with no Morningstar SD; daily NAV cache | `models.py` | Morningstar SD is empty for every debt fund, so the old weighted average ignored the debt sleeve |
+| 2026-10-27 | Minimum 3 years of NAV history for every candidate (gold included) | `models.py` | NAV-based risk needs a full lookback; excludes newer gold/silver FoFs |
+| 2026-10-27 | Documented Sep 2026 rules already in code: AMC cap 30%, Liquid/Overnight exclusivity, eligibility filter, whole-% rounding | `models.py` | Rulebook had not been updated since Aug 2026 (the Sep 2026 architecture document is not in the repo) |
+| 2026-10-30 | Aggressive fixed gold 8% → 7% | `models.py` | Requested |
+| 2026-10-30 | Aggressive `max_w` 15% → 12% | `models.py` | On 29 Oct data the 15% cap left only 8 funds (four at the cap); 12% gives 9 funds with all bands and cap mix met |
