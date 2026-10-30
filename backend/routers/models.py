@@ -269,7 +269,8 @@ MODELS = {
         "mid_small_ceiling": 50,
         "min_aaa_aa_pct": 70,
         "max_duration": 6.0,
-        "gold_fixed": 8,                                 # doc: 8%
+        "gold_fixed": 7,                                 # 7% (was 8% per doc)
+        "max_w": 12.0,                                   # per-fund cap 12% (default 15%) so the pool spreads over 9+ funds
         "label": "Aggressive", "risk": "High", "risk_score": 5,
         "horizon": "5+ years", "volatility": "10–15%", "risk_lambda": 0.0, "max_drawdown": "15–20%",
         "suitability": "Maximizes growth potential through higher equity allocation across all cap segments, suitable for investors with a long-term horizon and higher risk tolerance.",
@@ -557,12 +558,23 @@ def _solve(funds, eq_lo, eq_hi, debt_lo, debt_hi,
 
     A_ub = np.array(A_ub); b_ub = np.array(b_ub)
     A_eq = np.ones((1, n)); b_eq = np.array([100.0])
-    bounds = [(0.0, max_w)] * n
     c = np.zeros(n) if risk_lambda is None else _objective_vector(funds, risk_lambda)
+    gold_flag = np.array([f.get("isin") in (gold_isins or ()) for f in funds])
+    barred = np.zeros(n, dtype=bool)
 
-    res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method="highs")
-    if res.status == 0:
-        return _filter_weights(res.x, funds, gold_isins, MAX_FUNDS, max_w)
+    # Solve, bar any non-gold fund that lands under the minimum weight and solve again, so the
+    # clean-up afterwards has nothing left to drop (rescaling could break the AMC and per-fund caps)
+    for _ in range(n):
+        res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq,
+                      bounds=[(0.0, 0.0 if barred[i] else max_w) for i in range(n)], method="highs")
+        if res.status != 0:
+            return None
+        active = int((res.x > 1e-6).sum())
+        floor_w = MIN_W_TIGHT if active <= FUND_COUNT_THRESHOLD else MIN_W_LOOSE
+        small = (~gold_flag) & (res.x > 1e-6) & (res.x < floor_w - 1e-6)
+        if not small.any():
+            return _filter_weights(res.x, funds, gold_isins, MAX_FUNDS, max_w)
+        barred[np.argmin(np.where(small, res.x, np.inf))] = True
     return None
 
 

@@ -16,9 +16,9 @@ BugleRock's model portfolios are five risk-tiered, constraint-based portfolios c
 | Moderately Conservative | Low–Moderate | 30% (25–35%) | 70% (65–75%) | 5% |
 | Balanced | Moderate | 50% (45–55%) | 50% (45–55%) | 6% |
 | Moderately Aggressive | Moderate–High | 70% (65–75%) | 30% (25–35%) | 7% |
-| Aggressive | High | 80% (75–85%) | 20% (15–25%) | 8% |
+| Aggressive | High | 80% (75–85%) | 20% (15–25%) | 7% |
 
-**Rebasing for gold.** Equity and debt bands are defined as shares of the non-gold portfolio. The solver applies them scaled by `(100 - gold) / 100`, rounded to 1 dp. Example: Aggressive equity 75–85% becomes 69.0–78.2% with 8% gold. Equity + debt + gold plus a small cash/other residual (from fund holdings) make up 100%. The rebased bands are what the screen shows as targets.
+**Rebasing for gold.** Equity and debt bands are defined as shares of the non-gold portfolio. The solver applies them scaled by `(100 - gold) / 100`, rounded to 1 dp. Example: Aggressive equity 75–85% becomes 69.8–79.0% with 7% gold. Equity + debt + gold plus a small cash/other residual (from fund holdings) make up 100%. The rebased bands are what the screen shows as targets.
 
 ---
 
@@ -128,7 +128,7 @@ NAV_RISK_YEARS = 3       # Lookback for NAV-based risk and minimum fund history
 
 **Per-model overrides possible:**
 - `min_funds` — overrides `MIN_FUNDS` for that model (e.g. Conservative and Mod Conservative use 7)
-- `max_w` — overrides `MAX_W`; **Conservative and Mod Conservative use 16.67%** (their debt-heavy pools are too thin to meet the bands at 15%)
+- `max_w` — overrides `MAX_W`; **Conservative and Mod Conservative use 16.67%** (their debt-heavy pools are too thin to meet the bands at 15%); **Aggressive uses 12%** (at 15% its pool settles on 8 funds)
 - `risk_lambda` — risk penalty in the solver objective (section 6.1)
 - `cap_tol` — overrides `CAP_TOL` (e.g. Balanced uses 15 due to mixed hybrid pool)
 
@@ -168,12 +168,12 @@ All constraints are linear in the weights:
 
 **Per-fund weight bounds:**
 ```
-0 ≤ wᵢ ≤ max_w   (15%; 16.67% for Conservative and Mod Conservative)
+0 ≤ wᵢ ≤ max_w   (15%; 16.67% for Conservative and Mod Conservative; 12% for Aggressive)
 ```
 
 **Fixed gold:**
 ```
-Σ w_gold = gold_fixed   (5 / 5 / 6 / 7 / 8%)
+Σ w_gold = gold_fixed   (5 / 5 / 6 / 7 / 7%)
 ```
 
 **AMC cap:** funds sharing a `branding_name` together hold at most 30%.
@@ -445,11 +445,11 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 ### Aggressive
 | Parameter | Value |
 |---|---|
-| Equity target | 80% ±5 (rebased for 8% gold: 69.0–78.2%) |
-| Debt target | 20% ±5 (rebased: 13.8–23.0%) |
+| Equity target | 80% ±5 (rebased for 7% gold: 69.8–79.0%) |
+| Debt target | 20% ±5 (rebased: 14.0–23.2%) |
 | Cap mix target | L=35% M=33% S=32% ±5% (ranges 30–40 / 28–38 / 27–37) |
-| Fixed gold | 8% |
-| Max weight per fund | 15% |
+| Fixed gold | 7% |
+| Max weight per fund | **12%** |
 | Min funds | 9 (default) |
 | Hybrid tiers | 2, 3, 4 (no tier 1) |
 | Equity categories | All `CORE_EQUITY_CATS` |
@@ -551,3 +551,5 @@ python debug_categories.py      # print all distinct category strings in DB
 | 2026-10-27 | Portfolio SD now from covariance of daily NAV returns (3Y, annualised ×252); NAV-based SD shown for funds with no Morningstar SD; daily NAV cache | `models.py` | Morningstar SD is empty for every debt fund, so the old weighted average ignored the debt sleeve |
 | 2026-10-27 | Minimum 3 years of NAV history for every candidate (gold included) | `models.py` | NAV-based risk needs a full lookback; excludes newer gold/silver FoFs |
 | 2026-10-27 | Documented Sep 2026 rules already in code: AMC cap 30%, Liquid/Overnight exclusivity, eligibility filter, whole-% rounding | `models.py` | Rulebook had not been updated since Aug 2026 (the Sep 2026 architecture document is not in the repo) |
+| 2026-10-30 | Aggressive fixed gold 8% → 7% | `models.py` | Requested |
+| 2026-10-30 | Aggressive `max_w` 15% → 12% | `models.py` | On 29 Oct data the 15% cap left only 8 funds (four at the cap); 12% gives 9 funds with all bands and cap mix met |
