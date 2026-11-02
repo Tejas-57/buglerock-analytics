@@ -790,7 +790,6 @@ export function rtOpenReport(R) {
     + '</div>'
     + `<div><div style="font-size:14px;font-weight:600;color:${vc};margin-bottom:5px">Plan verdict</div>`
     + `<div style="font-size:12.5px;color:#555;line-height:1.7">${vm}</div>`
-    + (R.medianDepAge ? `<div style="margin-top:8px;font-size:11px;color:${GR60}">In failed scenarios, corpus typically depletes around age <strong>${R.medianDepAge}</strong> — ${IN.lifeExp - R.medianDepAge} years short of plan horizon.</div>` : '')
     + '</div></div>'
     + '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px">'
     + [
