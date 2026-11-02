@@ -9,6 +9,15 @@ Mutual-fund research and portfolio platform. React frontend (Vercel, `fundiq.bug
 - Ask before `git push`, and before merging anything.
 - Edit files in place. The "full files only" and "no multi-line terminal code" rules in the README are for the browser workflow and do not apply here.
 
+### Branch and sync routine
+- Only one person works in this repo, so there are no conflicts to pull in. But a PR merge adds a merge commit to `main` that the local copy lacks. Before starting new work, `git fetch` and create the branch from `origin/main`, so it never misses earlier merged work.
+- Branch per topic (e.g. model portfolios, retirement planner), not per day: Claude cannot tell when a day starts or ends. Start a new branch when the work moves to something unrelated, or when the user says "starting a new day". If the checked-out branch is old, ask whether to start a fresh one.
+- One change per commit, with a clear `<type>(<scope>): <description>` message. This lets a single change be reverted (`git revert <commit>`) or cherry-picked without touching the rest. Git history is Claude's record of past work across sessions, so write messages that explain the change.
+- Merge only after the change is tested on localhost. If a problem is found on the branch before merging, fix forward on the same branch; no revert is needed.
+- Deploy one thing immediately when the user asks: cherry-pick that commit onto a new branch from `origin/main`, push, open a PR, and merge on approval. Later merging of the topic branch is fine.
+- Pull requests are created with the GitHub CLI, installed per user and logged in as `Tejas-57`. In a new terminal use `gh`; otherwise the full path is `%LOCALAPPDATA%\Microsoft\WinGet\Packages\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\bin\gh.exe`.
+- Still ask before every push and every merge, even for urgent deploys.
+
 ## Running locally
 - Backend: `cd backend && venv\scripts\activate && python main.py` (port 8000, auto-reload)
 - Frontend: `cd frontend && npm start` (http://localhost:3000)
