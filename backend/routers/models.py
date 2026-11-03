@@ -11,6 +11,9 @@ BL+CVaR-LP (Black-Litterman posterior → Rockafellar-Uryasev CVaR) is kept in t
 switched off. Set SOLVER_MODE = "bl_cvar" to re-enable it; the LP then acts as its fallback.
 
 Methodology: BugleRock Model Portfolio Construction Architecture v1 (Sep 2026)
+  NOTE: the return floor, down-capture ceiling, mid+small ceiling, credit quality floor, duration
+  ceiling and profile-scaled min holding below are enforced only by the BL+CVaR optimiser
+  (SOLVER_MODE = "bl_cvar", off). The active LP solver ignores them; see MODEL_PORTFOLIOS_RULEBOOK.md.
   Changes from Aug 2026 rulebook:
     - Gold fixed allocation per profile (not a range)
     - AMC cap reduced 35% → 30%
@@ -122,12 +125,16 @@ DUAL_ALLOWED_CATS = {
 # Per-fund cap override for Conservative / Mod Conservative (default is MAX_W / PER_FUND_CAP, 15%)
 CONSERVATIVE_MAX_W = round(100.0 / 6, 4)
 
+# Fields read only by the BL+CVaR optimiser (SOLVER_MODE = "bl_cvar", currently off), NOT enforced
+# by the active LP solver: dncap_ceiling, stress_ceiling, cvar_max_funds, min_holding_pct,
+# return_floor, mid_small_ceiling, min_aaa_aa_pct, max_duration.
+# LP minimum weights come from MIN_W_LOOSE / MIN_W_TIGHT, not min_holding_pct.
 MODELS = {
     "conservative": {
         # BL+CVaR constraint params
         "dncap_ceiling": 92, "stress_ceiling": -10,
         "cvar_max_funds": 10, "min_holding_pct": 4,          # doc: 4% for conservative
-        "return_floor": 6.5,                             # % annualised, hard constraint
+        "return_floor": 6.5,                             # % annualised, hard constraint (BL+CVaR only)
         "mid_small_ceiling": 15,                         # % absolute portfolio look-through
         "min_aaa_aa_pct": 89,                            # % of debt sleeve min AAA+AA
         "max_duration": 2.5,                             # years, weighted mod duration
@@ -1587,8 +1594,9 @@ def _pick_candidates(eq_pool, debt_pool, hybrid_pool, m):
 
 def _pick_gold_candidates(gold_pool, gold_fixed):
     """
-    Pick gold/silver funds by AUM. Silver capped at 30% of precious metals sleeve.
-    Returns 1–2 funds (one ETF + one FoF at most).
+    Pick gold/silver funds by AUM (largest first, rank is ignored). Returns 1–2 funds
+    (one ETF + one FoF at most). The silver <= 30% rule is applied only in the BL+CVaR
+    path, not here or in the LP solver.
     """
     if not gold_pool or not gold_fixed:
         return []
