@@ -370,6 +370,8 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 
 **Hybrid category limits:**
 - Dynamic Asset Allocation: 2 (higher equity hybrid, differentiates from Conservative)
+- Balanced Allocation: 2 (no explicit limit in the config, so the model default `hyb_per_cat` = 2 applies)
+- Multi Asset Allocation: 2 (same default)
 - Equity Savings - Aggressive: 2
 - Equity Savings (plain): 1
 - Equity Savings - Conservative: 1
@@ -436,12 +438,14 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 **Hybrid category limits:**
 - Dynamic Asset Allocation: 2
 - Aggressive Allocation: 2
+- Balanced Allocation: 2 (no explicit limit in the config, so the model default `hyb_per_cat` = 2 applies)
+- Multi Asset Allocation: 2 (same default)
 - Equity Savings - Aggressive: 1
 - Equity Savings (plain/conservative): **0** (too low equity)
 - Conservative Allocation: **0** (too low equity — ~25% equity, wrong for 70%+ mandate)
 - Arbitrage Fund: **0** (excluded)
 
-**Design intent:** Growth with a debt ballast. Broad equity across all cap segments. DAA and Aggressive Allocation hybrids carry meaningful equity. Two debt funds (not one) needed — with only DAA hybrids contributing 8–24% debt each, a single debt fund at 11.1% max is insufficient to reach the debt floor (23.2% rebased).
+**Design intent:** Growth with a debt ballast. Broad equity across all cap segments. DAA, Balanced Allocation, Multi Asset Allocation and Aggressive Allocation hybrids carry meaningful equity. Two debt funds (not one) needed — with only DAA hybrids contributing 8–24% debt each, a single debt fund at 11.1% max is insufficient to reach the debt floor (23.2% rebased).
 
 ---
 
@@ -463,8 +467,11 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 **Equity category limits:**
 - Multi Cap: 1
 - Focused Fund: 1
+- All other core categories (including Contra/Value): 2 (`eq_per_cat`)
 
-**Design intent:** Maximum growth. Near-equal large/mid/small cap target (35/33/32) ensures broad market exposure. Single debt fund acts as a minimal ballast. No conservative hybrids.
+**Hybrid category limits:** none set in the config, so the tier filter alone decides. Tiers 2, 3 and 4 are allowed with up to 2 funds per category (`hyb_per_cat`): Dynamic Asset Allocation, Balanced Allocation, Multi Asset Allocation, Aggressive Allocation, Equity Savings - Aggressive, Equity Savings (plain) and Equity Savings - Conservative. Arbitrage and Conservative Allocation (tier 1) are excluded.
+
+**Design intent:** Maximum growth. Near-equal large/mid/small cap target (35/33/32) ensures broad market exposure. Single debt fund acts as a minimal ballast. Tier 1 hybrids (Arbitrage, Conservative Allocation) are excluded; the two Equity Savings categories are allowed by the config, although the solver may not pick them for an 80% equity mandate.
 
 ---
 
@@ -556,4 +563,4 @@ python debug_categories.py      # print all distinct category strings in DB
 | 2026-10-27 | Documented Sep 2026 rules already in code: AMC cap 30%, Liquid/Overnight exclusivity, eligibility filter, whole-% rounding | `models.py` | Rulebook had not been updated since Aug 2026 (the Sep 2026 architecture document is not in the repo) |
 | 2026-10-30 | Aggressive fixed gold 8% → 7% | `models.py` | Requested |
 | 2026-10-30 | Aggressive `max_w` 15% → 12% | `models.py` | On 29 Oct data the 15% cap left only 8 funds (four at the cap); 12% gives 9 funds with all bands and cap mix met |
-| 2026-11-03 | Documentation only: gold picker is by AUM and admits all Precious Metals ranks; no silver cap in the LP path; config fields used only by BL+CVaR marked as not enforced; stale Aug-era band figures in the Mod Conservative, Balanced and Mod Aggressive notes replaced with the rebased bands | `MODEL_PORTFOLIOS_RULEBOOK.md` | Rulebook-vs-code review; no change to model logic or outputs |
+| 2026-11-03 | Documentation only: gold picker is by AUM and admits all Precious Metals ranks; no silver cap in the LP path; config fields used only by BL+CVaR marked as not enforced; stale Aug-era band figures in the Mod Conservative, Balanced and Mod Aggressive notes replaced with the rebased bands; hybrid lists for Mod Conservative, Mod Aggressive and Aggressive now match the config (Balanced Allocation and Multi Asset Allocation allowed by default; Aggressive allows tier 2 to 4 hybrids) | `MODEL_PORTFOLIOS_RULEBOOK.md` | Rulebook-vs-code review; no change to model logic or outputs |
