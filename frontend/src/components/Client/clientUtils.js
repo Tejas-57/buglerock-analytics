@@ -53,6 +53,27 @@ export function effectiveSuitability(c, today = new Date()) {
   return { status: stored, level: null, message: '' };
 }
 
+// ₹ amounts in lakh / crore, as used across the client screens. '—' for empty or non-numeric input.
+export function fmtINR(n) {
+  if (!n) return '—';
+  const num = typeof n === 'string' ? parseInt(n.replace(/,/g, ''), 10) : n;
+  if (isNaN(num)) return '—';
+  if (num >= 10000000) return '₹' + (num / 10000000).toFixed(1) + 'Cr';
+  if (num >= 100000) return '₹' + (num / 100000).toFixed(1) + 'L';
+  return '₹' + Math.round(num).toLocaleString('en-IN');
+}
+
+// Value after `years` of a lump sum plus a monthly SIP (paid at month end) growing at an annual
+// CAGR of `ratePct`. Monthly rate is the compounding equivalent of the annual one.
+export function projectValue(lump, monthlySip, years, ratePct) {
+  const r = ratePct / 100;
+  const months = Math.round(years * 12);
+  const m = Math.pow(1 + r, 1 / 12) - 1;
+  const lumpFv = (lump || 0) * Math.pow(1 + r, years);
+  const sipFv = monthlySip ? (m === 0 ? monthlySip * months : monthlySip * ((Math.pow(1 + m, months) - 1) / m)) : 0;
+  return { invested: (lump || 0) + (monthlySip || 0) * months, value: lumpFv + sipFv };
+}
+
 // Values stored by the profile form (CIPStep1 HORIZON_OPTIONS) -> display text and the length in
 // years used for illustrative projections (upper end of each band; 10 for "7+").
 export const HORIZON_META = {

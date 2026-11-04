@@ -2,7 +2,8 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useClient } from '../../context/ClientContext';
 import RecommendedModel from './RecommendedModel';
-import { maskPan, fmtDate, effectiveSuitability, HORIZON_META } from './clientUtils';
+import GoalProjection from './GoalProjection';
+import { maskPan, fmtDate, fmtINR as fmt, effectiveSuitability, HORIZON_META } from './clientUtils';
 import './Client.css';
 
 const RISK_TAXONOMY = {
@@ -28,15 +29,6 @@ const PIPELINE_STAGES = [
   { key: 'models',              label: 'Model Portfolios',   path: '/models' },
   { key: 'portfolio',           label: 'Portfolio Builder',  path: '/portfolio' },
 ];
-
-function fmt(n) {
-  if (!n) return '—';
-  const num = typeof n === 'string' ? parseInt(n.replace(/,/g, ''), 10) : n;
-  if (isNaN(num)) return '—';
-  if (num >= 10000000) return '₹' + (num / 10000000).toFixed(1) + 'Cr';
-  if (num >= 100000) return '₹' + (num / 100000).toFixed(1) + 'L';
-  return '₹' + num.toLocaleString('en-IN');
-}
 
 export default function ClientDashboard() {
   const { activeClient } = useClient();
@@ -218,6 +210,9 @@ export default function ClientDashboard() {
           maxFunds={c.constraints?.maxFundsInPortfolio}
         />
       )}
+
+      {/* ── Illustrative goal projection from the reference model's own returns ── */}
+      {riskTax && <GoalProjection client={c} />}
 
       {/* ── Constraints summary ── */}
       {c.constraints && Object.keys(c.constraints).length > 0 && (
