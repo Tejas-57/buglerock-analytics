@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useClient } from '../../context/ClientContext';
+import { maskPan } from './clientUtils';
 import './Client.css';
 
 const RISK_TAXONOMY = {
@@ -73,7 +74,7 @@ export default function ClientDashboard() {
           <div>
             <div className="client-hero-name">{c.name}</div>
             <div className="client-hero-meta">
-              {c.pan && <span>{c.pan}</span>}
+              {c.pan && <span>{maskPan(c.pan)}</span>}
               {c.email && <span>{c.email}</span>}
               {c.rm_name && <span>RM: {c.rm_name}</span>}
             </div>
