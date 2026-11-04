@@ -82,19 +82,8 @@ export function fmtINR(n) {
   return '₹' + Math.round(num).toLocaleString('en-IN');
 }
 
-// Value after `years` of a lump sum plus a monthly SIP (paid at month end) growing at an annual
-// CAGR of `ratePct`. Monthly rate is the compounding equivalent of the annual one.
-export function projectValue(lump, monthlySip, years, ratePct) {
-  const r = ratePct / 100;
-  const months = Math.round(years * 12);
-  const m = Math.pow(1 + r, 1 / 12) - 1;
-  const lumpFv = (lump || 0) * Math.pow(1 + r, years);
-  const sipFv = monthlySip ? (m === 0 ? monthlySip * months : monthlySip * ((Math.pow(1 + m, months) - 1) / m)) : 0;
-  return { invested: (lump || 0) + (monthlySip || 0) * months, value: lumpFv + sipFv };
-}
-
-// Values stored by the profile form (CIPStep1 HORIZON_OPTIONS) -> display text and the length in
-// years used for illustrative projections (upper end of each band; 10 for "7+").
+// Values stored by the profile form (CIPStep1 HORIZON_OPTIONS) -> display text and the upper end
+// of each band in years (10 for "7+").
 export const HORIZON_META = {
   short:    { label: 'Short-term (1–3 yrs)',     years: 3 },
   medium:   { label: 'Medium-term (3–5 yrs)',    years: 5 },

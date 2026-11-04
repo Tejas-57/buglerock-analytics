@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useClient } from '../../context/ClientContext';
 import ClientBook from './ClientBook';
 import RecommendedModel from './RecommendedModel';
-import GoalProjection from './GoalProjection';
 import {
   maskPan, fmtDate, fmtINR as fmt, effectiveSuitability, HORIZON_META, RISK_TAXONOMY, STATUS_META,
 } from './clientUtils';
@@ -239,9 +238,6 @@ export default function ClientDashboard() {
           maxFunds={c.constraints?.maxFundsInPortfolio}
         />
       )}
-
-      {/* ── Illustrative goal projection from the reference model's own returns ── */}
-      {riskTax && <GoalProjection client={c} />}
 
       {/* ── Constraints summary ── */}
       {c.constraints && Object.keys(c.constraints).length > 0 && (
