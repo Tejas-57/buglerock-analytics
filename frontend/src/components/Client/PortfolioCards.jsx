@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import {
   listPortfolios, listVersions, getVersion, deletePortfolio, fetchCurrentModel, SOURCE_LABEL,
 } from './clientPortfolios';
-import { fmtDate } from './clientUtils';
+import { fmtDate, fmtINR } from './clientUtils';
+import { RT_KEYS } from '../RetirementPlanner/RetirementPlanner';
 import './Client.css';
 
 const MIX_COLORS = { Equity: '#912F63', Debt: '#3E3452', 'Cash & Others': '#A795AE' };
@@ -101,6 +102,26 @@ function PortfolioCard({ clientId, p, onDeleted }) {
     }
   }
 
+  // Puts the saved inputs and report back into the planner's own storage, then opens it on the Results tab.
+  async function openRetirement() {
+    let hasOpenPlan = false;
+    try { const cur = localStorage.getItem(RT_KEYS.result); hasOpenPlan = !!cur && cur !== 'null'; } catch { /* storage unavailable */ }
+    if (hasOpenPlan && !window.confirm('This replaces the plan currently open in the Retirement Planner. Continue?')) return;
+    try {
+      const v = await getVersion(clientId, p.portfolio_key, p.version);
+      const { inputs, result } = v.snapshot || {};
+      if (!inputs || !result) throw new Error('This saved plan has no report to open.');
+      localStorage.setItem(RT_KEYS.form, JSON.stringify(inputs.form));
+      localStorage.setItem(RT_KEYS.goals, JSON.stringify(inputs.goals));
+      localStorage.setItem(RT_KEYS.lumps, JSON.stringify(inputs.lumps));
+      localStorage.setItem(RT_KEYS.result, JSON.stringify(result));
+      localStorage.setItem(RT_KEYS.step, JSON.stringify('output'));
+      navigate('/retirement-planner');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   function openModel() {
     try { localStorage.setItem('mp_sel', p.model_key); } catch { /* storage unavailable */ }
     navigate('/models');
@@ -123,6 +144,7 @@ function PortfolioCard({ clientId, p, onDeleted }) {
             </button>
           )}
           {p.source === 'model' && <button className="btn-outline" onClick={openModel}>Open in Model Portfolios</button>}
+          {p.source === 'retirement' && <button className="btn-outline" onClick={openRetirement}>Open in Retirement Planner</button>}
           <button className="btn-outline" onClick={toggle}>{open ? 'Hide details' : 'Details'}</button>
         </div>
       </div>
@@ -163,6 +185,19 @@ function PortfolioCard({ clientId, p, onDeleted }) {
               This portfolio is unchanged. To follow the model, save it again from Model Portfolios and choose Overwrite.
             </div>
           )}
+        </div>
+      )}
+
+      {p.source === 'retirement' && (
+        <div className="pf-stats">
+          <span>
+            <b>{s.success_rate}%</b> chance the plan lasts to age {s.life_exp}
+            {' '}({s.success_rate >= 85 ? 'on track' : s.success_rate >= 65 ? 'needs attention' : 'at risk'})
+          </span>
+          {s.plan_score != null && <span>Plan score <b>{s.plan_score}/100</b></span>}
+          <span>Corpus needed <b>{fmtINR(s.corpus_needed)}</b></span>
+          <span>Median corpus at {s.ret_age} <b>{fmtINR(s.median_corpus)}</b></span>
+          <span>SIP <b>{fmtINR(s.current_sip)}</b>/mo{s.required_sip ? ` (${fmtINR(s.required_sip)} needed for ${s.target_conf}% confidence)` : ''}</span>
         </div>
       )}
 
