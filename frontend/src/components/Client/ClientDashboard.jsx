@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useClient } from '../../context/ClientContext';
 import ClientBook from './ClientBook';
+import PortfolioCards from './PortfolioCards';
 import {
   maskPan, fmtDate, fmtINR as fmt, effectiveSuitability, HORIZON_META, RISK_TAXONOMY, STATUS_META,
 } from './clientUtils';
@@ -155,6 +156,9 @@ export default function ClientDashboard() {
           {c.source_of_funds && <div className="client-kpi-sub">{c.source_of_funds}</div>}
         </div>
       </div>
+
+      {/* ── Portfolios saved against this client ── */}
+      <PortfolioCards clientId={c.id} />
 
       {/* ── Risk Assessment summary ── */}
       {(c.willingness_score != null || c.capacity_score != null) && (
