@@ -9,14 +9,17 @@ import './Client.css';
 // new version; the earlier version stays in the portfolio's history, so nothing is lost.
 //   source       'model' | 'custom' | 'retirement'
 //   defaultName  suggested name for a new portfolio
-//   getPayload   () => ({ model_key?, summary, snapshot }), called only when the user confirms
-export default function SaveToClientDialog({ source, defaultName, getPayload, onClose }) {
+//   getPayload   (variant) => ({ model_key?, summary, snapshot }), called only when the user confirms
+//   variants     optional [{ key, label, desc }]: asks which version of the portfolio to save
+//                (e.g. optimised or original weights) and passes the choice to getPayload
+export default function SaveToClientDialog({ source, defaultName, getPayload, variants, onClose }) {
   const { activeClient } = useClient();
   const navigate = useNavigate();
   const [existing, setExisting] = useState(null); // null while loading
   const [mode, setMode] = useState(null);         // 'new' | 'replace', chosen explicitly
   const [name, setName] = useState(defaultName || '');
   const [targetKey, setTargetKey] = useState('');
+  const [variant, setVariant] = useState(variants?.[0]?.key || null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(null);
@@ -37,7 +40,7 @@ export default function SaveToClientDialog({ source, defaultName, getPayload, on
     setSaving(true);
     setError('');
     try {
-      const payload = getPayload();
+      const payload = getPayload(variant);
       const body = mode === 'new'
         ? { name: name.trim(), source, ...payload }
         : { portfolio_key: targetKey, ...payload };
@@ -70,6 +73,22 @@ export default function SaveToClientDialog({ source, defaultName, getPayload, on
           </>
         ) : (
           <>
+            {variants && (
+              <div className="sp-group">
+                <div className="sp-group-title">Which weights do you want to save?</div>
+                {variants.map(v => (
+                  <label key={v.key} className={`sp-choice ${variant === v.key ? 'on' : ''}`}>
+                    <input type="radio" name="sp-variant" checked={variant === v.key} onChange={() => setVariant(v.key)} />
+                    <div>
+                      <div className="sp-choice-title">{v.label}</div>
+                      <div className="sp-choice-desc">{v.desc}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {variants && <div className="sp-group-title">How do you want to save it?</div>}
             <label className={`sp-choice ${mode === 'new' ? 'on' : ''}`}>
               <input type="radio" name="sp-mode" checked={mode === 'new'} onChange={() => setMode('new')} />
               <div>
