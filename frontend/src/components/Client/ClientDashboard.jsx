@@ -3,25 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useClient } from '../../context/ClientContext';
 import RecommendedModel from './RecommendedModel';
 import GoalProjection from './GoalProjection';
-import { maskPan, fmtDate, fmtINR as fmt, effectiveSuitability, HORIZON_META } from './clientUtils';
+import {
+  maskPan, fmtDate, fmtINR as fmt, effectiveSuitability, HORIZON_META, RISK_TAXONOMY, STATUS_META,
+} from './clientUtils';
 import './Client.css';
-
-const RISK_TAXONOMY = {
-  conservative:    { label: 'Conservative',         riskScore: 1, equityMin: 0,  equityMax: 28, color: '#1A7A52' },
-  mod_conservative:{ label: 'Moderately Conservative', riskScore: 2, equityMin: 28, equityMax: 48, color: '#2563EB' },
-  balanced:        { label: 'Balanced',             riskScore: 3, equityMin: 48, equityMax: 70, color: '#D97706' },
-  mod_aggressive:  { label: 'Moderately Aggressive', riskScore: 4, equityMin: 70, equityMax: 90, color: '#EA580C' },
-  aggressive:      { label: 'Aggressive',           riskScore: 5, equityMin: 80, equityMax: 90, color: '#912F63' },
-};
-
-const STATUS_META = {
-  draft:      { label: 'Draft',       bg: '#F3F4F6', txt: '#6B7280' },
-  indicative: { label: 'Indicative',  bg: '#FEF3C7', txt: '#92400E' },
-  assessed:   { label: 'Assessed',    bg: '#D1FAE5', txt: '#065F46' },
-  approved:   { label: 'Approved',    bg: '#D1FAE5', txt: '#065F46' },
-  review_due: { label: 'Review Due',  bg: '#FEF3C7', txt: '#92400E' },
-  expired:    { label: 'Expired',     bg: '#FEE2E2', txt: '#991B1B' },
-};
 
 const PIPELINE_STAGES = [
   { key: 'cip',                 label: 'Client Profile',     path: '/client/profile' },
