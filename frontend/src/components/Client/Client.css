@@ -111,6 +111,25 @@
   letter-spacing: 0.03em;
 }
 
+/* ── Action banner ── */
+.client-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.client-banner.info   { background: #EFF6FF; border: 1px solid #BFDBFE; color: #1E40AF; }
+.client-banner.warn   { background: #FEF3C7; border: 1px solid #D97706; color: #92400E; }
+.client-banner.danger { background: #FEE2E2; border: 1px solid #DC2626; color: #991B1B; }
+
+.client-banner .btn-outline { padding: 6px 12px; font-size: 12px; flex-shrink: 0; }
+
 /* ── KPI strip ── */
 .client-kpi-strip {
   display: flex;

@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useClient } from '../../context/ClientContext';
-import { maskPan } from './clientUtils';
+import { maskPan, fmtDate, effectiveSuitability, HORIZON_META } from './clientUtils';
 import './Client.css';
 
 const RISK_TAXONOMY = {
@@ -59,7 +59,9 @@ export default function ClientDashboard() {
 
   const c = activeClient;
   const riskTax = c.risk_profile ? RISK_TAXONOMY[c.risk_profile] : null;
-  const sm = STATUS_META[c.suitability_status] || STATUS_META.draft;
+  const suit = effectiveSuitability(c);
+  const sm = STATUS_META[suit.status] || STATUS_META.draft;
+  const horizonLabel = HORIZON_META[c.horizon]?.label || c.horizon;
 
   // Pipeline — CIP is done if status is not draft
   const cipDone = c.suitability_status && c.suitability_status !== 'draft';
@@ -95,6 +97,16 @@ export default function ClientDashboard() {
         </div>
       </div>
 
+      {/* ── Action banner (computed from valid_until / next_review_date) ── */}
+      {suit.level && (
+        <div className={`client-banner ${suit.level}`}>
+          <span>{suit.message}</span>
+          <button className="btn-outline" onClick={() => navigate('/client/profile')}>
+            {suit.status === 'draft' || suit.status === 'indicative' ? 'Complete profile' : 'Update profile'}
+          </button>
+        </div>
+      )}
+
       {/* ── KPI strip ── */}
       <div className="client-kpi-strip">
         <div className="client-kpi">
@@ -114,15 +126,12 @@ export default function ClientDashboard() {
         <div className="client-kpi">
           <div className="client-kpi-label">Objective</div>
           <div className="client-kpi-value">{c.objective || '—'}</div>
-          {c.horizon && <div className="client-kpi-sub">Horizon: {c.horizon}</div>}
+          {c.horizon && <div className="client-kpi-sub">Horizon: {horizonLabel}</div>}
         </div>
         <div className="client-kpi">
           <div className="client-kpi-label">Next Review</div>
-          <div className="client-kpi-value">
-            {c.next_review_date
-              ? new Date(c.next_review_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-              : '—'}
-          </div>
+          <div className="client-kpi-value">{fmtDate(c.next_review_date)}</div>
+          {c.valid_until && <div className="client-kpi-sub">Assessment valid to {fmtDate(c.valid_until)}</div>}
           {c.overall_score != null && (
             <div className="client-kpi-sub">Score: {c.overall_score}/100</div>
           )}
