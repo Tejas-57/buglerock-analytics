@@ -561,30 +561,32 @@ Results keyed by `portfolio.key` — switching portfolios resets and re-fetches,
 Reuses `PDFProposal` directly via `buildPDFProps()` adapter. If X-Ray was opened first, `stressData` and `overlapData` are passed through automatically.
 
 #### Model Portfolio Construction — Methodology (Oct 2026)
-Pipeline: **Sample Covariance → Black-Litterman → CVaR-LP**
+Active solver: **HiGHS LP** (`SOLVER_MODE = "lp"` in `backend/routers/models.py`). It maximises weighted 3Y return minus `risk_lambda` × weighted 3Y SD, subject to linear constraints. The Black-Litterman + CVaR-LP optimiser is still in the file but switched off; set `SOLVER_MODE = "bl_cvar"` to re-enable it (the LP then acts as its fallback).
 
 | Step | Detail |
 |---|---|
-| Sample covariance | Equal-weighted, 260 weekly NAV returns, annualised ×52. No EWMA, no Ledoit-Wolf. |
-| BL prior | Equal-weight (1/N per fund) — not AUM-weighted. Avoids large AMC distribution bias. |
-| BL views | 5 House Views: Equity=Overweight, Debt=Neutral, Gold=Moderate Overweight, Midcap=Moderate Overweight, Smallcap=Selective |
-| CVaR-LP objective | min CVaR − 0.5 × E[r_BL]. BL posterior used as soft return preference. |
-| Constraints | Equity/debt bands, gold fixed (5/5/6/7/8%), cap mix (L/M/S ±tol), AMC 30%, per-fund 16.67%, down-capture, duration, credit quality, mid+small look-through |
-| Relaxation order | Layer 1: drop corr pairs → Layer 2: drop AMC cap + soft constraints → Layer 3: drop cap mix → LP fallback |
-| Gold | Always protected — never dropped in any relaxation layer |
-| Weight rounding | Largest-remainder to whole percentages |
+| Universe | R1/R2 ranked funds with a NAV, plus all Precious Metals funds. Eligibility: `return_3y` and at least one CY2021–CY2025 return; 3 years of NAV history for every candidate (gold included). |
+| Candidate pool | Per-model category limits for equity, debt and hybrid sleeves (see rulebook). |
+| Objective | min −Σ wᵢ · (return_3yᵢ − risk_lambda · sd_navᵢ); `risk_lambda` 2.0 / 1.5 / 1.0 / 0.5 / 0.0 from Conservative to Aggressive. |
+| Constraints | Equity/debt bands rebased for gold, fixed gold, cap mix (L/M/S ±tol), AMC cap 30%, per-fund cap, minimum fund count, minimum weight 3% (5% when 11 or fewer funds), max 15 funds. |
+| Two-pass solve | Pass 1 forces the fund count with the cap mix on. Pass 2 relaxes the cap-mix tolerance step by step (+3, +6, +10, +15), then widens the bands ±5 as a last resort. |
+| Gold | Fixed per model, exempt from every weight filter. Picked by AUM (one ETF and one FoF at most). |
+| Post-solve | Liquid/Overnight exclusivity, then largest-remainder rounding to whole percentages. |
+| Risk shown | Portfolio SD from the covariance of daily NAV returns (3Y, ×252). |
 
-**Per-model parameters (Oct 2026):**
+**Per-model parameters (current):**
 
-| Model | Equity | Debt | Gold | Cap mix | dncap | Min holding |
-|---|---|---|---|---|---|---|
-| Conservative | 22–28% | 62–73% | 5% | L=75 M=15 S=10 ±5 | 92 | 4% |
-| Mod Conservative | 33–42% | 52–62% | 5% | L=70 M=20 S=10 ±5 | 90 | 4% |
-| Balanced | 50–60% | 40–50% | 6% | L=60 M=25 S=15 ±15 | 88 | 3% |
-| Mod Aggressive | 68–76% | 22–33% | 7% | L=50 M=27 S=23 ±5 | 86 | 3% |
-| Aggressive | 80–87% | 8–23% | 8% | L=35 M=33 S=32 ±5 | 84 | 4% |
+| Model | Equity | Debt | Gold | Cap mix | Max per fund | Min funds | risk_lambda |
+|---|---|---|---|---|---|---|---|
+| Conservative | 20% ±5 (14.2–23.8) | 80% ±5 (71.2–80.8) | 5% | L=75 M=15 S=10 ±5 | 16.67% | 7 | 2.0 |
+| Mod Conservative | 30% ±5 (23.8–33.2) | 70% ±5 (61.8–71.2) | 5% | L=70 M=20 S=10 ±5 | 16.67% | 7 | 1.5 |
+| Balanced | 50% ±5 (42.3–51.7) | 50% ±5 (42.3–51.7) | 6% | L=60 M=25 S=15 ±15 | 15% | 9 | 1.0 |
+| Mod Aggressive | 70% ±5 (60.5–69.8) | 30% ±5 (23.2–32.6) | 7% | L=50 M=27 S=23 ±5 | 15% | 9 | 0.5 |
+| Aggressive | 80% ±5 (69.8–79.0) | 20% ±5 (14.0–23.2) | 7% | L=35 M=33 S=32 ±5 | 12% | 9 | 0.0 |
 
-**Rulebook:** `backend/RULEBOOK.md` — full per-model fund category limits and solver logic.
+Bands are shares of the non-gold portfolio; the figures in brackets are the rebased bands the solver and the screen use.
+
+**Rulebook:** `MODEL_PORTFOLIOS_RULEBOOK.md` (repo root) — full per-model fund category limits and solver logic. Update it in the same commit as any change to model portfolio logic.
 
 #### Backend (`models.py`) — blended fields
 `_get_funds` SQL and `blended{}` now include:

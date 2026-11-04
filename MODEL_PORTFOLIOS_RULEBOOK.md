@@ -1,7 +1,7 @@
 # BugleRock Model Portfolios — Rulebook
 
 > **Source files:** `backend/routers/models.py` · `frontend/src/components/ModelPortfolios/ModelPortfolios.jsx`  
-> **Last updated:** 2026-10-27  
+> **Last updated:** 2026-11-03  
 > Every future change to model portfolio logic must be reflected in this document alongside the code change.
 
 ---
@@ -25,7 +25,7 @@ BugleRock's model portfolios are five risk-tiered, constraint-based portfolios c
 ## 2. Fund Universe
 
 ### Source
-Daily Excel file from Morningstar, parsed into `DailyFundData` table. Only **R1 and R2 ranked funds** with a valid NAV are eligible.
+Daily Excel file from Morningstar, parsed into `DailyFundData` table. Only **R1 and R2 ranked funds** with a valid NAV are eligible. **Exception:** Precious Metals (gold/silver) funds are admitted whatever their rank (`_get_funds`), so the gold sleeve is not limited to R1/R2.
 
 ### Asset Classes Used
 - **Equity** — Active equity funds only (no ETFs, no passive index funds)
@@ -126,6 +126,8 @@ BAND_MARGIN = 3.0        # Solver aims this far inside the equity/debt floors (s
 NAV_RISK_YEARS = 3       # Lookback for NAV-based risk and minimum fund history
 ```
 
+**Config fields not enforced by the active LP solver.** Each entry in `MODELS` also carries `dncap_ceiling`, `stress_ceiling`, `return_floor`, `mid_small_ceiling`, `min_aaa_aa_pct`, `max_duration`, `min_holding_pct` and `cvar_max_funds`. They are read only by the BL+CVaR optimiser (`SOLVER_MODE = "bl_cvar"`, currently off), so with `SOLVER_MODE = "lp"` they have **no effect** on the portfolios. Minimum weights in the LP come from `MIN_W_LOOSE` / `MIN_W_TIGHT` above, not from `min_holding_pct`. `mid_small_ceiling`, `min_aaa_aa_pct` and `max_duration` are still returned in each portfolio's `target` in the API response; they are informational only.
+
 **Per-model overrides possible:**
 - `min_funds` — overrides `MIN_FUNDS` for that model (e.g. Conservative and Mod Conservative use 7)
 - `max_w` — overrides `MAX_W`; **Conservative and Mod Conservative use 16.67%** (their debt-heavy pools are too thin to meet the bands at 15%); **Aggressive uses 12%** (at 15% its pool settles on 8 funds)
@@ -203,7 +205,8 @@ The true cap mix is a ratio: `Σ(wᵢ · eq_pctᵢ · largeᵢ) / Σ(wᵢ · eq_
 **Important:** Only funds where `large + mid + small > 1` participate in cap mix constraints. Funds with missing or all-zero cap data are excluded — consistent with how cap mix is calculated in the output.
 
 ### 6.5 Gold sleeve and eligibility
-- Gold/silver candidates come from `Precious Metals` funds; the picker (`_pick_gold_candidates`) offers the best-ranked gold funds.
+- Gold/silver candidates come from `Precious Metals` funds. The picker (`_pick_gold_candidates`) sorts them by **fund size (AUM), largest first**, not by rank, and offers at most two: one ETF and one fund of funds (FoF). The type is read from the category name ("fof" or "fund of fund" means FoF, anything else is treated as ETF).
+- **No silver cap in the active solver.** The "silver at most 30% of the gold sleeve" rule is only implemented in the BL+CVaR path (switched off). With the LP solver, either of the two picked funds can be silver and nothing limits its share.
 - The gold weight is fixed per model and is **exempt from every weight filter** (3% / 5% minimums, rescaling), so the fixed allocation always survives.
 - **Eligibility filter** (non-gold funds): a fund must have `return_3y` and at least one calendar-year return for 2021–2025. Gold is exempt from this filter.
 - **Minimum NAV history:** every candidate, gold included, needs NAV data reaching back 3 years (7-day grace). This removes newer gold/silver fund-of-funds, so it mainly shapes the gold pool.
@@ -367,6 +370,8 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 
 **Hybrid category limits:**
 - Dynamic Asset Allocation: 2 (higher equity hybrid, differentiates from Conservative)
+- Balanced Allocation: 2 (no explicit limit in the config, so the model default `hyb_per_cat` = 2 applies)
+- Multi Asset Allocation: 2 (same default)
 - Equity Savings - Aggressive: 2
 - Equity Savings (plain): 1
 - Equity Savings - Conservative: 1
@@ -374,7 +379,7 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 - Arbitrage Fund: **0** (excluded)
 - Aggressive Allocation: **0** (too high equity)
 
-**Design intent:** Modest step up from Conservative. More equity via Large & Mid Cap and Flexi Cap (higher return potential than pure Large Cap). DAA hybrids carry meaningful equity. No arbitrage. Debt floor lower than Conservative (52% vs 62%) to give room for higher-equity hybrids.
+**Design intent:** Modest step up from Conservative. More equity via Large & Mid Cap and Flexi Cap (higher return potential than pure Large Cap). DAA hybrids carry meaningful equity. No arbitrage. Debt band lower than Conservative (rebased 61.8–71.2% vs 71.2–80.8%) to give room for higher-equity hybrids.
 
 **Note on bands:** the equity/debt bands are now the centre ±5 definition above, rebased for gold. The 16.67% per-fund cap is kept for this model because the 15% cap makes the debt floor unreachable with this pool.
 
@@ -406,7 +411,7 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 - Conservative Allocation: 1 (debt anchor — key to Pass 1 feasibility)
 - Arbitrage Fund: **0** (excluded)
 
-**Design intent:** True 50/50 mandate. Wide hybrid pool needed — DAA, Aggressive Allocation, and Conservative Allocation all participate. Conservative Allocation (1 fund) is critical: at 65–70% debt, it provides the debt anchor that makes the 42–48% debt floor reachable at forced_max_w=11.1%. Cap tolerance widened to ±15 because the mixed hybrid pool makes tight cap mix constraints infeasible alongside the equity/debt targets.
+**Design intent:** True 50/50 mandate. Wide hybrid pool needed — DAA, Aggressive Allocation, and Conservative Allocation all participate. Conservative Allocation (1 fund) is critical: at 65–70% debt, it provides the debt anchor that makes the debt floor (42.3% rebased) reachable at forced_max_w=11.1%. Cap tolerance widened to ±15 because the mixed hybrid pool makes tight cap mix constraints infeasible alongside the equity/debt targets.
 
 ---
 
@@ -433,12 +438,14 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 **Hybrid category limits:**
 - Dynamic Asset Allocation: 2
 - Aggressive Allocation: 2
+- Balanced Allocation: 2 (no explicit limit in the config, so the model default `hyb_per_cat` = 2 applies)
+- Multi Asset Allocation: 2 (same default)
 - Equity Savings - Aggressive: 1
 - Equity Savings (plain/conservative): **0** (too low equity)
 - Conservative Allocation: **0** (too low equity — ~25% equity, wrong for 70%+ mandate)
 - Arbitrage Fund: **0** (excluded)
 
-**Design intent:** Growth with a debt ballast. Broad equity across all cap segments. DAA and Aggressive Allocation hybrids carry meaningful equity. Two debt funds (not one) needed — with only DAA hybrids contributing 8–24% debt each, a single debt fund at 11.1% max is insufficient to reach 27% debt floor.
+**Design intent:** Growth with a debt ballast. Broad equity across all cap segments. DAA, Balanced Allocation, Multi Asset Allocation and Aggressive Allocation hybrids carry meaningful equity. Two debt funds (not one) needed — with only DAA hybrids contributing 8–24% debt each, a single debt fund at 11.1% max is insufficient to reach the debt floor (23.2% rebased).
 
 ---
 
@@ -460,8 +467,11 @@ Uses the **actual blended 5Y CAGR** from the portfolio — not an assumed return
 **Equity category limits:**
 - Multi Cap: 1
 - Focused Fund: 1
+- All other core categories (including Contra/Value): 2 (`eq_per_cat`)
 
-**Design intent:** Maximum growth. Near-equal large/mid/small cap target (35/33/32) ensures broad market exposure. Single debt fund acts as a minimal ballast. No conservative hybrids.
+**Hybrid category limits:** none set in the config, so the tier filter alone decides. Tiers 2, 3 and 4 are allowed with up to 2 funds per category (`hyb_per_cat`): Dynamic Asset Allocation, Balanced Allocation, Multi Asset Allocation, Aggressive Allocation, Equity Savings - Aggressive, Equity Savings (plain) and Equity Savings - Conservative. Arbitrage and Conservative Allocation (tier 1) are excluded.
+
+**Design intent:** Maximum growth. Near-equal large/mid/small cap target (35/33/32) ensures broad market exposure. Single debt fund acts as a minimal ballast. Tier 1 hybrids (Arbitrage, Conservative Allocation) are excluded; the two Equity Savings categories are allowed by the config, although the solver may not pick them for an 80% equity mandate.
 
 ---
 
@@ -553,3 +563,4 @@ python debug_categories.py      # print all distinct category strings in DB
 | 2026-10-27 | Documented Sep 2026 rules already in code: AMC cap 30%, Liquid/Overnight exclusivity, eligibility filter, whole-% rounding | `models.py` | Rulebook had not been updated since Aug 2026 (the Sep 2026 architecture document is not in the repo) |
 | 2026-10-30 | Aggressive fixed gold 8% → 7% | `models.py` | Requested |
 | 2026-10-30 | Aggressive `max_w` 15% → 12% | `models.py` | On 29 Oct data the 15% cap left only 8 funds (four at the cap); 12% gives 9 funds with all bands and cap mix met |
+| 2026-11-03 | Documentation only: gold picker is by AUM and admits all Precious Metals ranks; no silver cap in the LP path; config fields used only by BL+CVaR marked as not enforced; stale Aug-era band figures in the Mod Conservative, Balanced and Mod Aggressive notes replaced with the rebased bands; hybrid lists for Mod Conservative, Mod Aggressive and Aggressive now match the config (Balanced Allocation and Multi Asset Allocation allowed by default; Aggressive allows tier 2 to 4 hybrids) | `MODEL_PORTFOLIOS_RULEBOOK.md` | Rulebook-vs-code review; no change to model logic or outputs |
