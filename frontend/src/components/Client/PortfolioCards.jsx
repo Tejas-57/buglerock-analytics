@@ -92,6 +92,14 @@ function PortfolioCard({ clientId, p, onDeleted }) {
         </>
       )}
 
+      {p.source === 'custom' && (
+        <div className="pf-stats">
+          <span><b>{s.fund_count ?? '—'}</b> funds</span>
+          {s.weights && <span>Weights: <b>{s.weights}</b></span>}
+          {s.risk_profile && <span>Mandate risk: <b>{s.risk_profile}</b></span>}
+        </div>
+      )}
+
       {error && <div className="pf-error">{error}</div>}
 
       {open && (
