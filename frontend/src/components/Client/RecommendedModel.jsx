@@ -1,11 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
-
-const API = process.env.REACT_APP_API_URL || '';
-
-// The model solver runs on every request, so keep one result per model for the day.
-const modelCache = {};
-const dayKey = () => new Date().toISOString().slice(0, 10);
+import { useReferenceModel } from './useReferenceModel';
 
 const MIX_COLORS = {
   Equity:          '#912F63',
@@ -17,36 +12,14 @@ const MIX_COLORS = {
 const pct = (v, d = 1) => (v == null ? '—' : `${Number(v).toFixed(d)}%`);
 const num = (v, d = 2) => (v == null ? '—' : Number(v).toFixed(d));
 
-// The risk_profile values stored on a client are the same keys the backend uses for its models.
 export default function RecommendedModel({ riskProfile, maxFunds }) {
   const navigate = useNavigate();
-  const [state, setState] = useState({ loading: true, model: null, error: null });
-  const [retry, setRetry] = useState(0);
-
-  useEffect(() => {
-    let live = true;
-    const ck = `${riskProfile}|${dayKey()}`;
-    if (modelCache[ck]) {
-      setState({ loading: false, model: modelCache[ck], error: null });
-      return undefined;
-    }
-    setState({ loading: true, model: null, error: null });
-    fetch(`${API}/api/models/detail?key=${encodeURIComponent(riskProfile)}`, { credentials: 'include' })
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(m => {
-        modelCache[ck] = m;
-        if (live) setState({ loading: false, model: m, error: null });
-      })
-      .catch(e => { if (live) setState({ loading: false, model: null, error: e.message }); });
-    return () => { live = false; };
-  }, [riskProfile, retry]);
+  const { loading, model, error, retry } = useReferenceModel(riskProfile);
 
   function openInModels() {
     try { localStorage.setItem('mp_sel', riskProfile); } catch {}
     navigate('/models');
   }
-
-  const { loading, model, error } = state;
 
   return (
     <div className="client-section">
@@ -60,7 +33,7 @@ export default function RecommendedModel({ riskProfile, maxFunds }) {
       {error && (
         <div className="rm-note">
           Model data is unavailable ({error}).{' '}
-          <button className="rm-link" onClick={() => setRetry(n => n + 1)}>Retry</button>
+          <button className="rm-link" onClick={retry}>Retry</button>
         </div>
       )}
 
