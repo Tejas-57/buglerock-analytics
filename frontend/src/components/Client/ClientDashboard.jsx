@@ -179,7 +179,7 @@ export default function ClientDashboard() {
               >
                 <div className="pipeline-label">{stage.label}</div>
                 <div className="pipeline-status">
-                  {isDone ? '✓ Complete' : isNext ? '→ Next step' : 'Pending'}
+                  {isDone ? '✓ Complete' : isNext ? '→ Next step' : 'Not tracked yet'}
                 </div>
               </div>
               {i < PIPELINE_STAGES.length - 1 && (
