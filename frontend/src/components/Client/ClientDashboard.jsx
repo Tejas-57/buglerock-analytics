@@ -74,6 +74,7 @@ export default function ClientDashboard() {
   const suit = effectiveSuitability(c);
   const sm = STATUS_META[suit.status] || STATUS_META.draft;
   const horizonLabel = HORIZON_META[c.horizon]?.label || c.horizon;
+  const summary = [riskTax?.label, HORIZON_META[c.horizon]?.label, c.objective].filter(Boolean).join(' · ');
 
   return (
     <div className="client-dashboard">
@@ -89,7 +90,9 @@ export default function ClientDashboard() {
               {c.pan && <span>{maskPan(c.pan)}</span>}
               {c.email && <span>{c.email}</span>}
               {c.rm_name && <span>RM: {c.rm_name}</span>}
+              {c.updated_at && <span>Updated {fmtDate(c.updated_at)}</span>}
             </div>
+            {summary && <div className="client-hero-summary">{summary}</div>}
           </div>
         </div>
         <div className="client-hero-right">
