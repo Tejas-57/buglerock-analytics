@@ -7,13 +7,6 @@ import {
 } from './clientUtils';
 import './Client.css';
 
-const PIPELINE_STAGES = [
-  { key: 'cip',                 label: 'Client Profile',     path: '/client/profile' },
-  { key: 'retirement-planner',  label: 'Retirement Planner', path: '/retirement-planner' },
-  { key: 'models',              label: 'Model Portfolios',   path: '/models' },
-  { key: 'portfolio',           label: 'Portfolio Builder',  path: '/portfolio' },
-];
-
 function ViewTabs({ view, setView, count }) {
   return (
     <div className="client-view-tabs">
@@ -81,9 +74,6 @@ export default function ClientDashboard() {
   const suit = effectiveSuitability(c);
   const sm = STATUS_META[suit.status] || STATUS_META.draft;
   const horizonLabel = HORIZON_META[c.horizon]?.label || c.horizon;
-
-  // Pipeline — CIP is done if status is not draft
-  const cipDone = c.suitability_status && c.suitability_status !== 'draft';
 
   return (
     <div className="client-dashboard">
@@ -161,31 +151,6 @@ export default function ClientDashboard() {
           <div className="client-kpi-value">{c.tax_status || '—'}</div>
           {c.source_of_funds && <div className="client-kpi-sub">{c.source_of_funds}</div>}
         </div>
-      </div>
-
-      {/* ── Build Pipeline ── */}
-      <div className="client-section-title">Build Pipeline</div>
-      <div className="client-pipeline">
-        {PIPELINE_STAGES.map((stage, i) => {
-          const isDone = stage.key === 'cip' ? cipDone : false;
-          const isNext = !isDone && (i === 0 || PIPELINE_STAGES[i - 1].key === 'cip' ? cipDone : false);
-          return (
-            <React.Fragment key={stage.key}>
-              <div
-                className={`pipeline-card ${isDone ? 'done' : isNext ? 'next' : 'pending'}`}
-                onClick={() => navigate(stage.path)}
-              >
-                <div className="pipeline-label">{stage.label}</div>
-                <div className="pipeline-status">
-                  {isDone ? '✓ Complete' : isNext ? '→ Next step' : 'Not tracked yet'}
-                </div>
-              </div>
-              {i < PIPELINE_STAGES.length - 1 && (
-                <div className="pipeline-sep">›</div>
-              )}
-            </React.Fragment>
-          );
-        })}
       </div>
 
       {/* ── Risk Assessment summary ── */}

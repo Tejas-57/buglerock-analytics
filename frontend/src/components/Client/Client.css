@@ -188,69 +188,6 @@
   margin-bottom: 14px;
 }
 
-/* ── Pipeline ── */
-.client-pipeline {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  margin-bottom: 20px;
-}
-
-.pipeline-card {
-  flex: 1;
-  padding: 14px 16px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s;
-}
-
-.pipeline-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(62, 52, 82, 0.12);
-}
-
-.pipeline-card.done {
-  background: linear-gradient(135deg, #D1FAE5, #A7F3D0);
-  border: 1.5px solid #059669;
-}
-
-.pipeline-card.next {
-  background: linear-gradient(135deg, rgba(145,47,99,0.08), rgba(62,52,82,0.06));
-  border: 1.5px solid #912F63;
-}
-
-.pipeline-card.pending {
-  background: #F9FAFB;
-  border: 1px solid var(--border);
-}
-
-.pipeline-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #3E3452;
-  margin-bottom: 4px;
-}
-
-.pipeline-card.pending .pipeline-label { color: #9CA3AF; }
-
-.pipeline-status {
-  font-size: 10px;
-  color: #912F63;
-}
-
-.pipeline-card.done .pipeline-status { color: #059669; }
-.pipeline-card.pending .pipeline-status { color: #9CA3AF; }
-
-.pipeline-sep {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  flex-shrink: 0;
-  color: #D1D5DB;
-  font-size: 20px;
-}
-
 /* ── Risk scores ── */
 .client-risk-scores {
   display: flex;
