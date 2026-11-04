@@ -8,6 +8,7 @@ import Analyse from './steps/Analyse';
 import Optimise from './steps/Optimise';
 import Compare from './steps/Compare';
 import PDFProposal from './steps/PDFProposal';
+import SaveToClientDialog from '../Client/SaveToClientDialog';
 
 const STEPS = [
   { id: 1, label: 'Client Mandate' },
@@ -43,6 +44,7 @@ function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); 
 export default function PortfolioBuilder({ selectedDate }) {
   const { activeClient } = useClient();
   const navigate = useNavigate();
+  const [saveOpen, setSaveOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(() => {
     // Check for a one-time goto instruction (e.g. from Watchlist Build Portfolio)
     const goto = localStorage.getItem('br_ptf_goto_step');
@@ -164,6 +166,33 @@ export default function PortfolioBuilder({ selectedDate }) {
 
   function markDone(step) { setCompletedSteps(prev => new Set([...prev, step])); }
 
+  // Save to the active client. After optimising, `weights` holds the optimised weights and
+  // `originalWeights` the ones before; the dialog asks which to keep.
+  const isOptimised = Object.keys(originalWeights).length > 0;
+  const hasPortfolio = funds.some(f => weights[f.isin] > 0);
+
+  function buildSavePayload(variant) {
+    const useOriginal = variant === 'original';
+    const used = useOriginal ? originalWeights : weights;
+    const rows = funds
+      .filter(f => used[f.isin] > 0)
+      .map(f => ({ isin: f.isin, name: f.name, category: f.category, weight: used[f.isin] }));
+    return {
+      summary: {
+        fund_count: rows.length,
+        weights: !isOptimised ? 'as built' : useOriginal ? 'original' : 'optimised',
+        risk_profile: ips.riskProfile,
+      },
+      snapshot: {
+        portfolio: { funds: rows },
+        optimised: isOptimised,
+        variant: isOptimised ? (useOriginal ? 'original' : 'optimised') : null,
+        ips,
+        optimiser: isOptimised && !useOriginal ? optimiserResult : null,
+      },
+    };
+  }
+
   function saveIPS() {
     save('br_ptf_ips', ips);
     markDone(1);
@@ -209,6 +238,14 @@ export default function PortfolioBuilder({ selectedDate }) {
             </React.Fragment>
           ))}
           <div className="ptf-rail-right">
+            <button
+              className="btn-outline" style={{ padding: '4px 12px', fontSize: 11 }}
+              disabled={!activeClient || !hasPortfolio}
+              onClick={() => setSaveOpen(true)}
+              title={!activeClient ? 'Select a client first' : !hasPortfolio ? 'Add funds and weights first' : `Save this portfolio to ${activeClient.name}`}
+            >
+              💾 Save to client
+            </button>
             {ipsSaved && <span style={{ background: '#E6F4ED', color: '#1A7A52', fontSize: 10, fontWeight: 600, padding: '3px 10px', borderRadius: 20, border: '1px solid #1A7A52' }}>✓ IPS saved</span>}
             {Object.keys(originalWeights).length > 0 && <span style={{ background: 'rgba(145,47,99,.08)', color: 'var(--brand-primary)', fontSize: 10, fontWeight: 600, padding: '3px 10px', borderRadius: 20, border: '1px solid var(--brand-primary)' }}>⚡ Optimised</span>}
           </div>
@@ -322,6 +359,19 @@ export default function PortfolioBuilder({ selectedDate }) {
           )}
         </div>
       </div>
+
+      {saveOpen && activeClient && (
+        <SaveToClientDialog
+          source="custom"
+          defaultName={ips.name ? `${ips.name} portfolio` : 'Custom portfolio'}
+          onClose={() => setSaveOpen(false)}
+          getPayload={buildSavePayload}
+          variants={isOptimised ? [
+            { key: 'optimised', label: 'Optimised weights', desc: 'What the optimiser produced, as shown now.' },
+            { key: 'original', label: 'Original weights', desc: 'The weights you set before optimising.' },
+          ] : undefined}
+        />
+      )}
     </div>
   );
 }
