@@ -40,6 +40,13 @@ export function deletePortfolio(clientId, portfolioKey) {
   return call(`${clientId}/portfolios/${portfolioKey}`, { method: 'DELETE' });
 }
 
+// Today's version of a model portfolio. The optimiser solves it on request, so this takes a few seconds.
+export async function fetchCurrentModel(modelKey) {
+  const r = await fetch(`${API}/api/models/detail?key=${encodeURIComponent(modelKey)}`, { credentials: 'include' });
+  if (!r.ok) throw new Error(`Could not load the current model (${r.status})`);
+  return r.json();
+}
+
 export const SOURCE_LABEL = {
   model: 'Model portfolio',
   custom: 'Custom portfolio',

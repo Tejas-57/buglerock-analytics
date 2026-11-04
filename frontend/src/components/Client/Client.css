@@ -1426,3 +1426,7 @@
 .pf-empty-actions { display: flex; gap: 8px; margin-top: 12px; }
 .sp-group { margin-bottom: 6px; }
 .sp-group-title { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); margin: 4px 0 8px; }
+.pf-notice { border-radius: 8px; padding: 10px 12px; font-size: 12px; margin-top: 10px; line-height: 1.6; }
+.pf-notice.ok { background: #D1FAE5; border: 1px solid #059669; color: #065F46; }
+.pf-notice.warn { background: #FEF3C7; border: 1px solid #D97706; color: #92400E; }
+.pf-notice-foot { margin-top: 6px; font-style: italic; }

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  listPortfolios, listVersions, getVersion, deletePortfolio, SOURCE_LABEL,
+  listPortfolios, listVersions, getVersion, deletePortfolio, fetchCurrentModel, SOURCE_LABEL,
 } from './clientPortfolios';
 import { fmtDate } from './clientUtils';
 import './Client.css';
@@ -25,13 +25,55 @@ function MixBar({ mix }) {
   );
 }
 
+// A change is flagged when a saved fund has left the model, or when turnover (the share of the
+// portfolio that would have to move to match today's model) is above this many percentage points.
+const TURNOVER_FLAG = 10;
+
+function compareWithModel(savedFunds, currentFunds) {
+  const saved = new Map(savedFunds.map(f => [f.isin, f]));
+  const now = new Map(currentFunds.map(f => [f.isin, f]));
+  const removed = savedFunds.filter(f => !now.has(f.isin));
+  const added = currentFunds.filter(f => !saved.has(f.isin));
+  let absDiff = 0;
+  const moves = [];
+  new Set([...saved.keys(), ...now.keys()]).forEach(isin => {
+    const a = saved.get(isin)?.weight || 0;
+    const b = now.get(isin)?.weight || 0;
+    absDiff += Math.abs(a - b);
+    if (saved.has(isin) && now.has(isin) && Math.abs(a - b) >= 0.5) {
+      moves.push({ name: saved.get(isin).name, from: a, to: b });
+    }
+  });
+  moves.sort((x, y) => Math.abs(y.to - y.from) - Math.abs(x.to - x.from));
+  const turnover = absDiff / 2;
+  return { removed, added, moves, turnover, flagged: removed.length > 0 || turnover > TURNOVER_FLAG };
+}
+
 function PortfolioCard({ clientId, p, onDeleted }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState(null);   // { funds } for the latest version
   const [versions, setVersions] = useState(null);
   const [error, setError] = useState('');
+  const [check, setCheck] = useState(null);     // { loading } | { error } | { result, dataDate }
   const s = p.summary || {};
+
+  // Compares the saved copy with today's model. Solves the model on request, so it only runs on click.
+  async function checkChanges() {
+    setCheck({ loading: true });
+    try {
+      const [saved, current] = await Promise.all([
+        getVersion(clientId, p.portfolio_key, p.version),
+        fetchCurrentModel(p.model_key),
+      ]);
+      setCheck({
+        result: compareWithModel(saved.snapshot?.portfolio?.funds || [], current.funds || []),
+        dataDate: current.data_date,
+      });
+    } catch (e) {
+      setCheck({ error: e.message });
+    }
+  }
 
   async function toggle() {
     const next = !open;
@@ -75,6 +117,11 @@ function PortfolioCard({ clientId, p, onDeleted }) {
           </div>
         </div>
         <div className="pf-actions">
+          {p.source === 'model' && (
+            <button className="btn-outline" onClick={checkChanges} disabled={check?.loading}>
+              {check?.loading ? 'Checking…' : 'Check for changes'}
+            </button>
+          )}
           {p.source === 'model' && <button className="btn-outline" onClick={openModel}>Open in Model Portfolios</button>}
           <button className="btn-outline" onClick={toggle}>{open ? 'Hide details' : 'Details'}</button>
         </div>
@@ -90,6 +137,33 @@ function PortfolioCard({ clientId, p, onDeleted }) {
             {s.data_date && <span>Model data as of {s.data_date}</span>}
           </div>
         </>
+      )}
+
+      {check?.error && <div className="pf-error">{check.error}</div>}
+      {check?.result && (
+        <div className={`pf-notice ${check.result.flagged ? 'warn' : 'ok'}`}>
+          {check.result.flagged
+            ? <strong>The {p.name} model has changed since this was saved on {fmtDate(p.created_at)}.</strong>
+            : <strong>No material change since this was saved. The model is in line with this portfolio.</strong>}
+          <div>
+            {check.result.turnover.toFixed(1)}% of the portfolio would move to match today's model
+            (data as of {check.dataDate || '—'}).
+          </div>
+          {check.result.removed.length > 0 && (
+            <div>No longer in the model: {check.result.removed.map(f => f.name).join(', ')}</div>
+          )}
+          {check.result.added.length > 0 && (
+            <div>New in the model: {check.result.added.map(f => f.name).join(', ')}</div>
+          )}
+          {check.result.moves.slice(0, 5).map(m => (
+            <div key={m.name}>{m.name}: {m.from}% → {m.to}%</div>
+          ))}
+          {check.result.flagged && (
+            <div className="pf-notice-foot">
+              This portfolio is unchanged. To follow the model, save it again from Model Portfolios and choose Overwrite.
+            </div>
+          )}
+        </div>
       )}
 
       {p.source === 'custom' && (
