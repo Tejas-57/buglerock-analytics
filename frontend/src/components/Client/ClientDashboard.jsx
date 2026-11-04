@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useClient } from '../../context/ClientContext';
+import ClientBook from './ClientBook';
 import RecommendedModel from './RecommendedModel';
 import GoalProjection from './GoalProjection';
 import {
@@ -15,9 +16,42 @@ const PIPELINE_STAGES = [
   { key: 'portfolio',           label: 'Portfolio Builder',  path: '/portfolio' },
 ];
 
+function ViewTabs({ view, setView, count }) {
+  return (
+    <div className="client-view-tabs">
+      <button className={`client-view-tab ${view === 'client' ? 'active' : ''}`} onClick={() => setView('client')}>
+        This client
+      </button>
+      <button className={`client-view-tab ${view === 'book' ? 'active' : ''}`} onClick={() => setView('book')}>
+        All clients ({count})
+      </button>
+    </div>
+  );
+}
+
 export default function ClientDashboard() {
-  const { activeClient } = useClient();
+  const { activeClient, clients, setActiveClient } = useClient();
   const navigate = useNavigate();
+  const [view, setView] = useState('client');
+
+  function openClient(client) {
+    setActiveClient(client);
+    setView('client');
+  }
+
+  function newClient() {
+    setActiveClient(null);
+    navigate('/client/profile');
+  }
+
+  // No client selected: show the book if there are clients to pick from
+  if (!activeClient && clients.length > 0) {
+    return (
+      <div className="client-dashboard">
+        <ClientBook clients={clients} activeId={null} onOpen={openClient} onNew={newClient} />
+      </div>
+    );
+  }
 
   if (!activeClient) {
     return (
@@ -35,6 +69,15 @@ export default function ClientDashboard() {
     );
   }
 
+  if (view === 'book') {
+    return (
+      <div className="client-dashboard">
+        <ViewTabs view={view} setView={setView} count={clients.length} />
+        <ClientBook clients={clients} activeId={activeClient.id} onOpen={openClient} onNew={newClient} />
+      </div>
+    );
+  }
+
   const c = activeClient;
   const riskTax = c.risk_profile ? RISK_TAXONOMY[c.risk_profile] : null;
   const suit = effectiveSuitability(c);
@@ -46,6 +89,7 @@ export default function ClientDashboard() {
 
   return (
     <div className="client-dashboard">
+      <ViewTabs view={view} setView={setView} count={clients.length} />
 
       {/* ── Header card ── */}
       <div className="client-hero-card">
