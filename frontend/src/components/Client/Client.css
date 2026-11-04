@@ -1381,3 +1381,25 @@
   color: var(--text-muted);
   min-width: 14px;
 }
+/* ── Save to client dialog ── */
+.sp-overlay {
+  position: fixed; inset: 0; background: rgba(62, 52, 82, 0.45);
+  display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 16px;
+}
+.sp-dialog { background: #fff; border-radius: 12px; padding: 22px 24px; width: 100%; max-width: 460px; box-shadow: 0 12px 40px rgba(62, 52, 82, 0.25); }
+.sp-title { font-size: 16px; font-weight: 600; color: #3E3452; }
+.sp-sub { font-size: 12px; color: var(--text-muted); margin: 2px 0 16px; }
+.sp-choice {
+  display: flex; gap: 10px; align-items: flex-start; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
+}
+.sp-choice.on { border-color: #912F63; background: rgba(145, 47, 99, 0.04); }
+.sp-choice.off { opacity: 0.55; cursor: not-allowed; }
+.sp-choice input[type=radio] { margin-top: 3px; accent-color: #912F63; }
+.sp-choice > div { flex: 1; min-width: 0; }
+.sp-choice-title { font-size: 13px; font-weight: 600; color: #3E3452; }
+.sp-choice-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
+.sp-input { width: 100%; margin-top: 10px; padding: 8px 10px; font-size: 13px; border: 1px solid var(--border); border-radius: 8px; }
+.sp-error { background: #FEE2E2; border: 1px solid #DC2626; color: #991B1B; border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 10px; }
+.sp-done { background: #D1FAE5; border: 1px solid #059669; color: #065F46; border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px; }
+.sp-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
