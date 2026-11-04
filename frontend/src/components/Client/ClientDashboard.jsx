@@ -194,6 +194,16 @@ export default function ClientDashboard() {
             {c.constrained_by && (
               <div className="risk-binding">
                 Binding constraint: <strong>{c.constrained_by === 'capacity' ? 'Risk Capacity' : 'Risk Willingness'}</strong>
+                {c.willingness_score != null && c.capacity_score != null && riskTax && (
+                  <>
+                    {' — '}
+                    {c.willingness_score === c.capacity_score
+                      ? `willingness and capacity are level at ${c.capacity_score}; capacity is treated as binding on a tie. The profile is ${riskTax.label}.`
+                      : c.constrained_by === 'capacity'
+                        ? `capacity (${c.capacity_score}) is lower than willingness (${c.willingness_score}), so the client can afford less risk than they are comfortable with. The profile is held at ${riskTax.label}.`
+                        : `willingness (${c.willingness_score}) is lower than capacity (${c.capacity_score}), so the client could afford more risk than they are comfortable with. The profile is held at ${riskTax.label}.`}
+                  </>
+                )}
               </div>
             )}
           </div>
