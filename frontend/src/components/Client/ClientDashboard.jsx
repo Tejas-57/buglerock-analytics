@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useClient } from '../../context/ClientContext';
 import ClientBook from './ClientBook';
-import RecommendedModel from './RecommendedModel';
 import {
   maskPan, fmtDate, fmtINR as fmt, effectiveSuitability, HORIZON_META, RISK_TAXONOMY, STATUS_META,
 } from './clientUtils';
@@ -229,14 +228,6 @@ export default function ClientDashboard() {
             )}
           </div>
         </div>
-      )}
-
-      {/* ── Reference model for the client's risk profile ── */}
-      {riskTax && (
-        <RecommendedModel
-          riskProfile={c.risk_profile}
-          maxFunds={c.constraints?.maxFundsInPortfolio}
-        />
       )}
 
       {/* ── Constraints summary ── */}
