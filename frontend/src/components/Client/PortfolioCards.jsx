@@ -102,20 +102,27 @@ function PortfolioCard({ clientId, p, onDeleted }) {
     }
   }
 
-  // Puts the saved inputs and report back into the planner's own storage, then opens it on the Results tab.
-  async function openRetirement() {
+  // Puts the saved plan back into the planner's own storage and opens it.
+  //   'report'  the saved report exactly as it was, on the Results tab
+  //   'refresh' the saved inputs only, on the Input tab, ready to edit and run again
+  async function openRetirement(mode) {
     let hasOpenPlan = false;
     try { const cur = localStorage.getItem(RT_KEYS.result); hasOpenPlan = !!cur && cur !== 'null'; } catch { /* storage unavailable */ }
     if (hasOpenPlan && !window.confirm('This replaces the plan currently open in the Retirement Planner. Continue?')) return;
     try {
       const v = await getVersion(clientId, p.portfolio_key, p.version);
       const { inputs, result } = v.snapshot || {};
-      if (!inputs || !result) throw new Error('This saved plan has no report to open.');
+      if (!inputs || (mode === 'report' && !result)) throw new Error('This saved plan has no report to open.');
       localStorage.setItem(RT_KEYS.form, JSON.stringify(inputs.form));
       localStorage.setItem(RT_KEYS.goals, JSON.stringify(inputs.goals));
       localStorage.setItem(RT_KEYS.lumps, JSON.stringify(inputs.lumps));
-      localStorage.setItem(RT_KEYS.result, JSON.stringify(result));
-      localStorage.setItem(RT_KEYS.step, JSON.stringify('output'));
+      if (mode === 'report') {
+        localStorage.setItem(RT_KEYS.result, JSON.stringify(result));
+        localStorage.setItem(RT_KEYS.step, JSON.stringify('output'));
+      } else {
+        localStorage.removeItem(RT_KEYS.result);
+        localStorage.setItem(RT_KEYS.step, JSON.stringify('input'));
+      }
       navigate('/retirement-planner');
     } catch (e) {
       setError(e.message);
@@ -144,7 +151,12 @@ function PortfolioCard({ clientId, p, onDeleted }) {
             </button>
           )}
           {p.source === 'model' && <button className="btn-outline" onClick={openModel}>Open in Model Portfolios</button>}
-          {p.source === 'retirement' && <button className="btn-outline" onClick={openRetirement}>Open in Retirement Planner</button>}
+          {p.source === 'retirement' && (
+            <>
+              <button className="btn-outline" onClick={() => openRetirement('refresh')}>Update with fresh run</button>
+              <button className="btn-outline" onClick={() => openRetirement('report')}>Open saved report</button>
+            </>
+          )}
           <button className="btn-outline" onClick={toggle}>{open ? 'Hide details' : 'Details'}</button>
         </div>
       </div>
@@ -198,6 +210,12 @@ function PortfolioCard({ clientId, p, onDeleted }) {
           <span>Corpus needed <b>{fmtINR(s.corpus_needed)}</b></span>
           <span>Median corpus at {s.ret_age} <b>{fmtINR(s.median_corpus)}</b></span>
           <span>SIP <b>{fmtINR(s.current_sip)}</b>/mo{s.required_sip ? ` (${fmtINR(s.required_sip)} needed for ${s.target_conf}% confidence)` : ''}</span>
+        </div>
+      )}
+      {p.source === 'retirement' && (
+        <div className="pf-note">
+          These figures are the report as saved on {fmtDate(p.created_at)}. They don't update by themselves.
+          Use <strong>Update with fresh run</strong> to re-run the plan with current inputs and save it as a new version.
         </div>
       )}
 
