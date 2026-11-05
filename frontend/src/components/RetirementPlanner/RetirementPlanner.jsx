@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { rtRunSimulation, rtFmt, rtFmtK, rtFmtCr, rtFmtA, rtFmtM } from './rtEngine';
 import { rtBuildFullSections, rtOpenReport } from './rtReport';
+import { useClient } from '../../context/ClientContext';
+import SaveToClientDialog from '../Client/SaveToClientDialog';
 import './RetirementPlanner.css';
 
 // Indian number formatting utilities
@@ -83,6 +85,9 @@ const LS_LUMPS   = 'br_rt_lumps';
 const LS_RESULT  = 'br_rt_result';
 const LS_STEP    = 'br_rt_step';
 
+// Storage keys the client dashboard writes to reopen a saved plan here.
+export const RT_KEYS = { form: LS_FORM, goals: LS_GOALS, lumps: LS_LUMPS, result: LS_RESULT, step: LS_STEP };
+
 function lsGet(key, fallback) {
   try { const v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : fallback; }
   catch { return fallback; }
@@ -95,6 +100,8 @@ function lsClear(...keys) {
 }
 
 export default function RetirementPlanner() {
+  const { activeClient } = useClient();
+  const [saveOpen, setSaveOpen] = useState(false);
   const [f, setF]         = useState(() => lsGet(LS_FORM,   { ...DEFAULTS }));
   const [goals, setGoals] = useState(() => lsGet(LS_GOALS,  DEFAULT_GOALS.map((g) => ({ ...g }))));
   const [lumps, setLumps] = useState(() => lsGet(LS_LUMPS,  DEFAULT_LUMPS.map((l) => ({ ...l }))));
@@ -256,6 +263,11 @@ export default function RetirementPlanner() {
           <button className={`rt-step-tab ${step === 'output' ? 'active' : ''}`} onClick={() => result && setStep('output')} disabled={!result}>② Results</button>
         </div>
         <div className="rt-toolbar">
+          <button
+            className="rt-btn rt-btn-ghost" onClick={() => setSaveOpen(true)}
+            disabled={!activeClient || !result}
+            title={!activeClient ? 'Select a client first' : !result ? 'Run the simulation first' : `Save this plan to ${activeClient.name}`}
+          >💾 Save to client</button>
           <button className="rt-btn rt-btn-ghost" onClick={reset}>↺ Reset</button>
           <button className="rt-btn rt-btn-primary" onClick={run} disabled={running}>{running ? 'Running…' : '▶ Run simulation'}</button>
         </div>
@@ -279,6 +291,30 @@ export default function RetirementPlanner() {
       )}
       {step === 'output' && result && (
         <Results R={result} onEdit={() => setStep('input')} />
+      )}
+
+      {/* Saves the inputs and the finished report as they are now; money figures in the summary are in rupees */}
+      {saveOpen && activeClient && result && (
+        <SaveToClientDialog
+          source="retirement"
+          defaultName="Retirement plan"
+          onClose={() => setSaveOpen(false)}
+          getPayload={() => ({
+            summary: {
+              success_rate: result.successRate,
+              plan_score: result.score?.composite ?? null,
+              corpus_needed: Math.round(result.corpusNeeded * 100000),
+              median_corpus: Math.round((result.P50?.[result.yearsToRet] ?? 0) * 100000),
+              current_sip: result.IN.sipM,
+              required_sip: result.reqSIP,
+              target_conf: result.IN.targetConf,
+              age: result.IN.age,
+              ret_age: result.IN.retAge,
+              life_exp: result.IN.lifeExp,
+            },
+            snapshot: { inputs: { form: f, goals, lumps }, result },
+          })}
+        />
       )}
     </div>
   );

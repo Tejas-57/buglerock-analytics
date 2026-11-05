@@ -1,44 +1,49 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useClient } from '../../context/ClientContext';
+import ClientBook from './ClientBook';
+import PortfolioCards from './PortfolioCards';
+import {
+  maskPan, fmtDate, fmtINR as fmt, effectiveSuitability, HORIZON_META, RISK_TAXONOMY, STATUS_META,
+} from './clientUtils';
 import './Client.css';
 
-const RISK_TAXONOMY = {
-  conservative:    { label: 'Conservative',         riskScore: 1, equityMin: 0,  equityMax: 28, color: '#1A7A52' },
-  mod_conservative:{ label: 'Moderately Conservative', riskScore: 2, equityMin: 28, equityMax: 48, color: '#2563EB' },
-  balanced:        { label: 'Balanced',             riskScore: 3, equityMin: 48, equityMax: 70, color: '#D97706' },
-  mod_aggressive:  { label: 'Moderately Aggressive', riskScore: 4, equityMin: 70, equityMax: 90, color: '#EA580C' },
-  aggressive:      { label: 'Aggressive',           riskScore: 5, equityMin: 80, equityMax: 90, color: '#912F63' },
-};
-
-const STATUS_META = {
-  draft:      { label: 'Draft',       bg: '#F3F4F6', txt: '#6B7280' },
-  indicative: { label: 'Indicative',  bg: '#FEF3C7', txt: '#92400E' },
-  assessed:   { label: 'Assessed',    bg: '#D1FAE5', txt: '#065F46' },
-  approved:   { label: 'Approved',    bg: '#D1FAE5', txt: '#065F46' },
-  review_due: { label: 'Review Due',  bg: '#FEF3C7', txt: '#92400E' },
-  expired:    { label: 'Expired',     bg: '#FEE2E2', txt: '#991B1B' },
-};
-
-const PIPELINE_STAGES = [
-  { key: 'cip',                 label: 'Client Profile',     path: '/client/profile' },
-  { key: 'retirement-planner',  label: 'Retirement Planner', path: '/retirement-planner' },
-  { key: 'models',              label: 'Model Portfolios',   path: '/models' },
-  { key: 'portfolio',           label: 'Portfolio Builder',  path: '/portfolio' },
-];
-
-function fmt(n) {
-  if (!n) return '—';
-  const num = typeof n === 'string' ? parseInt(n.replace(/,/g, ''), 10) : n;
-  if (isNaN(num)) return '—';
-  if (num >= 10000000) return '₹' + (num / 10000000).toFixed(1) + 'Cr';
-  if (num >= 100000) return '₹' + (num / 100000).toFixed(1) + 'L';
-  return '₹' + num.toLocaleString('en-IN');
+function ViewTabs({ view, setView, count }) {
+  return (
+    <div className="client-view-tabs">
+      <button className={`client-view-tab ${view === 'client' ? 'active' : ''}`} onClick={() => setView('client')}>
+        This client
+      </button>
+      <button className={`client-view-tab ${view === 'book' ? 'active' : ''}`} onClick={() => setView('book')}>
+        All clients ({count})
+      </button>
+    </div>
+  );
 }
 
 export default function ClientDashboard() {
-  const { activeClient } = useClient();
+  const { activeClient, clients, setActiveClient } = useClient();
   const navigate = useNavigate();
+  const [view, setView] = useState('client');
+
+  function openClient(client) {
+    setActiveClient(client);
+    setView('client');
+  }
+
+  function newClient() {
+    setActiveClient(null);
+    navigate('/client/profile');
+  }
+
+  // No client selected: show the book if there are clients to pick from
+  if (!activeClient && clients.length > 0) {
+    return (
+      <div className="client-dashboard">
+        <ClientBook clients={clients} activeId={null} onOpen={openClient} onNew={newClient} />
+      </div>
+    );
+  }
 
   if (!activeClient) {
     return (
@@ -56,15 +61,25 @@ export default function ClientDashboard() {
     );
   }
 
+  if (view === 'book') {
+    return (
+      <div className="client-dashboard">
+        <ViewTabs view={view} setView={setView} count={clients.length} />
+        <ClientBook clients={clients} activeId={activeClient.id} onOpen={openClient} onNew={newClient} />
+      </div>
+    );
+  }
+
   const c = activeClient;
   const riskTax = c.risk_profile ? RISK_TAXONOMY[c.risk_profile] : null;
-  const sm = STATUS_META[c.suitability_status] || STATUS_META.draft;
-
-  // Pipeline — CIP is done if status is not draft
-  const cipDone = c.suitability_status && c.suitability_status !== 'draft';
+  const suit = effectiveSuitability(c);
+  const sm = STATUS_META[suit.status] || STATUS_META.draft;
+  const horizonLabel = HORIZON_META[c.horizon]?.label || c.horizon;
+  const summary = [riskTax?.label, HORIZON_META[c.horizon]?.label, c.objective].filter(Boolean).join(' · ');
 
   return (
     <div className="client-dashboard">
+      <ViewTabs view={view} setView={setView} count={clients.length} />
 
       {/* ── Header card ── */}
       <div className="client-hero-card">
@@ -73,10 +88,12 @@ export default function ClientDashboard() {
           <div>
             <div className="client-hero-name">{c.name}</div>
             <div className="client-hero-meta">
-              {c.pan && <span>{c.pan}</span>}
+              {c.pan && <span>{maskPan(c.pan)}</span>}
               {c.email && <span>{c.email}</span>}
               {c.rm_name && <span>RM: {c.rm_name}</span>}
+              {c.updated_at && <span>Updated {fmtDate(c.updated_at)}</span>}
             </div>
+            {summary && <div className="client-hero-summary">{summary}</div>}
           </div>
         </div>
         <div className="client-hero-right">
@@ -93,6 +110,16 @@ export default function ClientDashboard() {
           </button>
         </div>
       </div>
+
+      {/* ── Action banner (computed from valid_until / next_review_date) ── */}
+      {suit.level && (
+        <div className={`client-banner ${suit.level}`}>
+          <span>{suit.message}</span>
+          <button className="btn-outline" onClick={() => navigate('/client/profile')}>
+            {suit.status === 'draft' || suit.status === 'indicative' ? 'Complete profile' : 'Update profile'}
+          </button>
+        </div>
+      )}
 
       {/* ── KPI strip ── */}
       <div className="client-kpi-strip">
@@ -113,15 +140,12 @@ export default function ClientDashboard() {
         <div className="client-kpi">
           <div className="client-kpi-label">Objective</div>
           <div className="client-kpi-value">{c.objective || '—'}</div>
-          {c.horizon && <div className="client-kpi-sub">Horizon: {c.horizon}</div>}
+          {c.horizon && <div className="client-kpi-sub">Horizon: {horizonLabel}</div>}
         </div>
         <div className="client-kpi">
           <div className="client-kpi-label">Next Review</div>
-          <div className="client-kpi-value">
-            {c.next_review_date
-              ? new Date(c.next_review_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-              : '—'}
-          </div>
+          <div className="client-kpi-value">{fmtDate(c.next_review_date)}</div>
+          {c.valid_until && <div className="client-kpi-sub">Assessment valid to {fmtDate(c.valid_until)}</div>}
           {c.overall_score != null && (
             <div className="client-kpi-sub">Score: {c.overall_score}/100</div>
           )}
@@ -133,30 +157,8 @@ export default function ClientDashboard() {
         </div>
       </div>
 
-      {/* ── Build Pipeline ── */}
-      <div className="client-section-title">Build Pipeline</div>
-      <div className="client-pipeline">
-        {PIPELINE_STAGES.map((stage, i) => {
-          const isDone = stage.key === 'cip' ? cipDone : false;
-          const isNext = !isDone && (i === 0 || PIPELINE_STAGES[i - 1].key === 'cip' ? cipDone : false);
-          return (
-            <React.Fragment key={stage.key}>
-              <div
-                className={`pipeline-card ${isDone ? 'done' : isNext ? 'next' : 'pending'}`}
-                onClick={() => navigate(stage.path)}
-              >
-                <div className="pipeline-label">{stage.label}</div>
-                <div className="pipeline-status">
-                  {isDone ? '✓ Complete' : isNext ? '→ Next step' : 'Pending'}
-                </div>
-              </div>
-              {i < PIPELINE_STAGES.length - 1 && (
-                <div className="pipeline-sep">›</div>
-              )}
-            </React.Fragment>
-          );
-        })}
-      </div>
+      {/* ── Portfolios saved against this client ── */}
+      <PortfolioCards clientId={c.id} />
 
       {/* ── Risk Assessment summary ── */}
       {(c.willingness_score != null || c.capacity_score != null) && (
@@ -184,6 +186,16 @@ export default function ClientDashboard() {
             {c.constrained_by && (
               <div className="risk-binding">
                 Binding constraint: <strong>{c.constrained_by === 'capacity' ? 'Risk Capacity' : 'Risk Willingness'}</strong>
+                {c.willingness_score != null && c.capacity_score != null && riskTax && (
+                  <>
+                    {' — '}
+                    {c.willingness_score === c.capacity_score
+                      ? `willingness and capacity are level at ${c.capacity_score}; capacity is treated as binding on a tie. The profile is ${riskTax.label}.`
+                      : c.constrained_by === 'capacity'
+                        ? `capacity (${c.capacity_score}) is lower than willingness (${c.willingness_score}), so the client can afford less risk than they are comfortable with. The profile is held at ${riskTax.label}.`
+                        : `willingness (${c.willingness_score}) is lower than capacity (${c.capacity_score}), so the client could afford more risk than they are comfortable with. The profile is held at ${riskTax.label}.`}
+                  </>
+                )}
               </div>
             )}
           </div>

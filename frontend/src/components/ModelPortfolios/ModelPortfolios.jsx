@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import './ModelPortfolios.css';
 import PortfolioXRay from '../PortfolioBuilder/steps/analyseTabs/PortfolioXRay.jsx';
 import PDFProposal from '../PortfolioBuilder/steps/PDFProposal.jsx';
+import { useClient } from '../../context/ClientContext';
+import SaveToClientDialog from '../Client/SaveToClientDialog';
 
 const API = process.env.REACT_APP_API_URL || '';
 
@@ -255,7 +257,7 @@ function OverviewCard({ p, selected, onClick }) {
   );
 }
 
-function Detail({ p, onXRay, onPDF }) {
+function Detail({ p, onXRay, onPDF, onSave, clientName }) {
   const rc = RISK_COLORS[p.risk_score] || RISK_COLORS[3];
   const b = p.blended;
   const eq = p.actual.equity_pct, db = p.actual.debt_pct;
@@ -273,6 +275,12 @@ function Detail({ p, onXRay, onPDF }) {
           <div className="mp-detail-sub">{p.suitability}</div>
         </div>
         <div className="mp-detail-actions">
+          <button
+            className="mp-btn mp-btn--secondary" onClick={onSave} disabled={!clientName}
+            title={clientName ? `Save this model portfolio to ${clientName}` : 'Select a client first'}
+          >
+            <span className="mp-btn-icon">💾</span> Save to client
+          </button>
           <button className="mp-btn mp-btn--secondary" onClick={onXRay}>
             <span className="mp-btn-icon">🔬</span> View Portfolio X-Ray
           </button>
@@ -357,6 +365,8 @@ function Detail({ p, onXRay, onPDF }) {
    Main component
 ════════════════════════════════════════════════════════════════════ */
 export default function ModelPortfolios({ selectedDate }) {
+  const { activeClient } = useClient();
+  const [saveOpen, setSaveOpen] = useState(false);
   const [ports, setPorts]       = useState([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState(null);
@@ -502,6 +512,32 @@ export default function ModelPortfolios({ selectedDate }) {
           p={selected}
           onXRay={openXray}
           onPDF={() => setPdfOpen(true)}
+          onSave={() => setSaveOpen(true)}
+          clientName={activeClient?.name}
+        />
+      )}
+
+      {/* Frozen snapshot: the model is re-solved daily, so what is saved is today's funds and weights */}
+      {saveOpen && selected && activeClient && (
+        <SaveToClientDialog
+          source="model"
+          defaultName={selected.label}
+          onClose={() => setSaveOpen(false)}
+          getPayload={() => ({
+            model_key: selected.key,
+            summary: {
+              label: selected.label,
+              risk: selected.risk,
+              fund_count: selected.fund_count,
+              asset_mix: selected.asset_mix,
+              equity_pct: selected.actual?.equity_pct,
+              debt_pct: selected.actual?.debt_pct,
+              return_3y: selected.blended?.return_3y,
+              return_5y: selected.blended?.return_5y,
+              data_date: dataDate,
+            },
+            snapshot: { portfolio: selected, data_date: dataDate },
+          })}
         />
       )}
 

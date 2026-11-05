@@ -220,9 +220,9 @@ export default function CIPStep1({ profileMode, setProfileMode, onNext, isNewCli
         suitability_status,
         // For existing mode — risk profile is already known
         risk_profile: profileMode === 'existing' ? form.existing_risk_profile : (activeClient?.risk_profile || null),
-        assessment_date: profileMode === 'existing' ? form.assessment_date : null,
-        valid_until: profileMode === 'existing' ? form.valid_until : null,
-        assessment_basis: profileMode === 'existing' ? form.assessment_basis : null,
+        assessment_date: profileMode === 'existing' ? (form.assessment_date || null) : null,
+        valid_until: profileMode === 'existing' ? (form.valid_until || null) : null,
+        assessment_basis: profileMode === 'existing' ? (form.assessment_basis || null) : null,
       };
 
       if (activeClient) {
