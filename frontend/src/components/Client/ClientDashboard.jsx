@@ -115,9 +115,11 @@ export default function ClientDashboard() {
       {suit.level && (
         <div className={`client-banner ${suit.level}`}>
           <span>{suit.message}</span>
-          <button className="btn-outline" onClick={() => navigate('/client/profile')}>
-            {suit.status === 'draft' || suit.status === 'indicative' ? 'Complete profile' : 'Update profile'}
-          </button>
+          {suit.status !== 'indicative' && (
+            <button className="btn-outline" onClick={() => navigate('/client/profile')}>
+              {suit.status === 'draft' ? 'Complete profile' : 'Update profile'}
+            </button>
+          )}
         </div>
       )}
 
