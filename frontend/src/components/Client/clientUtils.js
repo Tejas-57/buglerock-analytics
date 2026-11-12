@@ -51,7 +51,7 @@ export function effectiveSuitability(c, today = new Date()) {
     return { status: 'draft', level: 'info', message: 'Draft profile. Complete the risk assessment to unlock a suitable recommendation.' };
   }
   if (stored === 'indicative') {
-    return { status: 'indicative', level: 'info', message: 'Indicative profile. Good for preparing a proposal, but it cannot be finalised as a suitable recommendation.' };
+    return { status: 'indicative', level: 'info', message: 'What is an indicative profile? A quick first-pass profile built from the basics, without the full risk questionnaire. It is meant for early conversations and for preparing a proposal. Make sure the client\'s risk profile lines up with this indicative profile.' };
   }
 
   const untilDays = daysFromToday(c.valid_until, today);
