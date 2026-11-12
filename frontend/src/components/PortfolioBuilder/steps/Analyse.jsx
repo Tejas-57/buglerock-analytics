@@ -406,17 +406,20 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
       if (missing.length > 0) {
         setError(`Fetching holdings for ${missing.map(f => shortFundName(f.name)).join(', ')}...`);
         await Promise.all(missing.map(f => fetch(`${API}/api/holdings/fetch/${f.isin}`, { method: 'POST' })));
-        for (let attempt = 0; attempt < 30; attempt++) {
+        let lastD = firstD;
+        for (let attempt = 0; attempt < 15; attempt++) {
           await new Promise(res => setTimeout(res, 2000));
           const checkR = await fetch(url);
           if (checkR.ok) {
             const checkD = await checkR.json();
+            lastD = checkD;
             if (list.filter(f => (checkD.fund_holdings_counts?.[f.isin] ?? -1) === 0).length === 0) {
               setError(null); setData(checkD); return;
             }
           }
         }
-        throw new Error('Holdings fetch timed out — please try again');
+        // Some funds still have nothing: show what we have, and say why for the rest (see "no data" panel).
+        setError(null); setData(lastD); return;
       }
       setData(firstD);
     } catch (e) { setError(e.message); }
@@ -2627,9 +2630,16 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                 const fundMap = Object.fromEntries(funds2.map(f => [f.isin, f]));
                 const fundsWithNoData = funds2.filter(f => (fund_holdings_counts?.[f.isin] ?? -1) === 0);
                 if (fundsWithNoData.length > 0) return (
-                  <div style={{ padding: 24, background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>
-                    <div style={{ marginBottom: 8, fontWeight: 500 }}>Holdings data not available for: {fundsWithNoData.map(f => f.name).join(', ')}</div>
-                    <div style={{ fontSize: 11 }}>Contact admin to fetch holdings for these funds.</div>
+                  <div style={{ padding: 24, background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 13, color: 'var(--text-muted)' }}>
+                    <div style={{ marginBottom: 8, fontWeight: 500, textAlign: 'center' }}>Holdings data not available for {fundsWithNoData.length} fund{fundsWithNoData.length === 1 ? '' : 's'}:</div>
+                    {fundsWithNoData.map(f => {
+                      const raw = ovData.fund_row_counts?.[f.isin];
+                      const why = raw == null ? 'no holdings stored'
+                        : raw === 0 ? 'no holdings stored (Morningstar returned none)'
+                        : `${raw} rows stored, but none usable after removing cash and repo lines`;
+                      return <div key={f.isin} style={{ fontSize: 12, padding: '3px 0' }}>{f.name} <span style={{ color: 'var(--text-muted)' }}>· {why}</span></div>;
+                    })}
+                    <div style={{ fontSize: 11, marginTop: 10, textAlign: 'center' }}>Untick the switch to see the overlap of the equity funds only.</div>
                   </div>
                 );
                 const avgOverlap = pairs.length ? (pairs.reduce((s,p) => s+p.overlap_pct,0)/pairs.length).toFixed(1) : 0;

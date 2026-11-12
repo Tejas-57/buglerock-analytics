@@ -365,6 +365,7 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None, all_holdings: 
         # For each fund, get latest portfolio_date if not specified
         fund_holdings = {}  # {isin: {holding_isin: weight}}
         fund_dates = {}
+        raw_counts = {}     # all_holdings only: every stored row for the fund, before any filtering
 
         for isin in isin_list:
             q = db.query(FundHolding).filter(
@@ -395,6 +396,7 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None, all_holdings: 
 
             rows = q.all()
             if all_holdings:
+                raw_counts[isin] = db.query(func.count(FundHolding.id)).filter(FundHolding.isin == isin).scalar() or 0
                 held = {}
                 for r in rows:
                     if _is_cash_like(r.name):
@@ -529,6 +531,7 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None, all_holdings: 
                 for isin in isin_list
             },
             "unique_stock_count": len(all_isins_union),
+            "fund_row_counts": raw_counts if all_holdings else None,
         }
 
     finally:
