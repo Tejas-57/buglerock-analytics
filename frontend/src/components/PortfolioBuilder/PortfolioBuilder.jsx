@@ -9,6 +9,7 @@ import Optimise from './steps/Optimise';
 import Compare from './steps/Compare';
 import PDFProposal from './steps/PDFProposal';
 import SaveToClientDialog from '../Client/SaveToClientDialog';
+import { recommendBenchmark } from '../Client/clientUtils';
 
 const STEPS = [
   { id: 1, label: 'Client Mandate' },
@@ -42,7 +43,7 @@ function load(key, fallback) {
 function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
 
 export default function PortfolioBuilder({ selectedDate }) {
-  const { activeClient } = useClient();
+  const { activeClient, updateClient } = useClient();
   const navigate = useNavigate();
   const [saveOpen, setSaveOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(() => {
@@ -70,7 +71,29 @@ export default function PortfolioBuilder({ selectedDate }) {
   const [funds, setFunds] = useState(() => load('br_ptf_funds', []));
   const [weights, setWeights] = useState(() => load('br_ptf_weights', {}));
   const [originalWeights, setOriginalWeights] = useState(() => load('br_ptf_original_weights', {}));
-  // Benchmarks now come from ips.benchmarks array (set in ClientIPS)
+  // Benchmarks live in ips.benchmarks. They start from the client's saved benchmark and are saved back to it.
+  const seededClientId = React.useRef(null);
+  useEffect(() => {
+    if (!activeClient || seededClientId.current === activeClient.id) return;
+    seededClientId.current = activeClient.id;
+    const saved = activeClient.constraints?.benchmarks;
+    setIps(prev => ({ ...prev, benchmarks: saved?.length > 0 ? saved : [] }));
+  }, [activeClient]);
+
+  // Saved to the client record only as a complete set (weights add up to 100), so a half-edited
+  // set never reaches the profile or the PDF. The rest of the client's constraints are kept as they are.
+  async function changeBenchmarks(next) {
+    setIps(prev => ({ ...prev, benchmarks: next }));
+    if (!activeClient) return;
+    if (next.length > 0 && next.reduce((s, b) => s + (b.weight || 0), 0) !== 100) return;
+    try {
+      await updateClient(activeClient.id, {
+        constraints: { ...(activeClient.constraints || {}), benchmarks: next, benchmark: next[0]?.name || null },
+      });
+    } catch (e) {
+      console.warn('Could not save the benchmark to the client', e);
+    }
+  }
   const [selectedPortfolio, setSelectedPortfolio] = useState('original');
   const [snapshots, setSnapshots] = useState({});
   const [optimiserResult, setOptimiserResult] = useState(null);
@@ -284,7 +307,8 @@ export default function PortfolioBuilder({ selectedDate }) {
               snapshots={snapshots}
               setSnapshots={setSnapshots}
               benchmarks={ips.benchmarks || []}
-              onBenchmarksChange={v => setIps(prev => ({ ...prev, benchmarks: v }))}
+              onBenchmarksChange={changeBenchmarks}
+              suggestedBenchmark={recommendBenchmark(activeClient?.risk_profile)}
               ipsSkipped={ipsSkipped}
               onAnalyse={() => { markDone(2); setActiveStep(3); }}
               ips={ips}

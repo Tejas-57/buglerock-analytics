@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useClient } from '../../context/ClientContext';
+import { recommendBenchmark } from './clientUtils';
 
 const API = process.env.REACT_APP_API_URL || '';
 
@@ -24,17 +25,6 @@ const DEPLOYMENT_OPTIONS = [
   { value: 'sip',        label: 'SIP only' },
   { value: 'lump_sip',   label: 'Lump sum + SIP' },
 ];
-
-function recommendBenchmark(riskProfile) {
-  const map = {
-    conservative:     'CRISIL Composite Bond Index',
-    mod_conservative: 'Nifty Multi Asset 50:40:10',
-    balanced:         'Nifty 500',
-    mod_aggressive:   'Nifty 500',
-    aggressive:       'Nifty Midcap 150',
-  };
-  return map[riskProfile] || null;
-}
 
 // ── BenchmarkPicker (same as ClientIPS) ──────────────────────────────────────
 function BenchmarkPicker({ value, onChange }) {

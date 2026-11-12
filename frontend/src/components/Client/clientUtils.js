@@ -100,3 +100,15 @@ export function maskPan(pan) {
   if (p.length <= 3) return '•'.repeat(p.length);
   return `${p.slice(0, 2)}${'•'.repeat(p.length - 3)}${p.slice(-1)}`;
 }
+
+// Default benchmark index suggested for each risk profile (used by the profile Constraints step and the Portfolio Builder).
+export function recommendBenchmark(riskProfile) {
+  const map = {
+    conservative:     'CRISIL Composite Bond Index',
+    mod_conservative: 'Nifty Multi Asset 50:40:10',
+    balanced:         'Nifty 500',
+    mod_aggressive:   'Nifty 500',
+    aggressive:       'Nifty Midcap 150',
+  };
+  return map[riskProfile] || null;
+}

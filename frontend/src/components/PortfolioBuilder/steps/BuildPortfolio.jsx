@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 const API = process.env.REACT_APP_API_URL || '';
-function BenchmarkPicker({ selectedDate, value, onChange }) {
+function BenchmarkPicker({ selectedDate, value, onChange, suggested }) {
   const [allBMs, setAllBMs] = React.useState([]);
   const [open, setOpen] = React.useState(false);
   const dateStr = selectedDate instanceof Date
@@ -41,8 +41,14 @@ function BenchmarkPicker({ selectedDate, value, onChange }) {
     setRawBmWeights(prev=>{const n={...prev};delete n[name];return n;});
   }
   const totalW=selected.reduce((s,b)=>s+(b.weight||0),0);
+  // Only offered when nothing is chosen yet, and only if the suggested index exists in the live list
+  const suggestedBM = selected.length===0 && suggested ? allBMs.find(b=>b.name===suggested) : null;
   return (
     <div style={{position:'relative',minWidth:220}}>
+      {suggestedBM&&(<div style={{marginBottom:4,fontSize:10,color:'var(--text-muted)'}}>
+        Suggested for this client: <strong style={{color:'var(--brand-dark)'}}>{suggestedBM.display_name}</strong>{' '}
+        <button onClick={()=>toggleBM(suggestedBM)} style={{background:'none',border:'none',color:'var(--brand-primary)',fontWeight:600,fontSize:10,cursor:'pointer',padding:0}}>Use</button>
+      </div>)}
       {selected.length>0&&(<div style={{marginBottom:4,display:'flex',flexDirection:'column',gap:3}}>
         {selected.map(bm=>(<div key={bm.name} style={{display:'flex',alignItems:'center',gap:6,padding:'3px 8px',background:'var(--bg-secondary)',borderRadius:6,border:'1px solid var(--border)'}}>
           <div style={{flex:1,fontSize:11,fontWeight:500,color:'var(--brand-dark)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bm.display_name}</div>
@@ -119,7 +125,7 @@ function equaliseWeights(fundList) {
   return nw;
 }
 
-export default function BuildPortfolio({ funds, weights, setFunds, setWeights, snapshots={}, setSnapshots, benchmarks=[], onBenchmarksChange, ipsSkipped=false, onAnalyse, ips, selectedDate }) {
+export default function BuildPortfolio({ funds, weights, setFunds, setWeights, snapshots={}, setSnapshots, benchmarks=[], onBenchmarksChange, suggestedBenchmark, ipsSkipped=false, onAnalyse, ips, selectedDate }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [ddOpen, setDdOpen] = useState(false);
@@ -374,17 +380,10 @@ export default function BuildPortfolio({ funds, weights, setFunds, setWeights, s
             )}
           </div>
 
-          {/* Benchmark display / picker */}
-          <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0, maxWidth: ipsSkipped ? 340 : 280 }}>
-            <label style={{ fontSize:10, fontWeight:500, color:'var(--text-muted)', flexShrink:0 }}>Benchmark</label>
-            {ipsSkipped
-              ? <BenchmarkPicker selectedDate={selectedDate} value={benchmarks} onChange={onBenchmarksChange} />
-              : <div style={{ fontSize:11, color:'var(--brand-dark)', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                  {benchmarks.length > 0
-                    ? benchmarks.map(b => `${b.display_name} (${b.weight}%)`).join(' + ')
-                    : <span style={{ color:'var(--text-muted)', fontStyle:'italic' }}>Set in Client & IPS</span>}
-                </div>
-            }
+          {/* Benchmark picker: always available, so it can be set here whichever way the client profile was built */}
+          <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0, maxWidth:340 }}>
+            <label style={{ fontSize:10, fontWeight:500, color:'var(--text-muted)', flexShrink:0 }} title="Saved to the client's profile when it adds up to 100%">Benchmark</label>
+            <BenchmarkPicker selectedDate={selectedDate} value={benchmarks} onChange={onBenchmarksChange} suggested={suggestedBenchmark} />
           </div>
         </div>
       </div>
