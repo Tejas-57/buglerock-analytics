@@ -153,7 +153,7 @@ function PortfolioCard({ clientId, p, onDeleted }) {
           {p.source === 'model' && <button className="btn-outline" onClick={openModel}>Open in Model Portfolios</button>}
           {p.source === 'retirement' && (
             <>
-              <button className="btn-outline" onClick={() => openRetirement('refresh')}>Update with fresh run</button>
+              <button className="btn-outline" onClick={() => openRetirement('refresh')}>Edit inputs and re-run</button>
               <button className="btn-outline" onClick={() => openRetirement('report')}>Open saved report</button>
             </>
           )}
@@ -215,7 +215,7 @@ function PortfolioCard({ clientId, p, onDeleted }) {
       {p.source === 'retirement' && (
         <div className="pf-note">
           These figures are the report as saved on {fmtDate(p.created_at)}. They don't update by themselves.
-          Use <strong>Update with fresh run</strong> to re-run the plan with current inputs and save it as a new version.
+          Use <strong>Edit inputs and re-run</strong> to change the inputs, run the plan again and save it as a new version.
         </div>
       )}
 
