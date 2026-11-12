@@ -2656,6 +2656,15 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                 );
                 return (
                   <div>
+                    {overlapAll && ovData.no_isin_counts && (() => {
+                      const noIsin = Object.values(ovData.no_isin_counts).reduce((a, b) => a + b, 0);
+                      const total = Object.values(fund_holdings_counts || {}).reduce((a, b) => a + b, 0);
+                      return noIsin > 0 ? (
+                        <div style={{ marginBottom: 12, fontSize: 11, color: 'var(--text-muted)' }}>
+                          {noIsin} of {total} holdings have no ISIN and are matched by name. They are marked "(no ISIN)" or "(matched by name)" below.
+                        </div>
+                      ) : null;
+                    })()}
                     <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
                       {statCard(`${avgOverlap}%`, 'Avg Overlap', `${funds2.length} funds · ${pairs.length} pairs`)}
                       {statCard(highestPair?`${highestPair.overlap_pct.toFixed(1)}%`:'—','Highest Pair', highestPair?`${shortFundName(fundMap[highestPair.fund_a]?.name)} ↔ ${shortFundName(fundMap[highestPair.fund_b]?.name)}`:'', overlapColor(highestPair?.overlap_pct||0))}
@@ -2737,7 +2746,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                                 {shared.map(h => (
                                   <div key={h.holding_isin} style={{ display:'grid',gridTemplateColumns:'1fr 80px 80px',gap:'0 20px',padding:'5px 8px',alignItems:'center',background:'var(--bg-secondary)',borderRadius:5,marginBottom:3 }}>
                                     <div style={{ fontSize:12,fontWeight:500,display:'flex',alignItems:'center',gap:7 }}>
-                                      {h.name}<span style={{ fontSize:9,fontWeight:700,color:'#E67E22' }}>● SHARED</span>
+                                      {h.name}{h.by_name && <span style={{ fontSize:10,color:'var(--text-muted)' }}>(matched by name)</span>}<span style={{ fontSize:9,fontWeight:700,color:'#E67E22' }}>● SHARED</span>
                                     </div>
                                     <div style={{ fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right',color:fa?.color }}>{h.weight_a.toFixed(1)}%</div>
                                     <div style={{ fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right',color:fb?.color }}>{h.weight_b.toFixed(1)}%</div>
@@ -2753,7 +2762,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                                     {Array.from({length:10}).map((_,idx) => {
                                       const h=list[idx];
                                       return (<React.Fragment key={idx}>
-                                        <div style={{ fontSize:12,padding:'4px 0',color:h?'var(--text-body)':'transparent' }}>{h?h.name:'·'}</div>
+                                        <div style={{ fontSize:12,padding:'4px 0',color:h?'var(--text-body)':'transparent' }}>{h?h.name:'·'}{h?.no_isin && <span style={{ fontSize:10,color:'var(--text-muted)' }}> (no ISIN)</span>}</div>
                                         <div style={{ fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right',padding:'4px 0',color:h?fund?.color:'transparent' }}>{h?`${h.weight.toFixed(1)}%`:''}</div>
                                       </React.Fragment>);
                                     })}

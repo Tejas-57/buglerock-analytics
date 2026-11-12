@@ -412,6 +412,7 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None, all_holdings: 
                             "name": r.name,
                             "sector": r.global_sector or r.sector,
                             "exchange": r.exchange_name,
+                            "no_isin": not r.holding_isin,   # matched by name, not ISIN
                         }
                 fund_holdings[isin] = held
             else:
@@ -494,17 +495,18 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None, all_holdings: 
                         "weight_a": ha["weight"],
                         "weight_b": hb["weight"],
                         "min_weight": round(min(ha["weight"], hb["weight"]), 4),
+                        "by_name": bool(ha.get("no_isin") and hb.get("no_isin")),
                     })
                 detail.sort(key=lambda x: x["min_weight"], reverse=True)
 
                 # Top 10 unique to each fund (not in the other)
                 only_a = sorted(
-                    [{"name": v["name"], "weight": v["weight"]}
+                    [{"name": v["name"], "weight": v["weight"], "no_isin": bool(v.get("no_isin"))}
                      for k, v in holdings_a.items() if k not in holdings_b],
                     key=lambda x: -x["weight"]
                 )[:10]
                 only_b = sorted(
-                    [{"name": v["name"], "weight": v["weight"]}
+                    [{"name": v["name"], "weight": v["weight"], "no_isin": bool(v.get("no_isin"))}
                      for k, v in holdings_b.items() if k not in holdings_a],
                     key=lambda x: -x["weight"]
                 )[:10]
@@ -532,6 +534,8 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None, all_holdings: 
             },
             "unique_stock_count": len(all_isins_union),
             "fund_row_counts": raw_counts if all_holdings else None,
+            "no_isin_counts": ({i: sum(1 for v in fund_holdings.get(i, {}).values() if v.get("no_isin"))
+                                for i in isin_list} if all_holdings else None),
         }
 
     finally:
