@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from typing import Optional
 import logging
 import math
+import re
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -312,15 +313,37 @@ def get_historical_var(
         "param_notes":      param_notes,
     }
 
+_CASH_LIKE = re.compile(
+    r"(?<![a-z])(treps|cblo|repo|cash|receivables?|payables?)(?![a-z])|"
+    r"tri[- ]?party|reverse repo|net current|current assets|margin money", re.I)
+
+
+def _is_cash_like(name):
+    return bool(name) and bool(_CASH_LIKE.search(name))
+
+
+def _name_key(name):
+    """Name used to match a holding that has no ISIN: lower case, no punctuation or company suffix."""
+    n = re.sub(r"[^a-z0-9 ]+", " ", (name or "").lower())
+    n = re.sub(r"(?<![a-z])(limited|ltd|pvt|private|the)(?![a-z])", " ", n)
+    n = re.sub(r"\s+", " ", n).strip()
+    return f"name:{n}" if n else ""
+
+
 @router.get("/overlap")
-def get_overlap(isins: str, portfolio_date: Optional[str] = None):
+def get_overlap(isins: str, portfolio_date: Optional[str] = None, all_holdings: bool = False):
     """
     Calculate pairwise overlap + common holdings for a list of active equity funds.
     isins: comma-separated list of ISINs (2-4 funds)
 
-    Only equity holdings (holding_type='E') are considered.
-    Funds must be active equity mutual funds — filtering happens on the frontend
-    before calling this endpoint, but we also filter holding_type='E' here.
+    By default only equity holdings (holding_type='E') are considered, so the funds
+    must be active equity funds (the frontend filters them before calling this).
+
+    With all_holdings=true every holding is used (stocks, bonds, G-secs, T-bills ...), so
+    debt funds work too. Holdings are matched by their ISIN, or by a normalised name when
+    the ISIN is missing, and rows that appear more than once in a fund are added up. Cash
+    and repo lines (TREPS, net current assets ...) are left out: every fund holds them,
+    so they would only inflate the overlap.
 
     Returns:
       - pairwise_matrix: overlap % between each pair
@@ -346,11 +369,14 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None):
         for isin in isin_list:
             q = db.query(FundHolding).filter(
                 FundHolding.isin == isin,
-                FundHolding.holding_type == "E",   # equity only
-                FundHolding.holding_isin != None,  # must have ISIN to match
                 FundHolding.weighting != None,
                 FundHolding.weighting > 0,
             )
+            if not all_holdings:
+                q = q.filter(
+                    FundHolding.holding_type == "E",   # equity only
+                    FundHolding.holding_isin != None,  # must have ISIN to match
+                )
 
             if portfolio_date:
                 q = q.filter(FundHolding.portfolio_date == date_type.fromisoformat(portfolio_date))
@@ -368,15 +394,34 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None):
                 fund_dates[isin] = latest[0].isoformat()
 
             rows = q.all()
-            fund_holdings[isin] = {
-                r.holding_isin: {
-                    "weight": round(float(r.weighting), 4),
-                    "name": r.name,
-                    "sector": r.global_sector,
-                    "exchange": r.exchange_name,
+            if all_holdings:
+                held = {}
+                for r in rows:
+                    if _is_cash_like(r.name):
+                        continue
+                    key = r.holding_isin or _name_key(r.name)
+                    if not key:
+                        continue
+                    if key in held:
+                        held[key]["weight"] = round(held[key]["weight"] + float(r.weighting), 4)
+                    else:
+                        held[key] = {
+                            "weight": round(float(r.weighting), 4),
+                            "name": r.name,
+                            "sector": r.global_sector or r.sector,
+                            "exchange": r.exchange_name,
+                        }
+                fund_holdings[isin] = held
+            else:
+                fund_holdings[isin] = {
+                    r.holding_isin: {
+                        "weight": round(float(r.weighting), 4),
+                        "name": r.name,
+                        "sector": r.global_sector,
+                        "exchange": r.exchange_name,
+                    }
+                    for r in rows
                 }
-                for r in rows
-            }
 
         # ── Pairwise overlap matrix ──────────────────────────────────────────
         pairwise = {}
