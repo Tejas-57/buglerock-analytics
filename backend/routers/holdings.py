@@ -331,7 +331,7 @@ def _name_key(name):
 
 
 @router.get("/overlap")
-def get_overlap(isins: str, portfolio_date: Optional[str] = None, all_holdings: bool = False):
+def get_overlap(isins: str, portfolio_date: Optional[str] = None, all_holdings: bool = False, debt_only: bool = False):
     """
     Calculate pairwise overlap + common holdings for a list of active equity funds.
     isins: comma-separated list of ISINs (2-4 funds)
@@ -344,6 +344,10 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None, all_holdings: 
     the ISIN is missing, and rows that appear more than once in a fund are added up. Cash
     and repo lines (TREPS, net current assets ...) are left out: every fund holds them,
     so they would only inflate the overlap.
+
+    With debt_only=true (together with all_holdings) the equity stocks (holding_type 'E') are
+    dropped from every fund, hybrids included, so only the debt side is compared: bonds,
+    G-secs, T-bills, REITs/InvITs. It is the mirror image of the default equity-only view.
 
     Returns:
       - pairwise_matrix: overlap % between each pair
@@ -400,6 +404,8 @@ def get_overlap(isins: str, portfolio_date: Optional[str] = None, all_holdings: 
                 held = {}
                 for r in rows:
                     if _is_cash_like(r.name):
+                        continue
+                    if debt_only and (r.holding_type or "E") == "E":
                         continue
                     key = r.holding_isin or _name_key(r.name)
                     if not key:
