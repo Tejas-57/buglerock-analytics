@@ -348,6 +348,13 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
   const [overlapData, setOverlapData] = useState(null);
   const [overlapLoading, setOverlapLoading] = useState(false);
   const [overlapError, setOverlapError] = useState(null);
+  // "All holdings" mode (Overlap tab only): every fund in the portfolio, stocks and bonds, matched by holding.
+  const [overlapMode, setOverlapMode] = useState('equity'); // 'equity' | 'debt'
+  const overlapAll = overlapMode !== 'equity';
+  const overlapDebt = overlapMode === 'debt';
+  const [allData, setAllData] = useState(null);
+  const [allLoading, setAllLoading] = useState(false);
+  const [allError, setAllError] = useState(null);
 
   function shortFundName(name) {
     if (!name) return '';
@@ -384,37 +391,72 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
     data: snapshots[f.isin] || {},
   }));
 
-  async function fetchOverlap() {
-    if (equityFundsForOverlap.length < 2) return;
+  // Fetches overlap for a list of funds. allHoldings=true uses every holding (debt funds too).
+  async function loadOverlap(list, allHoldings, setData, setLoading, setError, debtOnly = false) {
+    if (list.length < 2) return;
     const API = process.env.REACT_APP_API_URL || '';
-    setOverlapLoading(true);
-    setOverlapError(null);
-    setOverlapData(null);
+    const isins = list.map(f => f.isin).join(',');
+    const url = `${API}/api/holdings/overlap?isins=${isins}${allHoldings ? '&all_holdings=true' : ''}${debtOnly ? '&debt_only=true' : ''}`;
+    setLoading(true);
+    setError(null);
+    setData(null);
     try {
-      const isins = equityFundsForOverlap.map(f => f.isin).join(',');
-      const firstR = await fetch(`${API}/api/holdings/overlap?isins=${isins}`);
+      const firstR = await fetch(url);
       if (!firstR.ok) throw new Error('Could not calculate overlap');
       const firstD = await firstR.json();
-      const missing = equityFundsForOverlap.filter(f => (firstD.fund_holdings_counts?.[f.isin] ?? -1) === 0);
+      // A fund is only "missing" when no rows are stored at all. In all-holdings mode a fund can have
+      // rows stored but none left after filtering (e.g. an equity fund in Debt mode): that is not missing.
+      const isMissing = (d, f) => d.fund_row_counts
+        ? (d.fund_row_counts[f.isin] ?? 0) === 0
+        : (d.fund_holdings_counts?.[f.isin] ?? -1) === 0;
+      const missing = list.filter(f => isMissing(firstD, f));
       if (missing.length > 0) {
-        setOverlapError(`Fetching holdings for ${missing.map(f => shortFundName(f.name)).join(', ')}...`);
+        setError(`Fetching holdings for ${missing.map(f => shortFundName(f.name)).join(', ')}...`);
         await Promise.all(missing.map(f => fetch(`${API}/api/holdings/fetch/${f.isin}`, { method: 'POST' })));
-        for (let attempt = 0; attempt < 30; attempt++) {
+        let lastD = firstD;
+        for (let attempt = 0; attempt < 15; attempt++) {
           await new Promise(res => setTimeout(res, 2000));
-          const checkR = await fetch(`${API}/api/holdings/overlap?isins=${isins}`);
+          const checkR = await fetch(url);
           if (checkR.ok) {
             const checkD = await checkR.json();
-            if (equityFundsForOverlap.filter(f => (checkD.fund_holdings_counts?.[f.isin] ?? -1) === 0).length === 0) {
-              setOverlapError(null); setOverlapData(checkD); return;
+            lastD = checkD;
+            if (list.filter(f => isMissing(checkD, f)).length === 0) {
+              setError(null); setData(checkD); return;
             }
           }
         }
-        throw new Error('Holdings fetch timed out — please try again');
+        // Some funds still have nothing: show what we have, and say why for the rest (see "no data" panel).
+        setError(null); setData(lastD); return;
       }
-      setOverlapData(firstD);
-    } catch (e) { setOverlapError(e.message); }
-    finally { setOverlapLoading(false); }
+      setData(firstD);
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
   }
+
+  const fetchOverlap = () => loadOverlap(equityFundsForOverlap, false, setOverlapData, setOverlapLoading, setOverlapError);
+
+  // Debt overlap only looks at debt and hybrid funds. Pure equity funds are left out whatever small
+  // non-equity rows they hold (cash, T-bills), because their real debt share is negligible.
+  function isDebtOverlapFund(f) {
+    const snap = snapshots[f.isin];
+    const ac  = (f.asset_class || snap?.asset_class || '').toLowerCase();
+    const cat = (f.category || snap?.category || '').toLowerCase();
+    return ac.includes('debt') || ac === 'bond' || ac.includes('hybrid') || ac.includes('allocation') ||
+      ac.includes('balanced') || ac.includes('multi-asset') || ac.includes('conservative') || ac.includes('aggressive') ||
+      /liquid|overnight|money market|gilt|duration|corporate bond|credit risk|banking and psu|floater|fixed maturity|hybrid|allocation|arbitrage|equity savings|balanced/.test(cat);
+  }
+  const allFundsAll = funds.map(f => ({ ...f, color: f.color, data: snapshots[f.isin] || {} }));
+  const allFundsForOverlap = overlapDebt ? allFundsAll.filter(isDebtOverlapFund) : allFundsAll;
+  const equityOnlyExcludedFromDebt = overlapDebt ? allFundsAll.filter(f => !isDebtOverlapFund(f)) : [];
+  const allOverlapKey = useRef(null);
+  useEffect(() => {
+    if (activeTab !== 'overlap' || !overlapAll) return;
+    const isins = allFundsForOverlap.map(f => f.isin).join(',') + '|' + overlapMode;
+    if (allFundsForOverlap.length < 2) { setAllData(null); setAllError(null); return; }
+    if (allOverlapKey.current === isins && allData) return;
+    allOverlapKey.current = isins;
+    loadOverlap(allFundsForOverlap, true, setAllData, setAllLoading, setAllError, overlapDebt);
+  }, [activeTab, overlapMode, funds.map(f => f.isin).join(',')]);
 
   const overlapPortfolioKey = useRef(null);
 
@@ -863,7 +905,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
           </React.Fragment>
         ))}
         <div className="ptf-tab-actions">
-          {activeTab === 'overlap' && overlapData && (
+          {activeTab === 'overlap' && overlapData && !overlapAll && (
             <button onClick={generateOverlapPDF} style={{ fontSize: 11, padding: '7px 16px', background: 'var(--brand-primary)', color: '#fff', border: 'none', borderRadius: 20, fontFamily: 'var(--font-body)', fontWeight: 600, cursor: 'pointer' }}>⬇ Export Overlap Report</button>
           )}
           <button className="btn btn-ghost" onClick={onEdit} style={{ fontSize: 11 }}>← Edit portfolio</button>
@@ -2574,40 +2616,76 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
 
         {/* ── FUND DETAILS ── */}
         {activeTab === 'overlap' && (() => {
-          const funds2 = equityFundsForOverlap;
-          const nonEquity = funds.filter(f => !isActiveEquityFund(f));
+          const funds2 = overlapAll ? allFundsForOverlap : equityFundsForOverlap;
+          const ovData = overlapAll ? allData : overlapData;
+          const ovLoading = overlapAll ? allLoading : overlapLoading;
+          const ovError = overlapAll ? allError : overlapError;
+          const nonEquity = overlapAll ? [] : funds.filter(f => !isActiveEquityFund(f));
           const overlapColor = (pct) => pct >= 35 ? '#C0392B' : pct >= 25 ? '#E67E22' : pct >= 15 ? '#F39C12' : pct >= 5 ? '#27AE60' : '#A0A0A0';
           const overlapLabel = (pct) => pct >= 35 ? 'Very High' : pct >= 25 ? 'High' : pct >= 15 ? 'Moderate' : pct >= 5 ? 'Low' : 'Negligible';
 
           return (
             <div style={{ padding: '4px 0' }}>
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                  {[['equity', 'Equity holdings'], ['debt', 'Debt holdings']].map(([k, label]) => (
+                    <button key={k} onClick={() => setOverlapMode(k)}
+                      style={{ padding: '6px 14px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
+                        background: overlapMode === k ? 'var(--brand-primary)' : 'transparent',
+                        color: overlapMode === k ? '#fff' : 'var(--text-body)' }}>{label}</button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                  {overlapMode === 'equity' && 'Equity stocks only, across active equity funds (the equity part of hybrids included).'}
+                  {overlapMode === 'debt' && 'Bonds, G-secs and T-bills only, across all funds (the debt part of hybrids included). Equity stocks, cash and repo lines are left out.'}
+                </div>
+              </div>
+              {equityOnlyExcludedFromDebt.length > 0 && (
+                <div style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(234,179,8,.06)', border: '1px solid rgba(234,179,8,.3)', borderRadius: 8, fontSize: 12, color: '#92700A' }}>
+                  Left out of the debt overlap (equity or other asset class, no meaningful debt): <strong>{equityOnlyExcludedFromDebt.map(f => shortFundName(f.name)).join(', ')}</strong>.
+                </div>
+              )}
               {nonEquity.length > 0 && (
                 <div style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(234,179,8,.06)', border: '1px solid rgba(234,179,8,.3)', borderRadius: 8, fontSize: 12, color: '#92700A' }}>
                   ⚠ Overlap is based on equity stock holdings only. <strong>{nonEquity.map(f => shortFundName(f.name)).join(', ')}</strong> {nonEquity.length === 1 ? 'is' : 'are'} a pure debt fund and {nonEquity.length === 1 ? 'holds' : 'hold'} no equity stocks — excluded from overlap.
                 </div>
               )}
-              {funds2.length < 2 && <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Add at least 2 active equity funds to see overlap.</div>}
-              {funds2.length >= 2 && overlapLoading && (
+              {funds2.length < 2 && <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{overlapAll ? (overlapDebt ? 'Add at least 2 debt or hybrid funds to see debt overlap.' : 'Add at least 2 funds to see overlap.') : 'Add at least 2 active equity funds to see overlap.'}</div>}
+              {funds2.length >= 2 && ovLoading && (
                 <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-                  {overlapError || 'Calculating overlap...'}
-                  {overlapError && <div style={{ fontSize: 11, marginTop: 6 }}>Fetching from Morningstar, please wait...</div>}
+                  {ovError || 'Calculating overlap...'}
+                  {ovError && <div style={{ fontSize: 11, marginTop: 6 }}>Fetching from Morningstar, please wait...</div>}
                 </div>
               )}
-              {funds2.length >= 2 && overlapError && !overlapLoading && <div style={{ padding: 32, textAlign: 'center', color: 'var(--neg)', fontSize: 13 }}>{overlapError}</div>}
-              {funds2.length >= 2 && overlapData && !overlapLoading && (() => {
-                const { pairwise_matrix, common_all, pair_details, fund_holdings_counts } = overlapData;
+              {funds2.length >= 2 && ovError && !ovLoading && <div style={{ padding: 32, textAlign: 'center', color: 'var(--neg)', fontSize: 13 }}>{ovError}</div>}
+              {funds2.length >= 2 && ovData && !ovLoading && (() => {
+                const { pairwise_matrix, common_all, pair_details, fund_holdings_counts } = ovData;
                 const pairs = Object.values(pairwise_matrix);
                 const fundMap = Object.fromEntries(funds2.map(f => [f.isin, f]));
                 const fundsWithNoData = funds2.filter(f => (fund_holdings_counts?.[f.isin] ?? -1) === 0);
-                if (fundsWithNoData.length > 0) return (
+                const fundsWithData = funds2.length - fundsWithNoData.length;
+                if (overlapDebt && fundsWithData < 2) return (
                   <div style={{ padding: 24, background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>
-                    <div style={{ marginBottom: 8, fontWeight: 500 }}>Holdings data not available for: {fundsWithNoData.map(f => f.name).join(', ')}</div>
-                    <div style={{ fontSize: 11 }}>Contact admin to fetch holdings for these funds.</div>
+                    Fewer than 2 of these funds hold any debt, so there is no debt overlap to show.
+                    <div style={{ fontSize: 12, marginTop: 8 }}>No debt holdings: {fundsWithNoData.map(f => shortFundName(f.name)).join(', ')}</div>
+                  </div>
+                );
+                if (!overlapDebt && fundsWithNoData.length > 0) return (
+                  <div style={{ padding: 24, background: 'var(--bg-secondary)', borderRadius: 8, fontSize: 13, color: 'var(--text-muted)' }}>
+                    <div style={{ marginBottom: 8, fontWeight: 500, textAlign: 'center' }}>Holdings data not available for {fundsWithNoData.length} fund{fundsWithNoData.length === 1 ? '' : 's'}:</div>
+                    {fundsWithNoData.map(f => {
+                      const raw = ovData.fund_row_counts?.[f.isin];
+                      const why = raw == null ? 'no holdings stored'
+                        : raw === 0 ? 'no holdings stored (Morningstar returned none)'
+                        : `${raw} rows stored, but none usable after removing cash and repo lines`;
+                      return <div key={f.isin} style={{ fontSize: 12, padding: '3px 0' }}>{f.name} <span style={{ color: 'var(--text-muted)' }}>· {why}</span></div>;
+                    })}
+                    <div style={{ fontSize: 11, marginTop: 10, textAlign: 'center' }}>Switch to Equity holdings to see the overlap of the equity funds only.</div>
                   </div>
                 );
                 const avgOverlap = pairs.length ? (pairs.reduce((s,p) => s+p.overlap_pct,0)/pairs.length).toFixed(1) : 0;
                 const highestPair = pairs.reduce((best,p) => p.overlap_pct>(best?.overlap_pct||0)?p:best, null);
-                const totalUniqueStocks = overlapData.unique_stock_count || '—';
+                const totalUniqueStocks = ovData.unique_stock_count || '—';
                 const heldByAllCount = common_all.length;
                 const heldByAllName = common_all.length > 0 ? common_all[0].name : '—';
                 const statCard = (value, label, sub, color) => (
@@ -2619,10 +2697,24 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                 );
                 return (
                   <div>
+                    {overlapDebt && fundsWithNoData.length > 0 && (
+                      <div style={{ marginBottom: 12, fontSize: 11, color: 'var(--text-muted)' }}>
+                        No debt holdings, so not part of this overlap: {fundsWithNoData.map(f => shortFundName(f.name)).join(', ')}.
+                      </div>
+                    )}
+                    {overlapAll && ovData.no_isin_counts && (() => {
+                      const noIsin = Object.values(ovData.no_isin_counts).reduce((a, b) => a + b, 0);
+                      const total = Object.values(fund_holdings_counts || {}).reduce((a, b) => a + b, 0);
+                      return noIsin > 0 ? (
+                        <div style={{ marginBottom: 12, fontSize: 11, color: 'var(--text-muted)' }}>
+                          {noIsin} of {total} holdings have no ISIN and are matched by name. They are marked "(no ISIN)" or "(matched by name)" below.
+                        </div>
+                      ) : null;
+                    })()}
                     <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
                       {statCard(`${avgOverlap}%`, 'Avg Overlap', `${funds2.length} funds · ${pairs.length} pairs`)}
                       {statCard(highestPair?`${highestPair.overlap_pct.toFixed(1)}%`:'—','Highest Pair', highestPair?`${shortFundName(fundMap[highestPair.fund_a]?.name)} ↔ ${shortFundName(fundMap[highestPair.fund_b]?.name)}`:'', overlapColor(highestPair?.overlap_pct||0))}
-                      {statCard(totalUniqueStocks,'Unique Stocks',`${funds2.length} funds combined`)}
+                      {statCard(totalUniqueStocks, overlapDebt ? 'Unique Bonds' : 'Unique Stocks',`${funds2.length} funds combined`)}
                       {statCard(heldByAllCount>0?heldByAllCount:'0','Held By Every Fund',heldByAllCount>0?`Top by weight: ${heldByAllName}`:'None in common',heldByAllCount>0?'var(--brand-primary)':'var(--text-muted)')}
                     </div>
                     <div style={{ marginBottom: 20, background: '#fff', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px' }}>
@@ -2693,14 +2785,14 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                               <div style={{ marginBottom:16 }}>
                                 <div style={{ fontSize:10,fontWeight:700,color:'#E67E22',letterSpacing:'.05em',textTransform:'uppercase',marginBottom:8 }}>Shared Holdings ({shared.length})</div>
                                 <div style={{ display:'grid',gridTemplateColumns:'1fr 80px 80px',gap:'0 20px',marginBottom:4 }}>
-                                  <div style={{ fontSize:10,color:'var(--text-muted)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.04em' }}>Stock</div>
+                                  <div style={{ fontSize:10,color:'var(--text-muted)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.04em' }}>{overlapAll ? 'Holding' : 'Stock'}</div>
                                   <div style={{ fontSize:10,color:fa?.color,fontWeight:700,textTransform:'uppercase',textAlign:'right' }}>{nameA.split(' ')[0]}</div>
                                   <div style={{ fontSize:10,color:fb?.color,fontWeight:700,textTransform:'uppercase',textAlign:'right' }}>{nameB.split(' ')[0]}</div>
                                 </div>
                                 {shared.map(h => (
                                   <div key={h.holding_isin} style={{ display:'grid',gridTemplateColumns:'1fr 80px 80px',gap:'0 20px',padding:'5px 8px',alignItems:'center',background:'var(--bg-secondary)',borderRadius:5,marginBottom:3 }}>
                                     <div style={{ fontSize:12,fontWeight:500,display:'flex',alignItems:'center',gap:7 }}>
-                                      {h.name}<span style={{ fontSize:9,fontWeight:700,color:'#E67E22' }}>● SHARED</span>
+                                      {h.name}{h.by_name && <span style={{ fontSize:10,color:'var(--text-muted)' }}>(matched by name)</span>}<span style={{ fontSize:9,fontWeight:700,color:'#E67E22' }}>● SHARED</span>
                                     </div>
                                     <div style={{ fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right',color:fa?.color }}>{h.weight_a.toFixed(1)}%</div>
                                     <div style={{ fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right',color:fb?.color }}>{h.weight_b.toFixed(1)}%</div>
@@ -2716,7 +2808,7 @@ export default function Analyse({ funds, weights, snapshots={}, benchmarks=[], i
                                     {Array.from({length:10}).map((_,idx) => {
                                       const h=list[idx];
                                       return (<React.Fragment key={idx}>
-                                        <div style={{ fontSize:12,padding:'4px 0',color:h?'var(--text-body)':'transparent' }}>{h?h.name:'·'}</div>
+                                        <div style={{ fontSize:12,padding:'4px 0',color:h?'var(--text-body)':'transparent' }}>{h?h.name:'·'}{h?.no_isin && <span style={{ fontSize:10,color:'var(--text-muted)' }}> (no ISIN)</span>}</div>
                                         <div style={{ fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right',padding:'4px 0',color:h?fund?.color:'transparent' }}>{h?`${h.weight.toFixed(1)}%`:''}</div>
                                       </React.Fragment>);
                                     })}
